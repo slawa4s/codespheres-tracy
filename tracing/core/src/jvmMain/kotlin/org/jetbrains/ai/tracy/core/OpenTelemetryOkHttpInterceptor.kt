@@ -240,6 +240,9 @@ class OpenTelemetryOkHttpInterceptor(
                 isStreamingRequest = adapter.isStreamingRequest(tracyRequest)
                 adapter.registerRequest(span, tracyRequest)
 
+                span.setAttribute("http.request.method", request.method)
+                span.setAttribute("url.full", request.url.toString())
+
                 // register response
                 val response = chain.proceed(request)
 
