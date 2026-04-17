@@ -1,7 +1,7 @@
 [project]
 name = "docs"
 # keep synced with the library version
-version = "0.0.21"
+version = "2.0.0"
 requires-python = ">=3.11"
 dependencies = [
     "urllib3==2.6.3",
