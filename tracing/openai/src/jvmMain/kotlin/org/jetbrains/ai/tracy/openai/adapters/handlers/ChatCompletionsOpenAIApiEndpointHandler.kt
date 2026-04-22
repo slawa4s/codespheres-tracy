@@ -23,6 +23,7 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.Json
@@ -134,6 +135,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat.completion")
+
         val body = response.body.asJson()?.jsonObject ?: return
 
         body["choices"]?.let { choices ->

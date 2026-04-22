@@ -148,7 +148,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 val body = response.body.asJson()?.jsonObject
                 OpenAIApiUtils.setCommonResponseAttributes(span, response)
                 // Guarantee the operation name is set even if body["object"] is absent.
-                span.setAttribute(GEN_AI_OPERATION_NAME, "response")
+                span.setAttribute(GEN_AI_OPERATION_NAME, "response.retrieve")
                 // Mirror the attributes populated by the CREATE path so that all lifecycle
                 // spans are consistent (token-usage counts and resolved model name).
                 body?.get("usage")?.let { setUsageAttributes(span, (it as? JsonObject) ?: return@let) }
@@ -176,6 +176,11 @@ internal class ResponsesOpenAIApiEndpointHandler(
         // Always set the operation name explicitly so the span is locatable even when
         // body["object"] is absent or holds an unexpected value (e.g. "realtime.response").
         span.setAttribute(GEN_AI_OPERATION_NAME, "response")
+        // setCommonResponseAttributes sets GEN_AI_RESPONSE_MODEL but not GEN_AI_REQUEST_MODEL.
+        // Populate the request-side model attribute so it is always present on the create span.
+        body["model"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_MODEL, it)
+        }
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.

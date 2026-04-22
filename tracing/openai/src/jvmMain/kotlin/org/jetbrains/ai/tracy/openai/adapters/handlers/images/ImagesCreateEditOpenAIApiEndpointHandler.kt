@@ -41,6 +41,7 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
 
         val mediaContentParts = mutableListOf<MediaContentPart>()
         var imagesCount = 0
+        var modelSetFromForm = false
         var sizeSetFromForm = false
         var nSetFromForm = false
         var responseFormatSetFromForm = false
@@ -70,6 +71,7 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
 
                 "model" -> {
                     span.setAttribute(GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL, content)
+                    modelSetFromForm = true
                 }
                 // mask is a single image that should be uploaded as well
                 "mask" -> if (contentTracingAllowed(ContentKind.INPUT)) {
@@ -128,8 +130,9 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
             }
         }
 
-        // Fallback: some SDK versions serialise size, n, and response_format as query parameters
+        // Fallback: some SDK versions serialise model, size, n, and response_format as query parameters
         // rather than multipart form fields (e.g. when set on the outer ImageEditParams.Builder).
+        if (!modelSetFromForm) request.url.parameters.queryParameter("model")?.let { span.setAttribute(GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL, it) }
         if (!sizeSetFromForm) request.url.parameters.queryParameter("size")?.let { span.setAttribute("gen_ai.request.size", it) }
         if (!nSetFromForm) request.url.parameters.queryParameter("n")?.let { span.setAttribute("gen_ai.request.n", it) }
         if (!responseFormatSetFromForm) request.url.parameters.queryParameter("response_format")?.let { span.setAttribute("gen_ai.request.response_format", it) }
