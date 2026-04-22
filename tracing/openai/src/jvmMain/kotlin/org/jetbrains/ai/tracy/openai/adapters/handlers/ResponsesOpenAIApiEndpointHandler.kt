@@ -11,7 +11,9 @@ import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.*
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
+import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
+import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.policy.ContentKind
 import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
@@ -28,6 +30,13 @@ internal class ResponsesOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        when (detectRoute(request.url, request.method)) {
+            ResponseRoute.CREATE -> handleCreateRequestAttributes(span, request)
+            ResponseRoute.RETRIEVE, ResponseRoute.DELETE -> { /* no request body for GET/DELETE */ }
+        }
+    }
+
+    private fun handleCreateRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
 
@@ -131,12 +140,20 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
     }
 
+    override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        when (detectRoute(response.url, response.requestMethod)) {
+            ResponseRoute.CREATE -> handleCreateResponseAttributes(span, response)
+            ResponseRoute.RETRIEVE -> OpenAIApiUtils.setCommonResponseAttributes(span, response)
+            ResponseRoute.DELETE -> OpenAIApiUtils.setCommonResponseAttributes(span, response)
+        }
+    }
+
     /**
      * Parses attributes from the Response Object of the Responses API.
      *
      * See [Response Object, Responses API](https://platform.openai.com/docs/api-reference/responses/object)
      */
-    override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+    private fun handleCreateResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
@@ -430,4 +447,38 @@ internal class ResponsesOpenAIApiEndpointHandler(
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
+
+    /**
+     * Identifies which Responses API endpoint is being called.
+     */
+    private enum class ResponseRoute {
+        CREATE,    // POST /v1/responses
+        RETRIEVE,  // GET /v1/responses/{id}
+        DELETE,    // DELETE /v1/responses/{id}
+    }
+
+    private fun detectRoute(url: TracyHttpUrl, method: String): ResponseRoute {
+        val segments = url.pathSegments
+        val responsesIndex = segments.indexOf("responses")
+        if (responsesIndex == -1) {
+            logger.warn { "Failed to detect responses route: $method ${segments.joinToString(separator = "/")}" }
+            return ResponseRoute.CREATE
+        }
+        val containsResponseId = segments.size > (responsesIndex + 1) &&
+                segments[responsesIndex + 1].isNotBlank()
+
+        return when {
+            method == "POST" -> ResponseRoute.CREATE
+            method == "GET" && containsResponseId -> ResponseRoute.RETRIEVE
+            method == "DELETE" && containsResponseId -> ResponseRoute.DELETE
+            else -> {
+                logger.warn { "Failed to detect responses route: $method ${segments.joinToString(separator = "/")}" }
+                ResponseRoute.CREATE
+            }
+        }
+    }
+
+    companion object {
+        private val logger = KotlinLogging.logger {}
+    }
 }

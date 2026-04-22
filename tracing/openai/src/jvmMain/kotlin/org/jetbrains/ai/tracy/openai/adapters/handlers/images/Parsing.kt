@@ -20,6 +20,9 @@ import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.*
+import mu.KotlinLogging
+
+private val logger = KotlinLogging.logger {}
 
 
 // See: https://platform.openai.com/docs/api-reference/images/create#images_create-output_format
@@ -31,6 +34,14 @@ internal fun handleImageGenerationResponseAttributes(
     extractor: MediaContentExtractor,
 ) {
     val body = response.body.asJson()?.jsonObject ?: return
+
+    if (body.isEmpty()) {
+        logger.warn {
+            "Image generation response body is empty; gen_ai.response attributes will be absent. " +
+                    "This may indicate a missing Content-Type header in the response."
+        }
+        return
+    }
 
     body["data"]?.jsonArray?.let { data ->
         // collect AI response content

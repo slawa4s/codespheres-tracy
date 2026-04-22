@@ -72,20 +72,21 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             val body = response.body.asJson()?.jsonObject ?: return
             val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
             val mimeType = response.contentType?.mimeType
+            val isEventStream = mimeType == TracyContentType.Text.EventStream.mimeType
 
-            if (mimeType != null) {
-                when {
-                    isStreamingRequest && mimeType == TracyContentType.Text.EventStream.mimeType -> {
-                        span.setAttribute("gen_ai.response.streaming", true)
-                        span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
-                    }
-                    mimeType != TracyContentType.Text.EventStream.mimeType -> {
-                        // mime type can be application/json, video/mp4 (for OpenAI Video API), etc.
-                        getResponseBodyAttributes(span, response)
-                    }
-                    else -> {
-                        span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
-                    }
+            when {
+                isStreamingRequest && isEventStream -> {
+                    span.setAttribute("gen_ai.response.streaming", true)
+                    span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
+                }
+                isEventStream -> {
+                    // non-streaming request received an event-stream response
+                    span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
+                }
+                else -> {
+                    // application/json, video/mp4, or missing Content-Type header —
+                    // TracyHttpResponseBody is always Json so JSON extraction is always safe.
+                    getResponseBodyAttributes(span, response)
                 }
             }
 

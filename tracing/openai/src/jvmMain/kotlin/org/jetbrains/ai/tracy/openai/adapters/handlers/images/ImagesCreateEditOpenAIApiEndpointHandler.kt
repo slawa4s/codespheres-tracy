@@ -85,25 +85,33 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                     }
                 }
                 // either a single image or an array of images
-                "image", "image[]" -> if (contentTracingAllowed(ContentKind.INPUT)) {
-                    // trace images only when input content tracing is allowed.
-                    // base64-encoded image content
-                    span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
-                    if (contentType != null) {
-                        span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
-                    }
+                "image", "image[]" -> {
+                    // image byte count is metadata, not user content — always record it
                     span.setAttribute("gen_ai.request.image.size_bytes", part.content.size.toLong())
-                    if (part.filename != null) {
-                        span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
-                    }
-                    // save image for further upload
-                    if (contentType != null) {
-                        mediaContentParts.add(
-                            MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
-                        )
+                    if (contentTracingAllowed(ContentKind.INPUT)) {
+                        // trace images only when input content tracing is allowed.
+                        // base64-encoded image content
+                        span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
+                        if (contentType != null) {
+                            span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
+                        }
+                        if (part.filename != null) {
+                            span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                        }
+                        // save image for further upload
+                        if (contentType != null) {
+                            mediaContentParts.add(
+                                MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
+                            )
+                        }
                     }
                     ++imagesCount
                 }
+
+                // Configuration metadata — not user-supplied content, set directly without redaction.
+                "size" -> span.setAttribute("gen_ai.request.size", content)
+                "n" -> span.setAttribute("gen_ai.request.n", content)
+                "response_format" -> span.setAttribute("gen_ai.request.response_format", content)
 
                 null -> logger.warn { "Form data part with missing name ignored. Content type: '$contentType'" }
                 else -> {
