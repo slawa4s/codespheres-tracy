@@ -35,7 +35,7 @@ internal fun handleImageGenerationResponseAttributes(
     body["data"]?.jsonArray?.let { data ->
         // collect AI response content
         for ((index, image) in data.withIndex()) {
-            span.setAttribute("gen_ai.completion.$index.content", image.asString.orRedactedOutput())
+            span.setAttribute("gen_ai.completion.$index.content", image.asString)
         }
         // install media content for further upload
         val format = body["output_format"]?.jsonPrimitive?.content ?: defaultImageFormat

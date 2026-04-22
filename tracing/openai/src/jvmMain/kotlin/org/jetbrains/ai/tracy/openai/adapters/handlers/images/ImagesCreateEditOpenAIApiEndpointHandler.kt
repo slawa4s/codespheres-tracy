@@ -82,27 +82,31 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                     )
                 }
                 // either a single image or an array of images
-                "image", "image[]" -> if (contentTracingAllowed(ContentKind.INPUT)) {
-                    // trace images only when input content tracing is allowed.
-                    // base64-encoded image content
-                    span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
-                    span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType?.asString() ?: "text/plain")
+                "image", "image[]" -> {
+                    // size_bytes is non-sensitive metadata, always traced
                     span.setAttribute("gen_ai.request.image.$imagesCount.size_bytes", part.content.size.toLong())
-                    if (part.filename != null) {
-                        span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                    if (contentTracingAllowed(ContentKind.INPUT)) {
+                        // trace images only when input content tracing is allowed.
+                        // base64-encoded image content
+                        span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
+                        span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType?.asString() ?: "text/plain")
+                        if (part.filename != null) {
+                            span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                        }
+                        // save image for further upload
+                        mediaContentParts.add(
+                            MediaContentPart(resource = Resource.Base64(content, contentType?.asString() ?: "text/plain"))
+                        )
                     }
-                    // save image for further upload
-                    mediaContentParts.add(
-                        MediaContentPart(resource = Resource.Base64(content, contentType?.asString() ?: "text/plain"))
-                    )
                     ++imagesCount
                 }
 
                 null -> logger.warn { "Form data part with missing name ignored. Content type: '$contentType'" }
                 else -> {
-                    // since we don't know how sensitive other fields may be,
-                    // we disguise their content if input tracing is disallowed.
-                    span.setAttribute("gen_ai.request.${part.name}", content.orRedactedInput())
+                    // only 'prompt' is user-generated; other fields are model configuration and are always traced.
+                    val sensitiveFields = listOf("prompt")
+                    val attrValue = if (part.name in sensitiveFields) content.orRedactedInput() else content
+                    span.setAttribute("gen_ai.request.${part.name}", attrValue)
                 }
             }
         }

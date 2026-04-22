@@ -31,7 +31,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
         // Set operation name based on HTTP method before body parsing so lifecycle spans
         // have the correct value even when the body is empty (GET/DELETE).
         val operationName = when (request.method.uppercase()) {
-            "POST" -> "create"
+            "POST" -> "response"
             "GET" -> "retrieve"
             "DELETE" -> "response.deleted"
             else -> null

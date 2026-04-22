@@ -87,6 +87,10 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
                         span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
                     }
                 }
+            } else if (body.isNotEmpty()) {
+                // No Content-Type header (e.g. DELETE/GET responses), but body is a valid non-empty JSON object.
+                // Extract response attributes so gen_ai.response.id, gen_ai.operation.name, and usage are populated.
+                getResponseBodyAttributes(span, response)
             }
 
             span.setAttribute("http.status_code", response.code.toLong())

@@ -32,12 +32,14 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
         body["prompt"]?.let { span.setAttribute("gen_ai.prompt.0.content", it.jsonPrimitive.content.orRedactedInput()) }
         body["model"]?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it.jsonPrimitive.content) }
 
+        val sensitiveRequestKeys = listOf("prompt")
         val manuallyParsedKeys = listOf("prompt", "model")
         for ((key, value) in body.entries) {
             if (key in manuallyParsedKeys) {
                 continue
             }
-            span.setAttribute("gen_ai.request.$key", value.asString.orRedactedInput())
+            val attrValue = if (key in sensitiveRequestKeys) value.asString.orRedactedInput() else value.asString
+            span.setAttribute("gen_ai.request.$key", attrValue)
         }
     }
 
