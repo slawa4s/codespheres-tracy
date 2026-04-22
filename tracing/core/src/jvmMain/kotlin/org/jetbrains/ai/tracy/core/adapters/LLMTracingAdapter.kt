@@ -57,6 +57,9 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
         getRequestBodyAttributes(span, request)
         span.setAttribute("gen_ai.api_base", "${request.url.scheme}://${request.url.host}")
         span.setAttribute(GEN_AI_SYSTEM, genAISystem)
+        span.setAttribute("server.address", request.url.host)
+        val defaultPort = if (request.url.scheme == "https") 443L else 80L
+        span.setAttribute("server.port", defaultPort)
 
         return@runCatching
     }.getOrElse { exception ->
@@ -89,7 +92,7 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             span.setAttribute("http.status_code", response.code.toLong())
 
             if (response.isError()) {
-                getResponseErrorBodyAttributes(span, response.body)
+                getResponseErrorBodyAttributes(span, response.body, response.code)
                 span.setStatus(StatusCode.ERROR)
             } else {
                 span.setStatus(StatusCode.OK)
@@ -108,13 +111,18 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             span.recordException(exception)
         }
 
-    protected open fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
-        body.asJson()?.jsonObject["error"]?.jsonObject?.let { error ->
+    protected open fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody, httpStatusCode: Int = 0) {
+        val errorObj = body.asJson()?.jsonObject?.get("error")?.jsonObject
+        errorObj?.let { error ->
             error["message"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.message", it.content) }
             error["type"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.type", it.content) }
             error["param"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.param", it.content) }
             error["code"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.code", it.content) }
         }
+        // Set the standard OTel error.type attribute, falling back to the HTTP status code string
+        val errorType = errorObj?.get("type")?.jsonPrimitive?.content
+            ?: if (httpStatusCode > 0) httpStatusCode.toString() else null
+        errorType?.let { span.setAttribute("error.type", it) }
     }
 
     protected abstract fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest)
