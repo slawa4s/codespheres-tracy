@@ -18,6 +18,7 @@ import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import mu.KotlinLogging
@@ -32,6 +33,8 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "image_edit")
+
         val body = request.body.asFormData() ?: return
 
         val mediaContentParts = mutableListOf<MediaContentPart>()

@@ -38,8 +38,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
         operationName?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
 
-        val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+
+        val body = request.body.asJson()?.jsonObject ?: return
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.previous_response_id", it)
@@ -148,7 +149,6 @@ internal class ResponsesOpenAIApiEndpointHandler(
      */
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
@@ -226,6 +226,17 @@ internal class ResponsesOpenAIApiEndpointHandler(
         body["usage"]?.let { usage ->
             setUsageAttributes(span, usage.jsonObject)
         }
+
+        // Re-apply the operation name from the request method so the response body's
+        // "object" field (always "response") does not overwrite the request-side name
+        // (e.g. "retrieve" set during handleRequestAttributes for GET requests).
+        val operationName = when (response.requestMethod.uppercase()) {
+            "POST" -> "response"
+            "GET" -> "retrieve"
+            "DELETE" -> "response.deleted"
+            else -> null
+        }
+        operationName?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
