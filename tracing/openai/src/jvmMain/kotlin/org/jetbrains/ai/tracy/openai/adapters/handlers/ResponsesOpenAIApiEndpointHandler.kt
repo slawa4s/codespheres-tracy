@@ -28,6 +28,16 @@ internal class ResponsesOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        // Set operation name based on HTTP method before body parsing so lifecycle spans
+        // have the correct value even when the body is empty (GET/DELETE).
+        val operationName = when (request.method.uppercase()) {
+            "POST" -> "create"
+            "GET" -> "retrieve"
+            "DELETE" -> "response.deleted"
+            else -> null
+        }
+        operationName?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
+
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
 

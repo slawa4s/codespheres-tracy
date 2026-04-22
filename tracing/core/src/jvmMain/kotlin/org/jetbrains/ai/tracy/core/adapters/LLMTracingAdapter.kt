@@ -12,6 +12,7 @@ import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_SYSTEM
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -57,6 +58,8 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
         getRequestBodyAttributes(span, request)
         span.setAttribute("gen_ai.api_base", "${request.url.scheme}://${request.url.host}")
         span.setAttribute(GEN_AI_SYSTEM, genAISystem)
+        span.setAttribute("server.address", request.url.host)
+        span.setAttribute("server.port", request.url.port.toLong())
 
         return@runCatching
     }.getOrElse { exception ->
@@ -89,7 +92,7 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             span.setAttribute("http.status_code", response.code.toLong())
 
             if (response.isError()) {
-                getResponseErrorBodyAttributes(span, response.body)
+                getResponseErrorBodyAttributes(span, response)
                 span.setStatus(StatusCode.ERROR)
             } else {
                 span.setStatus(StatusCode.OK)
@@ -108,13 +111,18 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             span.recordException(exception)
         }
 
-    protected open fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
-        body.asJson()?.jsonObject["error"]?.jsonObject?.let { error ->
+    protected open fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
+        val errorObject = response.body.asJson()?.jsonObject?.get("error")?.jsonObject
+        errorObject?.let { error ->
             error["message"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.message", it.content) }
             error["type"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.type", it.content) }
             error["param"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.param", it.content) }
             error["code"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.code", it.content) }
         }
+        // Set the standard OTel error.type attribute using the first available error identifier
+        val errorCode = errorObject?.get("type")?.jsonPrimitive?.contentOrNull
+            ?: errorObject?.get("code")?.jsonPrimitive?.contentOrNull
+        span.setAttribute("error.type", errorCode ?: response.code.toString())
     }
 
     protected abstract fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest)

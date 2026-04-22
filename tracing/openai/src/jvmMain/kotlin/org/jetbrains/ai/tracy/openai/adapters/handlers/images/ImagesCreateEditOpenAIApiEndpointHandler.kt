@@ -38,20 +38,20 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
         var imagesCount = 0
 
         for (part in body.parts) {
-            // TODO: TRACY-88
             val contentType = part.contentType
-            if (contentType == null) {
-                logger.warn { "Missing content type of form data part '${part.name}'" }
-                continue
-            }
 
-            // decode content based on the expected content type
-            val content = when(contentType.type) {
-                "image" -> Base64.getEncoder().encodeToString(part.content)
-                "text" -> part.content.toString(
-                    contentType.charset() ?: Charsets.US_ASCII
-                )
-                else -> null
+            // decode content based on the expected content type;
+            // parts with no content-type are treated as text/plain (UTF-8).
+            val content = if (contentType == null) {
+                part.content.toString(Charsets.UTF_8)
+            } else {
+                when (contentType.type) {
+                    "image" -> Base64.getEncoder().encodeToString(part.content)
+                    "text" -> part.content.toString(
+                        contentType.charset() ?: Charsets.US_ASCII
+                    )
+                    else -> null
+                }
             }
 
             if (content == null) {
@@ -72,13 +72,13 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                     // trace mask only when input content tracing is allowed.
                     // base64-encoded mask content
                     span.setAttribute("gen_ai.request.mask.content", content)
-                    span.setAttribute("gen_ai.request.mask.contentType", contentType.asString())
+                    span.setAttribute("gen_ai.request.mask.contentType", contentType?.asString() ?: "text/plain")
                     if (part.filename != null) {
                         span.setAttribute("gen_ai.request.mask.filename", part.filename)
                     }
                     // save mask for further upload
                     mediaContentParts.add(
-                        MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
+                        MediaContentPart(resource = Resource.Base64(content, contentType?.asString() ?: "text/plain"))
                     )
                 }
                 // either a single image or an array of images
@@ -86,13 +86,14 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                     // trace images only when input content tracing is allowed.
                     // base64-encoded image content
                     span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
-                    span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
+                    span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType?.asString() ?: "text/plain")
+                    span.setAttribute("gen_ai.request.image.$imagesCount.size_bytes", part.content.size.toLong())
                     if (part.filename != null) {
                         span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
                     }
                     // save image for further upload
                     mediaContentParts.add(
-                        MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
+                        MediaContentPart(resource = Resource.Base64(content, contentType?.asString() ?: "text/plain"))
                     )
                     ++imagesCount
                 }
