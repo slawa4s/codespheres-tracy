@@ -144,9 +144,16 @@ internal class ResponsesOpenAIApiEndpointHandler(
         when (detectRoute(response.url, response.requestMethod)) {
             ResponseRoute.CREATE -> handleCreateResponseAttributes(span, response)
             ResponseRoute.RETRIEVE -> {
+                val body = response.body.asJson()?.jsonObject
                 OpenAIApiUtils.setCommonResponseAttributes(span, response)
                 // Guarantee the operation name is set even if body["object"] is absent.
                 span.setAttribute(GEN_AI_OPERATION_NAME, "response")
+                // Mirror the attributes populated by the CREATE path so that all lifecycle
+                // spans are consistent (token-usage counts and resolved model name).
+                body?.get("usage")?.let { setUsageAttributes(span, it.jsonObject) }
+                body?.get("model")?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute(GEN_AI_REQUEST_MODEL, it)
+                }
             }
             ResponseRoute.DELETE -> {
                 OpenAIApiUtils.setCommonResponseAttributes(span, response)
@@ -164,6 +171,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
     private fun handleCreateResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
+        // Always set the operation name explicitly so the span is locatable even when
+        // body["object"] is absent or holds an unexpected value (e.g. "realtime.response").
+        span.setAttribute(GEN_AI_OPERATION_NAME, "response")
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.

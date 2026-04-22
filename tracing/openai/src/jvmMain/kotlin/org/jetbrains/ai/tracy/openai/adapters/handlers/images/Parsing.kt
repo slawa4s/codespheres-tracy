@@ -17,6 +17,7 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import org.jetbrains.ai.tracy.openai.adapters.handlers.asString
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.*
@@ -69,7 +70,12 @@ internal fun handleImageGenerationResponseAttributes(
 
     body["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
 
-    val manuallyParsedKeys = listOf("data", "usage", "created")
+    // Some API versions and proxies echo the resolved model back in the response body.
+    // Set it as gen_ai.request.model so image create/edit spans have a consistent model attribute
+    // even when the SDK omits the model field from the request (e.g. dall-e-2 default in edit).
+    body["model"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it) }
+
+    val manuallyParsedKeys = listOf("data", "usage", "created", "model")
     for ((key, value) in body.entries) {
         if (key in manuallyParsedKeys) {
             continue

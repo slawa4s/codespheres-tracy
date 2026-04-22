@@ -54,12 +54,10 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                     contentType.charset() ?: Charsets.US_ASCII
                 )
                 null -> part.content.toString(Charsets.US_ASCII)
-                else -> null
-            }
-
-            if (content == null) {
-                logger.warn { "Form data part '${part.name}' with content type '$contentType' has no content" }
-                continue
+                // For any other MIME type (e.g. application/octet-stream) treat the bytes as
+                // opaque binary and base64-encode them so that subsequent form-field handling
+                // (model, prompt, size, etc.) is not skipped via the null-continue guard.
+                else -> Base64.getEncoder().encodeToString(part.content)
             }
 
             when (part.name) {
