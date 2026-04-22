@@ -8,6 +8,8 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContent
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
@@ -33,7 +35,24 @@ internal class CreateVideoHandler(private val extractor: MediaContentExtractor) 
      * Request is `multipart/form-data` with: prompt, input_reference (file), model, seconds, size
      */
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        val body = request.body.asFormData() ?: return
+        val body = request.body.asFormData()
+        if (body == null) {
+            // JSON body branch — used when no input_reference file is attached
+            val json = request.body.asJson()?.jsonObject ?: return
+            json["prompt"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.prompt.0.content", it.orRedactedInput())
+            }
+            json["model"]?.jsonPrimitive?.content?.let {
+                span.setAttribute(GEN_AI_REQUEST_MODEL, it)
+            }
+            json["seconds"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.request.video.seconds", it)
+            }
+            json["size"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.request.video.size", it.orRedactedInput())
+            }
+            return
+        }
 
         val mediaContentParts = mutableListOf<MediaContentPart>()
 
@@ -67,7 +86,10 @@ internal class CreateVideoHandler(private val extractor: MediaContentExtractor) 
                     span.setAttribute(GEN_AI_REQUEST_MODEL, content)
                 }
                 "seconds" -> {
-                    span.setAttribute("gen_ai.request.video.seconds", content.orRedactedInput())
+                    val secondsLong = content.toLongOrNull()
+                    if (secondsLong != null) {
+                        span.setAttribute("gen_ai.request.video.seconds", secondsLong)
+                    }
                 }
                 "size" -> {
                     span.setAttribute("gen_ai.request.video.size", content.orRedactedInput())

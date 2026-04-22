@@ -13,6 +13,7 @@ import org.jetbrains.ai.tracy.core.adapters.media.Resource
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asFormData
+import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.ContentKind
 import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
@@ -20,7 +21,9 @@ import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import mu.KotlinLogging
 import java.util.*
 
@@ -35,7 +38,27 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         span.setAttribute(GEN_AI_OPERATION_NAME, "image_edit")
 
-        val body = request.body.asFormData() ?: return
+        val body = request.body.asFormData()
+        if (body == null) {
+            // JSON body fallback — used when no binary image file is attached
+            val json = request.body.asJson()?.jsonObject ?: return
+            json["prompt"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.prompt.0.content", it.orRedactedInput())
+            }
+            json["model"]?.jsonPrimitive?.content?.let {
+                span.setAttribute(GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL, it)
+            }
+            json["size"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.request.size", it)
+            }
+            json["n"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.request.n", it.toLong())
+            }
+            json["response_format"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.request.response_format", it)
+            }
+            return
+        }
 
         val mediaContentParts = mutableListOf<MediaContentPart>()
         var imagesCount = 0

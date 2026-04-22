@@ -32,6 +32,11 @@ internal fun handleImageGenerationResponseAttributes(
 ) {
     val body = response.body.asJson()?.jsonObject ?: return
 
+    // Extract top-level scalar fields unconditionally, independent of the data array
+    body["created"]?.jsonPrimitive?.longOrNull?.let {
+        span.setAttribute("gen_ai.response.created", it)
+    }
+
     body["data"]?.jsonArray?.let { data ->
         // collect AI response content
         for ((index, image) in data.withIndex()) {
@@ -49,7 +54,7 @@ internal fun handleImageGenerationResponseAttributes(
 
     body["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
 
-    val manuallyParsedKeys = listOf("data", "usage")
+    val manuallyParsedKeys = listOf("data", "usage", "created")
     for ((key, value) in body.entries) {
         if (key in manuallyParsedKeys) {
             continue
