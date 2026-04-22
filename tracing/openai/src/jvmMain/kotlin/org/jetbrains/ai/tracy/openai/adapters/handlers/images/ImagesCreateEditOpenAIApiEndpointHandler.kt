@@ -41,6 +41,9 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
 
         val mediaContentParts = mutableListOf<MediaContentPart>()
         var imagesCount = 0
+        var sizeSetFromForm = false
+        var nSetFromForm = false
+        var responseFormatSetFromForm = false
 
         for (part in body.parts) {
             // Parts without a Content-Type header are text fields (e.g. model, prompt, n, size).
@@ -112,9 +115,9 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                 }
 
                 // Configuration metadata — not user-supplied content, set directly without redaction.
-                "size" -> span.setAttribute("gen_ai.request.size", content)
-                "n" -> span.setAttribute("gen_ai.request.n", content)
-                "response_format" -> span.setAttribute("gen_ai.request.response_format", content)
+                "size" -> { span.setAttribute("gen_ai.request.size", content); sizeSetFromForm = true }
+                "n" -> { span.setAttribute("gen_ai.request.n", content); nSetFromForm = true }
+                "response_format" -> { span.setAttribute("gen_ai.request.response_format", content); responseFormatSetFromForm = true }
 
                 null -> logger.warn { "Form data part with missing name ignored. Content type: '$contentType'" }
                 else -> {
@@ -124,6 +127,12 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                 }
             }
         }
+
+        // Fallback: some SDK versions serialise size, n, and response_format as query parameters
+        // rather than multipart form fields (e.g. when set on the outer ImageEditParams.Builder).
+        if (!sizeSetFromForm) request.url.parameters.queryParameter("size")?.let { span.setAttribute("gen_ai.request.size", it) }
+        if (!nSetFromForm) request.url.parameters.queryParameter("n")?.let { span.setAttribute("gen_ai.request.n", it) }
+        if (!responseFormatSetFromForm) request.url.parameters.queryParameter("response_format")?.let { span.setAttribute("gen_ai.request.response_format", it) }
 
         if (contentTracingAllowed(ContentKind.INPUT)) {
             extractor.setUploadableContentAttributes(

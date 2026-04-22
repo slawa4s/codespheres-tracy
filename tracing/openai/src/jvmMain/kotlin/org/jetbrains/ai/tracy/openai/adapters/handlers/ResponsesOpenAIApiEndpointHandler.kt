@@ -144,18 +144,20 @@ internal class ResponsesOpenAIApiEndpointHandler(
         when (detectRoute(response.url, response.requestMethod)) {
             ResponseRoute.CREATE -> handleCreateResponseAttributes(span, response)
             ResponseRoute.RETRIEVE -> {
+                extractResponseIdFromPath(response.url)?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
                 val body = response.body.asJson()?.jsonObject
                 OpenAIApiUtils.setCommonResponseAttributes(span, response)
                 // Guarantee the operation name is set even if body["object"] is absent.
                 span.setAttribute(GEN_AI_OPERATION_NAME, "response")
                 // Mirror the attributes populated by the CREATE path so that all lifecycle
                 // spans are consistent (token-usage counts and resolved model name).
-                body?.get("usage")?.let { setUsageAttributes(span, it.jsonObject) }
+                body?.get("usage")?.let { setUsageAttributes(span, (it as? JsonObject) ?: return@let) }
                 body?.get("model")?.jsonPrimitive?.contentOrNull?.let {
                     span.setAttribute(GEN_AI_REQUEST_MODEL, it)
                 }
             }
             ResponseRoute.DELETE -> {
+                extractResponseIdFromPath(response.url)?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
                 OpenAIApiUtils.setCommonResponseAttributes(span, response)
                 // Guarantee the operation name is set even if body["object"] is absent.
                 span.setAttribute(GEN_AI_OPERATION_NAME, "response.deleted")
@@ -250,7 +252,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
 
         body["usage"]?.let { usage ->
-            setUsageAttributes(span, usage.jsonObject)
+            setUsageAttributes(span, (usage as? JsonObject) ?: return@let)
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
@@ -496,6 +498,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
             }
         }
     }
+
+    private fun extractResponseIdFromPath(url: TracyHttpUrl): String? =
+        url.pathSegments.let { it.getOrNull(it.indexOf("responses") + 1)?.takeIf { s -> s.isNotBlank() } }
 
     companion object {
         private val logger = KotlinLogging.logger {}

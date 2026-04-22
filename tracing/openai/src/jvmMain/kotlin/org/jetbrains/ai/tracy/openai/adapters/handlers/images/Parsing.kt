@@ -46,7 +46,8 @@ internal fun handleImageGenerationResponseAttributes(
 
     // Explicitly extract 'created' before the generic loop so this attribute is always set
     // even when the generic loop is skipped due to an empty or partial body.
-    body["created"]?.let { span.setAttribute("gen_ai.response.created", it.asString) }
+    // Fall back to 'created_at' used by some API-compatible proxies (e.g. LiteLLM, Azure OpenAI).
+    (body["created"] ?: body["created_at"])?.let { span.setAttribute("gen_ai.response.created", it.asString) }
 
     body["data"]?.jsonArray?.let { data ->
         // collect AI response content — extract url or b64_json directly rather than
@@ -75,7 +76,7 @@ internal fun handleImageGenerationResponseAttributes(
     // even when the SDK omits the model field from the request (e.g. dall-e-2 default in edit).
     body["model"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it) }
 
-    val manuallyParsedKeys = listOf("data", "usage", "created", "model")
+    val manuallyParsedKeys = listOf("data", "usage", "created", "created_at", "model")
     for ((key, value) in body.entries) {
         if (key in manuallyParsedKeys) {
             continue
