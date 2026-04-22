@@ -16,6 +16,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.asFormData
 import org.jetbrains.ai.tracy.core.policy.ContentKind
 import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
+import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes
 import kotlinx.serialization.json.Json
@@ -32,6 +33,10 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        // Attempt to capture model via JSON path first (mirrors the pattern in other handlers).
+        // For multipart/form-data requests this is a no-op; the model is set below via form fields.
+        OpenAIApiUtils.setCommonRequestAttributes(span, request)
+
         val body = request.body.asFormData() ?: return
 
         val mediaContentParts = mutableListOf<MediaContentPart>()

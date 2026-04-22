@@ -54,12 +54,15 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
         // Pre-allocate in case the span reaches the limit
         span.setAttribute(DROPPED_ATTRIBUTES_COUNT_ATTRIBUTE_KEY, 0L)
 
-        getRequestBodyAttributes(span, request)
-        span.setAttribute("gen_ai.api_base", "${request.url.scheme}://${request.url.host}")
+        // Set fundamental span attributes before provider-specific parsing so they are
+        // always written even if getRequestBodyAttributes throws (e.g. due to unexpected body shape).
         span.setAttribute(GEN_AI_SYSTEM, genAISystem)
+        span.setAttribute("gen_ai.api_base", "${request.url.scheme}://${request.url.host}")
         span.setAttribute("server.address", request.url.host)
         val defaultPort = if (request.url.scheme == "https") 443L else 80L
         span.setAttribute("server.port", defaultPort)
+
+        getRequestBodyAttributes(span, request)
 
         return@runCatching
     }.getOrElse { exception ->

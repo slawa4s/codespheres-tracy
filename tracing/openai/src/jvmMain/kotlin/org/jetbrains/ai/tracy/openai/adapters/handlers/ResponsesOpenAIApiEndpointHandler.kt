@@ -143,8 +143,16 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         when (detectRoute(response.url, response.requestMethod)) {
             ResponseRoute.CREATE -> handleCreateResponseAttributes(span, response)
-            ResponseRoute.RETRIEVE -> OpenAIApiUtils.setCommonResponseAttributes(span, response)
-            ResponseRoute.DELETE -> OpenAIApiUtils.setCommonResponseAttributes(span, response)
+            ResponseRoute.RETRIEVE -> {
+                OpenAIApiUtils.setCommonResponseAttributes(span, response)
+                // Guarantee the operation name is set even if body["object"] is absent.
+                span.setAttribute(GEN_AI_OPERATION_NAME, "response")
+            }
+            ResponseRoute.DELETE -> {
+                OpenAIApiUtils.setCommonResponseAttributes(span, response)
+                // Guarantee the operation name is set even if body["object"] is absent.
+                span.setAttribute(GEN_AI_OPERATION_NAME, "response.deleted")
+            }
         }
     }
 
@@ -160,7 +168,8 @@ internal class ResponsesOpenAIApiEndpointHandler(
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
         body["output"]?.let { outputs ->
-            for ((index, output) in outputs.jsonArray.withIndex()) {
+            val outputArray = outputs as? JsonArray ?: return@let
+            for ((index, output) in outputArray.withIndex()) {
                 when (val type = output.jsonObject["type"]?.jsonPrimitive?.content) {
                     "message", null -> {
                         // See schema: https://platform.openai.com/docs/api-reference/responses/object#responses-object-output-output_message

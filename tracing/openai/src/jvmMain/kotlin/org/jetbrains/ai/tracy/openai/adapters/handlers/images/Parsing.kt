@@ -43,10 +43,19 @@ internal fun handleImageGenerationResponseAttributes(
         return
     }
 
+    // Explicitly extract 'created' before the generic loop so this attribute is always set
+    // even when the generic loop is skipped due to an empty or partial body.
+    body["created"]?.let { span.setAttribute("gen_ai.response.created", it.asString) }
+
     body["data"]?.jsonArray?.let { data ->
-        // collect AI response content
+        // collect AI response content — extract url or b64_json directly rather than
+        // serialising the whole JSON object, for a cleaner and more resilient attribute value.
         for ((index, image) in data.withIndex()) {
-            span.setAttribute("gen_ai.completion.$index.content", image.asString.orRedactedOutput())
+            val imageObj = image.jsonObject
+            val content = imageObj["url"]?.jsonPrimitive?.content
+                ?: imageObj["b64_json"]?.jsonPrimitive?.content
+                ?: image.asString
+            span.setAttribute("gen_ai.completion.$index.content", content.orRedactedOutput())
         }
         // install media content for further upload
         val format = body["output_format"]?.jsonPrimitive?.content ?: defaultImageFormat
@@ -60,7 +69,7 @@ internal fun handleImageGenerationResponseAttributes(
 
     body["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
 
-    val manuallyParsedKeys = listOf("data", "usage")
+    val manuallyParsedKeys = listOf("data", "usage", "created")
     for ((key, value) in body.entries) {
         if (key in manuallyParsedKeys) {
             continue
