@@ -38,14 +38,14 @@ internal class ListVideosHandler : VideoRouteHandler {
 
         val data = body["data"]
         if (data != null && data is JsonArray) {
-            span.setAttribute("gen_ai.response.videos_count", data.size.toLong())
+            span.setAttribute("gen_ai.response.list.count", data.size.toLong())
             for ((index, videoElement) in data.withIndex()) {
                 if (videoElement is JsonObject) {
                     span.traceVideoModel(videoElement, "gen_ai.response.videos.$index")
                 }
             }
         } else {
-            span.setAttribute("gen_ai.response.videos_count", 0L)
+            span.setAttribute("gen_ai.response.list.count", 0L)
         }
     }
 }

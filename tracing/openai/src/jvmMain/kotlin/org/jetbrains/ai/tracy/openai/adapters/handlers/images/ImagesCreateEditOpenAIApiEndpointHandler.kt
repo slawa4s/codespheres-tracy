@@ -87,7 +87,7 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                 // either a single image or an array of images
                 "image", "image[]" -> {
                     // size_bytes is non-sensitive metadata, always traced
-                    span.setAttribute("gen_ai.request.image.$imagesCount.size_bytes", part.content.size.toLong())
+                    span.setAttribute("gen_ai.request.image.size_bytes", part.content.size.toLong())
                     if (contentTracingAllowed(ContentKind.INPUT)) {
                         // trace images only when input content tracing is allowed.
                         // base64-encoded image content

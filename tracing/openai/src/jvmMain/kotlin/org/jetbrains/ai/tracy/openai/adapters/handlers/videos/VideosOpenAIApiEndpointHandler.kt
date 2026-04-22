@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.videos
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
@@ -48,12 +49,15 @@ internal class VideosOpenAIApiEndpointHandler(
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val route = detectRoute(request.url, request.method)
+        span.setAttribute(GEN_AI_OPERATION_NAME, route.operationName)
         routeHandlers[route]?.handleRequest(span, request)
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val route = detectRoute(response.url, response.requestMethod)
         routeHandlers[route]?.handleResponse(span, response)
+        // Override operation name set by setCommonResponseAttributes (which uses the response 'object' field)
+        span.setAttribute(GEN_AI_OPERATION_NAME, route.operationName)
     }
 
     override fun handleStreaming(span: Span, events: String) {
@@ -96,13 +100,13 @@ internal class VideosOpenAIApiEndpointHandler(
     /**
      * Internal enum to distinguish between different video API routes.
      */
-    private enum class VideoRoute {
-        CREATE,   // POST /videos
-        GET_VIDEO,      // GET /videos/{video_id}
-        DELETE,   // DELETE /videos/{video_id}
-        LIST,     // GET /videos
-        VIDEO_CONTENT,  // GET /videos/{video_id}/content
-        REMIX     // POST /videos/{video_id}/remix
+    private enum class VideoRoute(val operationName: String) {
+        CREATE("videos.create"),          // POST /videos
+        GET_VIDEO("videos.retrieve"),     // GET /videos/{video_id}
+        DELETE("videos.delete"),          // DELETE /videos/{video_id}
+        LIST("videos.list"),              // GET /videos
+        VIDEO_CONTENT("videos.content"),  // GET /videos/{video_id}/content
+        REMIX("videos.remix")             // POST /videos/{video_id}/remix
     }
 
     companion object {

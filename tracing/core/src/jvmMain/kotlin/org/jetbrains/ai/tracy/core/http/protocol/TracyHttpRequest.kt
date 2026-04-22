@@ -100,7 +100,12 @@ fun ByteArray.asRequestBody(contentType: TracyContentType, charset: Charset): Tr
         }
         TracyContentType.MultiPart.FormData.mimeType -> {
             val parser = MultipartFormDataParser()
-            val formData = parser.parse(contentType, bytes)
+            val formData = try {
+                parser.parse(contentType, bytes)
+            } catch (err: Exception) {
+                logger.warn("Error while parsing multipart/form-data request body", err)
+                return null
+            }
             TracyHttpRequestBody.FormData(formData)
         }
         else -> null
