@@ -57,6 +57,10 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
             json["response_format"]?.jsonPrimitive?.content?.let {
                 span.setAttribute("gen_ai.request.response_format", it)
             }
+            json["image"]?.jsonPrimitive?.content?.let { base64Image ->
+                val sizeBytes = Base64.getDecoder().decode(base64Image).size.toLong()
+                span.setAttribute("gen_ai.request.image.size_bytes", sizeBytes)
+            }
             return
         }
 

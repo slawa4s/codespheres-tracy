@@ -39,7 +39,15 @@ internal class DeleteVideoHandler : VideoRouteHandler {
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
         body["id"]?.let { span.setAttribute("gen_ai.response.video.id", it.jsonPrimitive.content) }
-        body["status"]?.let { span.setAttribute("gen_ai.response.video.status", it.jsonPrimitive.content) }
-        body["deleted"]?.let { span.setAttribute("gen_ai.response.deleted", it.jsonPrimitive.boolean) }
+        val deleted = body["deleted"]?.jsonPrimitive?.boolean
+        if (body["status"] != null) {
+            span.setAttribute("gen_ai.response.video.status", body["status"]!!.jsonPrimitive.content)
+        } else if (deleted == true) {
+            // The delete response has no status field; infer it from the deleted flag.
+            span.setAttribute("gen_ai.response.video.status", "deleted")
+        }
+        if (deleted != null) {
+            span.setAttribute("gen_ai.response.deleted", deleted)
+        }
     }
 }

@@ -55,9 +55,12 @@ internal class VideosOpenAIApiEndpointHandler(
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val route = detectRoute(response.url, response.requestMethod)
-        routeHandlers[route]?.handleResponse(span, response)
-        // Override operation name set by setCommonResponseAttributes (which uses the response 'object' field)
-        span.setAttribute(GEN_AI_OPERATION_NAME, route.operationName)
+        try {
+            routeHandlers[route]?.handleResponse(span, response)
+        } finally {
+            // Override operation name set by setCommonResponseAttributes (which uses the response 'object' field)
+            span.setAttribute(GEN_AI_OPERATION_NAME, route.operationName)
+        }
     }
 
     override fun handleStreaming(span: Span, events: String) {
