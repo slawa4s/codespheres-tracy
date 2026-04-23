@@ -24,6 +24,7 @@ internal class GetVideoHandler : VideoRouteHandler {
      * Request: Path parameter video_id
      */
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "videos.retrieve")
         val videoId = extractVideoIdFromPath(request.url)
         if (videoId != null) {
             span.setAttribute("gen_ai.request.video.requested_id", videoId)
@@ -37,7 +38,6 @@ internal class GetVideoHandler : VideoRouteHandler {
      */
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.setAttribute(GEN_AI_OPERATION_NAME, "videos.retrieve")
         span.traceVideoModel(body, "gen_ai.response.video")
     }
 }

@@ -23,7 +23,7 @@ internal object OpenAIApiUtils {
     fun setCommonRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
 
-        body["temperature"]?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it.jsonPrimitive.doubleOrNull) }
+        body["temperature"]?.let { it.jsonPrimitive.doubleOrNull?.let { v -> span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, v) } }
         body["model"]?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it.jsonPrimitive.content) }
     }
 

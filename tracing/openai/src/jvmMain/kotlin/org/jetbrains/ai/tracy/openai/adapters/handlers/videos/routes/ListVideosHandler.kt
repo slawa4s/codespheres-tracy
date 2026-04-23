@@ -21,6 +21,7 @@ internal class ListVideosHandler : VideoRouteHandler {
      * Request: Query parameters after, limit, order
      */
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "videos.list")
         val params = request.url.parameters
         params.queryParameter("after")?.let { span.setAttribute("gen_ai.request.after", it) }
         params.queryParameter("limit")?.let { span.setAttribute("gen_ai.request.limit", it) }
@@ -36,8 +37,6 @@ internal class ListVideosHandler : VideoRouteHandler {
         body["first_id"]?.let { span.setAttribute("gen_ai.response.first_id", it.jsonPrimitive.content) }
         body["last_id"]?.let { span.setAttribute("gen_ai.response.last_id", it.jsonPrimitive.content) }
         body["has_more"]?.let { span.setAttribute("gen_ai.response.has_more", it.jsonPrimitive.boolean) }
-
-        span.setAttribute(GEN_AI_OPERATION_NAME, "videos.list")
 
         val data = body["data"]
         if (data != null && data is JsonArray) {

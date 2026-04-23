@@ -34,6 +34,7 @@ internal class CreateVideoHandler(private val extractor: MediaContentExtractor) 
      * Request is `multipart/form-data` with: prompt, input_reference (file), model, seconds, size
      */
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "videos.create")
         val body = request.body.asFormData() ?: return
 
         val mediaContentParts = mutableListOf<MediaContentPart>()
@@ -112,7 +113,6 @@ internal class CreateVideoHandler(private val extractor: MediaContentExtractor) 
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.setAttribute(GEN_AI_OPERATION_NAME, "videos.create")
         span.traceVideoModel(body, "gen_ai.response.video")
     }
 }

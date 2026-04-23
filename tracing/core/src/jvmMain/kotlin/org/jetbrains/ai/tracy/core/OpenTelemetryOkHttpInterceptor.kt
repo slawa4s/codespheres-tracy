@@ -325,7 +325,11 @@ class OpenTelemetryOkHttpInterceptor(
                 try {
                     adapter.handleStreaming(span, url, capturedText.toString())
                 } finally {
-                    span.end()
+                    try {
+                        originalBody.close()
+                    } finally {
+                        span.end()
+                    }
                 }
             }
         }

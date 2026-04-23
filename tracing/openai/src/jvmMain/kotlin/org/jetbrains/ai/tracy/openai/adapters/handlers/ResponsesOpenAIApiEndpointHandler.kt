@@ -240,6 +240,16 @@ internal class ResponsesOpenAIApiEndpointHandler(
                     span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
                 }
             }
+            if (type == "response.created") {
+                event["response"]?.jsonObject?.let { responseObj ->
+                    responseObj["id"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_ID, it)
+                    }
+                    responseObj["model"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                    }
+                }
+            }
             if (type == "response.done") {
                 event["response"]?.jsonObject?.let { responseObj ->
                     responseObj["usage"]?.jsonObject?.let { usage ->
