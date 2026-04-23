@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.*
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -36,16 +37,18 @@ internal class ListVideosHandler : VideoRouteHandler {
         body["last_id"]?.let { span.setAttribute("gen_ai.response.last_id", it.jsonPrimitive.content) }
         body["has_more"]?.let { span.setAttribute("gen_ai.response.has_more", it.jsonPrimitive.boolean) }
 
+        span.setAttribute(GEN_AI_OPERATION_NAME, "videos.list")
+
         val data = body["data"]
         if (data != null && data is JsonArray) {
-            span.setAttribute("gen_ai.response.videos_count", data.size.toLong())
+            span.setAttribute("gen_ai.response.list.count", data.size.toLong())
             for ((index, videoElement) in data.withIndex()) {
                 if (videoElement is JsonObject) {
                     span.traceVideoModel(videoElement, "gen_ai.response.videos.$index")
                 }
             }
         } else {
-            span.setAttribute("gen_ai.response.videos_count", 0L)
+            span.setAttribute("gen_ai.response.list.count", 0L)
         }
     }
 }

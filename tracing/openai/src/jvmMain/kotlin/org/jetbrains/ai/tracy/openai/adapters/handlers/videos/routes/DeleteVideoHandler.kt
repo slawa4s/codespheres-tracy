@@ -41,6 +41,7 @@ internal class DeleteVideoHandler : VideoRouteHandler {
         val body = response.body.asJson()?.jsonObject ?: return
         span.setAttribute(GEN_AI_OPERATION_NAME, "videos.delete")
         body["id"]?.let { span.setAttribute("gen_ai.response.video.id", it.jsonPrimitive.content) }
+        span.setAttribute("gen_ai.response.video.status", "deleted")
         body["deleted"]?.let { span.setAttribute("gen_ai.response.deleted", it.jsonPrimitive.boolean) }
     }
 }

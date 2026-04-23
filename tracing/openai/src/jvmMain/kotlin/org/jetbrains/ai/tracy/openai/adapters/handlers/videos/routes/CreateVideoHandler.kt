@@ -68,10 +68,10 @@ internal class CreateVideoHandler(private val extractor: MediaContentExtractor) 
                     span.setAttribute(GEN_AI_REQUEST_MODEL, content)
                 }
                 "seconds" -> {
-                    span.setAttribute("gen_ai.request.video.seconds", content.orRedactedInput())
+                    span.setAttribute("gen_ai.request.video.seconds", content)
                 }
                 "size" -> {
-                    span.setAttribute("gen_ai.request.video.size", content.orRedactedInput())
+                    span.setAttribute("gen_ai.request.video.size", content)
                 }
                 "input_reference" -> {
                     if (contentType != null) {

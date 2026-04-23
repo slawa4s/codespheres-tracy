@@ -31,6 +31,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+        span.setAttribute(GEN_AI_OPERATION_NAME, "responses")
         span.setAttribute("openai.api.type", "responses")
         span.setAttribute("gen_ai.provider.name", genAISystem)
 
