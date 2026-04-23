@@ -25,11 +25,14 @@ import kotlinx.serialization.json.*
  * Handler for OpenAI Responses API
  */
 internal class ResponsesOpenAIApiEndpointHandler(
-    private val extractor: MediaContentExtractor
+    private val extractor: MediaContentExtractor,
+    private val genAISystem: String,
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+        span.setAttribute("openai.api.type", "responses")
+        span.setAttribute("gen_ai.provider.name", genAISystem)
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.previous_response_id", it)
@@ -236,6 +239,19 @@ internal class ResponsesOpenAIApiEndpointHandler(
                     span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
                 }
             }
+            if (type == "response.done") {
+                event["response"]?.jsonObject?.let { responseObj ->
+                    responseObj["usage"]?.jsonObject?.let { usage ->
+                        setUsageAttributes(span, usage)
+                    }
+                    responseObj["id"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_ID, it)
+                    }
+                    responseObj["model"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                    }
+                }
+            }
         }
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
@@ -348,6 +364,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
         usage["output_tokens"]?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+        }
+        usage["input_tokens_details"]?.jsonObject?.get("cached_tokens")?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
         }
     }
 

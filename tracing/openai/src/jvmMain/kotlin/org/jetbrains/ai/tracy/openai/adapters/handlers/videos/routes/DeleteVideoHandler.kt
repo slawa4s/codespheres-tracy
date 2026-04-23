@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -38,6 +39,7 @@ internal class DeleteVideoHandler : VideoRouteHandler {
      */
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
+        span.setAttribute(GEN_AI_OPERATION_NAME, "videos.delete")
         body["id"]?.let { span.setAttribute("gen_ai.response.video.id", it.jsonPrimitive.content) }
         body["deleted"]?.let { span.setAttribute("gen_ai.response.deleted", it.jsonPrimitive.boolean) }
     }

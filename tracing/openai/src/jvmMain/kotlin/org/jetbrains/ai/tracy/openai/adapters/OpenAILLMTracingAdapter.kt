@@ -139,7 +139,7 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             }
 
             OpenAIApiType.RESPONSES_API -> handlers.getOrPut(OpenAIApiType.RESPONSES_API) {
-                ResponsesOpenAIApiEndpointHandler(extractor)
+                ResponsesOpenAIApiEndpointHandler(extractor, GenAiSystemIncubatingValues.OPENAI)
             }
 
             OpenAIApiType.IMAGES_GENERATIONS -> handlers.getOrPut(OpenAIApiType.IMAGES_GENERATIONS) {
