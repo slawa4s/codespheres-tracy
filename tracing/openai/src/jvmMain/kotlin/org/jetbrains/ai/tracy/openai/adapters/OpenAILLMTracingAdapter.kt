@@ -16,6 +16,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOp
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
@@ -89,6 +90,14 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private val handlers = ConcurrentHashMap<OpenAIApiType, EndpointApiHandler>()
 
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        val apiType = OpenAIApiType.detect(request.url)
+        span.setAttribute("openai.api.type", apiType?.route ?: "completions")
+        val defaultOperationName = when (apiType) {
+            OpenAIApiType.RESPONSES_API -> "response"
+            else -> "chat.completions"
+        }
+        span.setAttribute(GEN_AI_OPERATION_NAME, defaultOperationName)
+
         val handler = handlerFor(request.url)
         handler.handleRequestAttributes(span, request)
     }
