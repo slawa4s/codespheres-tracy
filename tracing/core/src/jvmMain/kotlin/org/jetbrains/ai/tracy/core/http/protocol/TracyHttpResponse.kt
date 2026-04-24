@@ -28,6 +28,13 @@ interface TracyHttpResponse {
     val url: TracyHttpUrl
     val requestMethod: String
 
+    /**
+     * Response headers as a map with lowercased header names.
+     * Defaults to an empty map for implementations that do not expose headers.
+     */
+    val headers: Map<String, String>
+        get() = emptyMap()
+
     fun isError(): Boolean
 }
 
