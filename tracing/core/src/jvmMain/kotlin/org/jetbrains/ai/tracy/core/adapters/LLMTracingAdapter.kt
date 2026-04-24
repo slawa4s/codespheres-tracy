@@ -73,6 +73,17 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
             val mimeType = response.contentType?.mimeType
 
+            span.setAttribute("http.response.status_code", response.code.toLong())
+            span.setAttribute("http.status_code", response.code.toLong())
+
+            if (response.isError()) {
+                span.setAttribute("error.type", response.code.toString())
+                getResponseErrorBodyAttributes(span, response.body)
+                span.setStatus(StatusCode.ERROR)
+            } else {
+                span.setStatus(StatusCode.OK)
+            }
+
             if (mimeType != null) {
                 when {
                     isStreamingRequest && mimeType == TracyContentType.Text.EventStream.mimeType -> {
@@ -87,17 +98,6 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
                         span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
                     }
                 }
-            }
-
-            span.setAttribute("http.response.status_code", response.code.toLong())
-            span.setAttribute("http.status_code", response.code.toLong())
-
-            if (response.isError()) {
-                span.setAttribute("error.type", response.code.toString())
-                getResponseErrorBodyAttributes(span, response.body)
-                span.setStatus(StatusCode.ERROR)
-            } else {
-                span.setStatus(StatusCode.OK)
             }
 
             val spanData = (span as? ReadableSpan)?.toSpanData() ?: return@runCatching

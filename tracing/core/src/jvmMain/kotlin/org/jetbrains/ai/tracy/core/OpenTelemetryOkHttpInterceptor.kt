@@ -272,6 +272,7 @@ class OpenTelemetryOkHttpInterceptor(
             } catch (e: Exception) {
                 span.setStatus(StatusCode.ERROR)
                 span.recordException(e)
+                span.setAttribute("error.type", e.javaClass.name)
                 throw e
             } finally {
                 if (!isStreamingRequest) {

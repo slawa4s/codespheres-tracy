@@ -213,9 +213,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
             }
         }
 
-        body["usage"]?.let { usage ->
-            setUsageAttributes(span, usage.jsonObject)
-        }
+        (body["usage"] as? JsonObject)?.let { setUsageAttributes(span, it) }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
@@ -246,7 +244,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 response["object"]?.jsonPrimitive?.content?.let {
                     span.setAttribute(GEN_AI_OPERATION_NAME, it)
                 }
-                response["usage"]?.jsonObject?.let { usage ->
+                (response["usage"] as? JsonObject)?.let { usage ->
                     setUsageAttributes(span, usage)
                 }
             }

@@ -8,7 +8,9 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.embeddings
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -52,6 +54,9 @@ internal class EmbeddingsOpenAIApiEndpointHandler : EndpointApiHandler {
             if (embedding is JsonArray) {
                 span.setAttribute("gen_ai.embeddings.dimension.count", embedding.size.toLong())
             }
+        }
+        (body["usage"] as? JsonObject)?.let { usage ->
+            usage["prompt_tokens"]?.jsonPrimitive?.intOrNull?.let { span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it.toLong()) }
         }
     }
 
