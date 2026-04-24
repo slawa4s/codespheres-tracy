@@ -14,8 +14,11 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioSpeechOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranscriptionOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.BatchesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.moderations.ModerationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
@@ -53,7 +56,16 @@ private enum class OpenAIApiType(val route: String) {
     AUDIO_TRANSLATION("audio/translations"),
 
     // See: https://platform.openai.com/docs/api-reference/audio/createSpeech
-    AUDIO_SPEECH("audio/speech");
+    AUDIO_SPEECH("audio/speech"),
+
+    // See: https://platform.openai.com/docs/api-reference/files
+    FILES("files"),
+
+    // See: https://platform.openai.com/docs/api-reference/batch
+    BATCHES("batches"),
+
+    // See: https://platform.openai.com/docs/api-reference/moderations
+    MODERATIONS("moderations");
 
     val operationName: String
         get() = when (this) {
@@ -65,6 +77,9 @@ private enum class OpenAIApiType(val route: String) {
             AUDIO_TRANSCRIPTION -> "audio.transcription"
             AUDIO_TRANSLATION -> "audio.translation"
             AUDIO_SPEECH -> "audio.speech"
+            FILES -> "files.create"
+            BATCHES -> "batches"
+            MODERATIONS -> "moderations"
         }
 
     companion object {
@@ -193,6 +208,18 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.AUDIO_SPEECH -> handlers.getOrPut(OpenAIApiType.AUDIO_SPEECH) {
                 AudioSpeechOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.FILES -> handlers.getOrPut(OpenAIApiType.FILES) {
+                FilesOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.BATCHES -> handlers.getOrPut(OpenAIApiType.BATCHES) {
+                BatchesOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.MODERATIONS -> handlers.getOrPut(OpenAIApiType.MODERATIONS) {
+                ModerationsOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
