@@ -23,6 +23,7 @@ import okhttp3.HttpUrl
 interface TracyHttpUrl {
     val scheme: String
     val host: String
+    val port: Int
     val pathSegments: List<String>
     val parameters: TracyQueryParameters
 }
@@ -54,6 +55,7 @@ data class TracyHttpUrlImpl(
     override val host: String,
     override val pathSegments: List<String>,
     override val parameters: TracyQueryParameters,
+    override val port: Int = -1,
 ) : TracyHttpUrl
 
 /**
@@ -76,5 +78,6 @@ fun HttpUrl.toProtocolUrl(): TracyHttpUrl {
         host = httpUrl.host,
         pathSegments = httpUrl.pathSegments,
         parameters = params,
+        port = httpUrl.port,
     )
 }

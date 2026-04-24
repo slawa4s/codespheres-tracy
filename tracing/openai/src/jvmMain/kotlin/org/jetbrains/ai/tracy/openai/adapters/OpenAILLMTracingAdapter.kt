@@ -16,6 +16,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOp
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
@@ -42,6 +43,15 @@ private enum class OpenAIApiType(val route: String) {
 
     // See: https://platform.openai.com/docs/api-reference/videos
     VIDEOS("videos");
+
+    val operationName: String
+        get() = when (this) {
+            CHAT_COMPLETIONS -> "chat"
+            RESPONSES_API -> "create_response"
+            IMAGES_GENERATIONS -> "generate_image"
+            IMAGES_EDITS -> "edit_image"
+            VIDEOS -> "create_video"
+        }
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -89,6 +99,11 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private val handlers = ConcurrentHashMap<OpenAIApiType, EndpointApiHandler>()
 
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        val apiType = OpenAIApiType.detect(request.url)
+        if (apiType != null) {
+            span.setAttribute("openai.api.type", apiType.route)
+            span.setAttribute(GEN_AI_OPERATION_NAME, apiType.operationName)
+        }
         val handler = handlerFor(request.url)
         handler.handleRequestAttributes(span, request)
     }
