@@ -227,13 +227,17 @@ internal class ResponsesOpenAIApiEndpointHandler(
             }.getOrNull() ?: continue
 
             val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
+            if (type == "response.created") {
+                event["response"]?.jsonObject?.get("model")?.jsonPrimitive?.content?.let {
+                    span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                }
+            } else if (type == "response.output_text.done") {
                 event["text"]?.jsonPrimitive?.content?.let {
                     span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
                     span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
                 }
-            } else if (type == "response.completed" || type == "response.done") {
-                val response = event["response"]?.jsonObject ?: continue
+            } else if (type == "response.completed" || type == "response.done" || type == "response.incomplete" || type == "response.failed") {
+                val response = event["response"]?.jsonObject ?: event.jsonObject
                 response["id"]?.jsonPrimitive?.content?.let {
                     span.setAttribute(GEN_AI_RESPONSE_ID, it)
                 }
@@ -361,6 +365,12 @@ internal class ResponsesOpenAIApiEndpointHandler(
             span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
         }
         (usage["input_token_details"] as? JsonObject)?.get("cached_tokens")?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
+        }
+        usage["cached_tokens"]?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
+        }
+        (usage["prompt_tokens_details"] as? JsonObject)?.get("cached_tokens")?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
         }
     }

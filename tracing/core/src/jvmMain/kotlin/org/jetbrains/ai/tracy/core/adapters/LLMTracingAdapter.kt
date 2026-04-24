@@ -12,6 +12,7 @@ import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_SYSTEM
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -117,7 +118,7 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
     protected open fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
         body.asJson()?.jsonObject["error"]?.jsonObject?.let { error ->
             error["message"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.message", it.content) }
-            error["type"]?.jsonPrimitive?.let { span.setAttribute("error.type", it.content) }
+            error["type"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("error.type", it) }
             error["param"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.param", it.content) }
             error["code"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.code", it.content) }
         }
