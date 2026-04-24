@@ -138,7 +138,6 @@ internal class ResponsesOpenAIApiEndpointHandler(
      */
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
@@ -233,7 +232,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
                     span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
                     span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
                 }
-            } else if (type == "response.completed") {
+            } else if (type == "response.completed" || type == "response.done") {
                 val response = event["response"]?.jsonObject ?: continue
                 response["id"]?.jsonPrimitive?.content?.let {
                     span.setAttribute(GEN_AI_RESPONSE_ID, it)
@@ -360,6 +359,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
         usage["output_tokens"]?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+        }
+        (usage["input_token_details"] as? JsonObject)?.get("cached_tokens")?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
         }
     }
 
