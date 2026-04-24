@@ -7,6 +7,7 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.files
 
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
@@ -21,6 +22,8 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  * Supports:
  * - `POST /files` — Upload a file (`files.create`)
  * - `DELETE /files/{file_id}` — Delete a file (`files.delete`)
+ * - `GET /files` — List files (`files.list`)
+ * - `GET /files/{file_id}` — Retrieve a file (`files.retrieve`)
  *
  * See [Files API Reference](https://platform.openai.com/docs/api-reference/files)
  */
@@ -30,6 +33,15 @@ internal class FilesOpenAIApiEndpointHandler : EndpointApiHandler {
         val operationName = when (request.method) {
             "POST" -> "files.create"
             "DELETE" -> "files.delete"
+            "GET" -> {
+                val segments = request.url.pathSegments
+                val filesIndex = segments.indexOf("files")
+                if (filesIndex != -1 && segments.size > filesIndex + 1 && segments[filesIndex + 1].isNotBlank()) {
+                    "files.retrieve"
+                } else {
+                    "files.list"
+                }
+            }
             else -> null
         }
         operationName?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
@@ -50,7 +62,12 @@ internal class FilesOpenAIApiEndpointHandler : EndpointApiHandler {
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        body["id"]?.let { span.setAttribute("gen_ai.response.file.id", it.jsonPrimitive.content) }
+        val data = body["data"]
+        if (data is JsonArray) {
+            span.setAttribute("gen_ai.response.list.count", data.size.toLong())
+        } else {
+            body["id"]?.let { span.setAttribute("gen_ai.response.file.id", it.jsonPrimitive.content) }
+        }
     }
 
     override fun handleStreaming(span: Span, events: String) {

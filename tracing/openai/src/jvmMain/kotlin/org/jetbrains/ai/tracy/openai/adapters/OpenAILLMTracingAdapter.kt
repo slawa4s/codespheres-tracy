@@ -18,6 +18,8 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.BatchesOpenAIApiE
 import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.embeddings.EmbeddingsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.models.ModelsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.moderations.ModerationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
@@ -65,7 +67,13 @@ private enum class OpenAIApiType(val route: String) {
     BATCHES("batches"),
 
     // See: https://platform.openai.com/docs/api-reference/moderations
-    MODERATIONS("moderations");
+    MODERATIONS("moderations"),
+
+    // See: https://platform.openai.com/docs/api-reference/embeddings
+    EMBEDDINGS("embeddings"),
+
+    // See: https://platform.openai.com/docs/api-reference/models
+    MODELS("models");
 
     val operationName: String
         get() = when (this) {
@@ -80,6 +88,8 @@ private enum class OpenAIApiType(val route: String) {
             FILES -> "files.create"
             BATCHES -> "batches"
             MODERATIONS -> "moderations"
+            EMBEDDINGS -> "embeddings"
+            MODELS -> "models.list"
         }
 
     companion object {
@@ -220,6 +230,14 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.MODERATIONS -> handlers.getOrPut(OpenAIApiType.MODERATIONS) {
                 ModerationsOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.EMBEDDINGS -> handlers.getOrPut(OpenAIApiType.EMBEDDINGS) {
+                EmbeddingsOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.MODELS -> handlers.getOrPut(OpenAIApiType.MODELS) {
+                ModelsOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
