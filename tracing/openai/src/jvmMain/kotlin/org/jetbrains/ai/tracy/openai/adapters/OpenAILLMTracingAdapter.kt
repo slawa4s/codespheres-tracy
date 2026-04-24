@@ -77,7 +77,7 @@ private enum class OpenAIApiType(val route: String) {
 
     val operationName: String
         get() = when (this) {
-            CHAT_COMPLETIONS -> "chat"
+            CHAT_COMPLETIONS -> "chat.completion"
             RESPONSES_API -> "create_response"
             IMAGES_GENERATIONS -> "generate_image"
             IMAGES_EDITS -> "edit_image"
