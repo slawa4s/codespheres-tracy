@@ -53,8 +53,9 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         val apiType = listApiTypes.firstOrNull { it in request.url.pathSegments }
         if (apiType != null) {
             span.setAttribute("anthropic.api.type", apiType)
-            if (request.method == "GET") {
-                span.setAttribute("gen_ai.operation.name", "list")
+            when {
+                request.method == "GET" -> span.setAttribute("gen_ai.operation.name", "list")
+                apiType == "batches" && request.method == "POST" -> span.setAttribute("gen_ai.operation.name", "create")
             }
             return
         }
