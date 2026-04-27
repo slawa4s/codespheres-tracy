@@ -224,17 +224,7 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
                 // otherwise, (e.g., when the body is binary), we pass an empty JSON object as the response body.
                 val responseBody = when (response.contentType()?.withoutParameters()) {
                     ContentType.Application.Json -> try {
-                        val body = run {
-                            // peek the response body to avoid consuming the underlying channel
-                            // NOTE: we must first peek and only then await.
-                            // otherwise there are cases when an empty body gets peeked
-                            val peeked = response.rawContent.readBuffer.peek()
-                            response.rawContent.awaitContent(Int.MAX_VALUE)
-                            peeked.request(Long.MAX_VALUE)
-                            val buffer = Buffer()
-                            buffer.write(peeked, peeked.buffer.size)
-                            buffer.readString()
-                        }
+                        val body = response.peekBodyAsString()
                         Json.parseToJsonElement(body).jsonObject
                     } catch (err: Exception) {
                         logger.trace("Error while parsing response body", err)
@@ -305,6 +295,24 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
     }
 
     private fun HttpResponse.asResponseView(body: JsonObject): TracyHttpResponse = TracyHttpResponseView(response = this, body)
+
+    /**
+     * Reads the response body as a string by peeking the underlying channel without consuming it,
+     * so downstream callers can still read the full response.
+     *
+     * The peek must happen *before* [awaitContent]; otherwise there are cases where an empty body
+     * is peeked. After awaiting, [request] drains the peeked source so its bytes can be copied
+     * into a fresh [Buffer] for decoding.
+     */
+    @OptIn(InternalAPI::class, InternalIoApi::class)
+    private suspend fun HttpResponse.peekBodyAsString(): String {
+        val peeked = rawContent.readBuffer.peek()
+        rawContent.awaitContent(Int.MAX_VALUE)
+        peeked.request(Long.MAX_VALUE)
+        val buffer = Buffer()
+        buffer.write(peeked, peeked.buffer.size)
+        return buffer.readString()
+    }
 
     /**
      * Helper function to serialize `@Serializable` objects with an unknown type
