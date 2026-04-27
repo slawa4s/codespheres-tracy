@@ -60,6 +60,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             return
         }
 
+        // Detect 'messages' API endpoint (e.g. /v1/messages for streaming and non-streaming)
+        if ("messages" in request.url.pathSegments) {
+            span.setAttribute("anthropic.api.type", "messages")
+            span.setAttribute("gen_ai.operation.name", "chat")
+        }
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -226,9 +232,62 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
 
-    // streaming is not supported
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
-    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+    override fun isStreamingRequest(request: TracyHttpRequest): Boolean {
+        val body = request.body.asJson()?.jsonObject ?: return false
+        return body["stream"]?.jsonPrimitive?.boolean ?: false
+    }
+
+    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) {
+        var messageId: String? = null
+        var model: String? = null
+        var role: String? = null
+        var outputType: String? = null
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
+        var stopReason: String? = null
+
+        for (line in events.lineSequence()) {
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+            if (data.isEmpty() || data == "[DONE]") continue
+
+            val json = try {
+                Json.parseToJsonElement(data).jsonObject
+            } catch (_: Exception) {
+                continue
+            }
+
+            when (json["type"]?.jsonPrimitive?.contentOrNull) {
+                "message_start" -> {
+                    val message = json["message"]?.jsonObject ?: continue
+                    messageId = message["id"]?.jsonPrimitive?.contentOrNull
+                    model = message["model"]?.jsonPrimitive?.contentOrNull
+                    role = message["role"]?.jsonPrimitive?.contentOrNull
+                    outputType = message["type"]?.jsonPrimitive?.contentOrNull
+                    // input_tokens are carried in the message_start usage block
+                    message["usage"]?.jsonObject?.let { usage ->
+                        inputTokens = usage["input_tokens"]?.jsonPrimitive?.intOrNull
+                    }
+                }
+                "message_delta" -> {
+                    val delta = json["delta"]?.jsonObject
+                    stopReason = delta?.get("stop_reason")?.jsonPrimitive?.contentOrNull
+                    // output_tokens are carried in the message_delta usage block
+                    json["usage"]?.jsonObject?.let { usage ->
+                        outputTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull
+                    }
+                }
+            }
+        }
+
+        messageId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        model?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        role?.let { span.setAttribute("gen_ai.response.role", it) }
+        outputType?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it) }
+        inputTokens?.let { span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it) }
+        outputTokens?.let { span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it) }
+        stopReason?.let { span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, listOf(it)) }
+    }
 
     /**
      * Parses content of the `messages` field when its type is

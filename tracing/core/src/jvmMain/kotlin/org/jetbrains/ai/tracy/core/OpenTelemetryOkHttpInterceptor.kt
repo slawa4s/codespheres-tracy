@@ -262,7 +262,23 @@ class OpenTelemetryOkHttpInterceptor(
                             JsonObject(emptyMap())
                         }
                         else -> {
-                            JsonObject(emptyMap())
+                            // For non-JSON (binary) responses, record the byte count so that
+                            // endpoint handlers (e.g. SpeechOpenAIApiEndpointHandler) can read it.
+                            val contentLength = response.body?.contentLength() ?: -1L
+                            val binarySize = if (contentLength >= 0) {
+                                contentLength
+                            } else {
+                                try {
+                                    response.peekBody(Long.MAX_VALUE).bytes().size.toLong()
+                                } catch (_: Exception) {
+                                    -1L
+                                }
+                            }
+                            if (binarySize >= 0) {
+                                JsonObject(mapOf("_tracy_binary_size" to JsonPrimitive(binarySize)))
+                            } else {
+                                JsonObject(emptyMap())
+                            }
                         }
                     }
 

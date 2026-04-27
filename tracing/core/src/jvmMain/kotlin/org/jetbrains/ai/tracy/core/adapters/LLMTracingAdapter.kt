@@ -72,6 +72,13 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             span.setAttribute("http.response.status_code", response.code.toLong())
             span.setAttribute("http.status_code", response.code.toLong())
 
+            // Always capture error status and attributes before any early return so that
+            // non-JSON / absent response bodies still produce a fully-attributed error span.
+            if (response.isError()) {
+                getResponseErrorBodyAttributes(span, response.body)
+                span.setStatus(StatusCode.ERROR)
+            }
+
             val body = response.body.asJson()?.jsonObject ?: return
             val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
             val mimeType = response.contentType?.mimeType
@@ -92,10 +99,7 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
                 }
             }
 
-            if (response.isError()) {
-                getResponseErrorBodyAttributes(span, response.body)
-                span.setStatus(StatusCode.ERROR)
-            } else {
+            if (!response.isError()) {
                 span.setStatus(StatusCode.OK)
             }
 
