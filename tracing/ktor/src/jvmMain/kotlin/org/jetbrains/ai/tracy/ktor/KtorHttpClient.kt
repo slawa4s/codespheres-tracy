@@ -19,6 +19,7 @@ import io.ktor.client.utils.*
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.util.*
+import io.ktor.util.reflect.TypeInfo
 import io.ktor.utils.io.*
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
@@ -250,58 +251,67 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
             }
 
             transformResponseBody { response, content, typeInfo ->
-                val enabled = response.call.request.attributes[tracingEnabledKey]
-                if (!enabled) return@transformResponseBody null
-
-                val isStreamingRequest = response.call.request.attributes.getOrNull(isStreamingRequestKey)
-                    ?: return@transformResponseBody null
-                val span = response.call.request.attributes.getOrNull(httpSpanKey)
-                    ?: return@transformResponseBody null
-
-                if (!isStreamingRequest) {
-                    return@transformResponseBody null
-                }
-
-                val body = JsonObject(mapOf("stream" to JsonPrimitive(true)))
-                // registering response attributes into span
-                adapter.registerResponse(span, response = response.asResponseView(body))
-
-                val originalBody: ByteReadChannel = content
-                val tracingChannel = ByteChannel(autoFlush = true)
-                val capturedText = StringBuilder()
-
-                CoroutineScope(response.coroutineContext).launch(start = CoroutineStart.UNDISPATCHED) {
-                    try {
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        while (!originalBody.isClosedForRead) {
-                            val bytesRead = originalBody.readAvailable(buffer, 0, buffer.size)
-                            if (bytesRead == -1) break
-                            if (bytesRead > 0) {
-                                capturedText.append(buffer.decodeToString(0, bytesRead))
-                                tracingChannel.writeFully(buffer, 0, bytesRead)
-                                tracingChannel.flush()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        span.setStatus(StatusCode.ERROR)
-                        span.recordException(e)
-                        if (!tracingChannel.isClosedForWrite) tracingChannel.close(e)
-                    } finally {
-                        try {
-                            adapter.handleStreaming(
-                                span = span,
-                                url = response.request.url.toProtocolUrl(),
-                                events = capturedText.toString()
-                            )
-                        } finally {
-                            span.end()
-                            if (!tracingChannel.isClosedForWrite) tracingChannel.close()
-                        }
-                    }
-                }
-                if (typeInfo.type != ByteReadChannel::class) null else tracingChannel
+                interceptStreamingBody(response, content, typeInfo)
             }
         })
+    }
+
+    @OptIn(InternalAPI::class)
+    private suspend fun interceptStreamingBody(
+        response: HttpResponse,
+        content: ByteReadChannel,
+        typeInfo: TypeInfo,
+    ): Any? {
+        val enabled = response.call.request.attributes[tracingEnabledKey]
+        if (!enabled) return null
+
+        val isStreamingRequest = response.call.request.attributes.getOrNull(isStreamingRequestKey)
+            ?: return null
+        val span = response.call.request.attributes.getOrNull(httpSpanKey)
+            ?: return null
+
+        if (!isStreamingRequest) return null
+
+        if (typeInfo.type != ByteReadChannel::class) return null
+
+        val body = JsonObject(mapOf("stream" to JsonPrimitive(true)))
+        // registering response attributes into span
+        adapter.registerResponse(span, response = response.asResponseView(body))
+
+        val originalBody: ByteReadChannel = content
+        val tracingChannel = ByteChannel(autoFlush = true)
+        val capturedText = StringBuilder()
+
+        CoroutineScope(response.coroutineContext).launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (!originalBody.isClosedForRead) {
+                    val bytesRead = originalBody.readAvailable(buffer, 0, buffer.size)
+                    if (bytesRead == -1) break
+                    if (bytesRead > 0) {
+                        capturedText.append(buffer.decodeToString(0, bytesRead))
+                        tracingChannel.writeFully(buffer, 0, bytesRead)
+                        tracingChannel.flush()
+                    }
+                }
+            } catch (e: Exception) {
+                span.setStatus(StatusCode.ERROR)
+                span.recordException(e)
+                if (!tracingChannel.isClosedForWrite) tracingChannel.close(e)
+            } finally {
+                try {
+                    adapter.handleStreaming(
+                        span = span,
+                        url = response.request.url.toProtocolUrl(),
+                        events = capturedText.toString()
+                    )
+                } finally {
+                    span.end()
+                    if (!tracingChannel.isClosedForWrite) tracingChannel.close()
+                }
+            }
+        }
+        return tracingChannel
     }
 
     private fun HttpResponse.asResponseView(body: JsonObject): TracyHttpResponse = TracyHttpResponseView(response = this, body)
@@ -348,10 +358,7 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
 
         val bodyType = this.bodyType?.type
         return when {
-            bodyType != null && bodyType.hasAnnotation<Serializable>() -> {
-                serializeToJson(body)?.toByteArray()
-            }
-
+            bodyType != null -> serializeToJson(body)?.toByteArray()
             else -> null
         }
     }
