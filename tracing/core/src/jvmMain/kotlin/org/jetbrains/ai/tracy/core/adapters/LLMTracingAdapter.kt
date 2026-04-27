@@ -75,7 +75,7 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             // Always capture error status and attributes before any early return so that
             // non-JSON / absent response bodies still produce a fully-attributed error span.
             if (response.isError()) {
-                getResponseErrorBodyAttributes(span, response.body)
+                getResponseErrorBodyAttributes(span, response)
                 span.setStatus(StatusCode.ERROR)
             }
 
@@ -116,8 +116,8 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             span.recordException(exception)
         }
 
-    protected open fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
-        body.asJson()?.jsonObject["error"]?.jsonObject?.let { error ->
+    protected open fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
+        response.body.asJson()?.jsonObject?.get("error")?.jsonObject?.let { error ->
             error["message"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.message", it.content) }
             error["type"]?.jsonPrimitive?.let {
                 span.setAttribute("gen_ai.error.type", it.content)

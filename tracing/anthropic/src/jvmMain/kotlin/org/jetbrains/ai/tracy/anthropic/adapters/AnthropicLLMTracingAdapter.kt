@@ -53,9 +53,36 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         val apiType = listApiTypes.firstOrNull { it in request.url.pathSegments }
         if (apiType != null) {
             span.setAttribute("anthropic.api.type", apiType)
-            when {
-                request.method == "GET" -> span.setAttribute("gen_ai.operation.name", "list")
-                apiType == "batches" && request.method == "POST" -> span.setAttribute("gen_ai.operation.name", "create")
+            val apiTypeIndex = request.url.pathSegments.indexOf(apiType)
+            val trailingSegments = request.url.pathSegments.drop(apiTypeIndex + 1).filter { it.isNotEmpty() }
+            when (apiType) {
+                "batches" -> when {
+                    request.method == "POST" && trailingSegments.isEmpty() -> {
+                        span.setAttribute("gen_ai.operation.name", "create")
+                        (request.body.asJson()?.jsonObject?.get("requests") as? JsonArray)?.size?.let {
+                            span.setAttribute("gen_ai.request.batch.size", it.toLong())
+                        }
+                    }
+                    request.method == "GET" && trailingSegments.isEmpty() ->
+                        span.setAttribute("gen_ai.operation.name", "list")
+                    request.method == "GET" ->
+                        span.setAttribute("gen_ai.operation.name", "retrieve")
+                    request.method == "POST" && "cancel" in trailingSegments ->
+                        span.setAttribute("gen_ai.operation.name", "cancel")
+                }
+                "models" -> {
+                    val modelId = trailingSegments.firstOrNull()
+                    if (modelId != null) {
+                        span.setAttribute("gen_ai.operation.name", "retrieve")
+                        span.setAttribute(GEN_AI_REQUEST_MODEL, modelId)
+                    } else {
+                        span.setAttribute("gen_ai.operation.name", "list")
+                    }
+                }
+                else -> when {
+                    request.method == "GET" -> span.setAttribute("gen_ai.operation.name", "list")
+                    request.method == "POST" -> span.setAttribute("gen_ai.operation.name", "create")
+                }
             }
             return
         }
@@ -142,6 +169,68 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
+
+        if (body["type"]?.jsonPrimitive?.contentOrNull == "message_batch") {
+            body["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("gen_ai.response.batch.id", it) }
+            body["processing_status"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.processing_status", it)
+            }
+            body["created_at"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.created_at", it)
+            }
+            body["expires_at"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.expires_at", it)
+            }
+            body["request_counts"]?.jsonObject?.let { counts ->
+                counts["processing"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.processing", it.toLong())
+                }
+                counts["succeeded"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it.toLong())
+                }
+                counts["errored"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.errored", it.toLong())
+                }
+                counts["canceled"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.canceled", it.toLong())
+                }
+                counts["expired"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.expired", it.toLong())
+                }
+            }
+            return
+        }
+
+        if (body["type"]?.jsonPrimitive?.contentOrNull == "model") {
+            body["id"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                span.setAttribute("gen_ai.response.model.id", it)
+            }
+            body["display_name"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("gen_ai.response.model.display_name", it)
+            }
+            body["created_at"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("gen_ai.response.model.created_at", it)
+            }
+            body["max_input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_input_tokens", it.toLong())
+            }
+            body["max_output_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_output_tokens", it.toLong())
+            }
+            body["capabilities"]?.jsonObject?.let { caps ->
+                caps["batch"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.capabilities.batch", it)
+                }
+                caps["citations"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.capabilities.citations", it)
+                }
+                caps["vision"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.capabilities.vision", it)
+                }
+            }
+            return
+        }
 
         val dataArray = body["data"] as? JsonArray
         if (dataArray != null) {
@@ -287,6 +376,15 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         inputTokens?.let { span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it) }
         outputTokens?.let { span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it) }
         stopReason?.let { span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, listOf(it)) }
+    }
+
+    override fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
+        super.getResponseErrorBodyAttributes(span, response)
+        val apiType = listOf("batches", "files", "models", "messages")
+            .firstOrNull { it in response.url.pathSegments }
+        if (apiType != null) {
+            span.setAttribute("anthropic.api.type", apiType)
+        }
     }
 
     /**
