@@ -235,7 +235,7 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
                             buffer.write(peeked, peeked.buffer.size)
                             buffer.readString()
                         }
-                        Json.parseToJsonElement(body).jsonObject
+                        JSON_CONFIG.parseToJsonElement(body).jsonObject
                     } catch (err: Exception) {
                         logger.trace("Error while parsing response body", err)
                         JsonObject(emptyMap())
