@@ -156,9 +156,6 @@ fun instrument(client: HttpClient, adapter: LLMTracingAdapter): HttpClient {
 }
 
 private class TracingPlugin(private val adapter: LLMTracingAdapter) {
-    private val httpSpanKey = AttributeKey<Span>("HttpSpanKey")
-    private val tracingEnabledKey = AttributeKey<Boolean>("TracingEnabledKey")
-    private val isStreamingRequestKey = AttributeKey<Boolean>("IsStreamingRequestKey")
 
     @OptIn(InternalAPI::class, InternalIoApi::class)
     fun setup(config: HttpClientConfig<*>) {
@@ -363,5 +360,9 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
             ignoreUnknownKeys = true
             encodeDefaults = true
         }
+
+        private val httpSpanKey = AttributeKey<Span>("HttpSpanKey")
+        private val tracingEnabledKey = AttributeKey<Boolean>("TracingEnabledKey")
+        private val isStreamingRequestKey = AttributeKey<Boolean>("IsStreamingRequestKey")
     }
 }
