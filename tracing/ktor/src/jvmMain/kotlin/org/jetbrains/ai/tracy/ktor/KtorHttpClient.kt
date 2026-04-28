@@ -211,14 +211,8 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
             }
 
             onResponse { response ->
-                val enabled = response.call.request.attributes[tracingEnabledKey]
-                if (!enabled) return@onResponse
-                val isStreamingRequest = response.call.request.attributes.getOrNull(isStreamingRequestKey)
-                    ?: return@onResponse
-                val span = response.call.request.attributes.getOrNull(httpSpanKey)
-                    ?: return@onResponse
-                if (isStreamingRequest) return@onResponse
-
+                val ctx = response.spanContext() ?: return@onResponse
+                if (ctx.isStreaming) return@onResponse
 
                 // when the content type is `application/json`, we decode the response body;
                 // otherwise, (e.g., when the body is binary), we pass an empty JSON object as the response body.
@@ -245,26 +239,17 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
                     }
                 }
 
-                adapter.registerResponse(span, response = response.asResponseView(responseBody))
-                span.end()
+                adapter.registerResponse(ctx.span, response = response.asResponseView(responseBody))
+                ctx.span.end()
             }
 
             transformResponseBody { response, content, typeInfo ->
-                val enabled = response.call.request.attributes[tracingEnabledKey]
-                if (!enabled) return@transformResponseBody null
-
-                val isStreamingRequest = response.call.request.attributes.getOrNull(isStreamingRequestKey)
-                    ?: return@transformResponseBody null
-                val span = response.call.request.attributes.getOrNull(httpSpanKey)
-                    ?: return@transformResponseBody null
-
-                if (!isStreamingRequest) {
-                    return@transformResponseBody null
-                }
+                val ctx = response.spanContext() ?: return@transformResponseBody null
+                if (!ctx.isStreaming) return@transformResponseBody null
 
                 val body = JsonObject(mapOf("stream" to JsonPrimitive(true)))
                 // registering response attributes into span
-                adapter.registerResponse(span, response = response.asResponseView(body))
+                adapter.registerResponse(ctx.span, response = response.asResponseView(body))
 
                 val originalBody: ByteReadChannel = content
                 val tracingChannel = ByteChannel(autoFlush = true)
@@ -283,18 +268,18 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
                             }
                         }
                     } catch (e: Exception) {
-                        span.setStatus(StatusCode.ERROR)
-                        span.recordException(e)
+                        ctx.span.setStatus(StatusCode.ERROR)
+                        ctx.span.recordException(e)
                         if (!tracingChannel.isClosedForWrite) tracingChannel.close(e)
                     } finally {
                         try {
                             adapter.handleStreaming(
-                                span = span,
+                                span = ctx.span,
                                 url = response.request.url.toProtocolUrl(),
                                 events = capturedText.toString()
                             )
                         } finally {
-                            span.end()
+                            ctx.span.end()
                             if (!tracingChannel.isClosedForWrite) tracingChannel.close()
                         }
                     }
@@ -302,6 +287,16 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
                 if (typeInfo.type != ByteReadChannel::class) null else tracingChannel
             }
         })
+    }
+
+    private data class SpanContext(val isStreaming: Boolean, val span: Span)
+
+    private fun HttpResponse.spanContext(): SpanContext? {
+        val enabled = call.request.attributes[tracingEnabledKey]
+        if (!enabled) return null
+        val isStreaming = call.request.attributes.getOrNull(isStreamingRequestKey) ?: return null
+        val span = call.request.attributes.getOrNull(httpSpanKey) ?: return null
+        return SpanContext(isStreaming, span)
     }
 
     private fun HttpResponse.asResponseView(body: JsonObject): TracyHttpResponse = TracyHttpResponseView(response = this, body)
