@@ -305,7 +305,6 @@ class OpenTelemetryOkHttpInterceptor(
                         } catch (e: Exception) {
                             span.setStatus(StatusCode.ERROR)
                             span.recordException(e)
-                            span.end()
                             throw e
                         }
 
