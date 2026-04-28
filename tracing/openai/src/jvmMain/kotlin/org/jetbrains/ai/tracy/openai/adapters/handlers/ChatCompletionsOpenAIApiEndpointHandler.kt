@@ -184,10 +184,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                         }
                     }
 
-                    span.setAttribute(
-                        "gen_ai.completion.$index.annotations",
-                        message.jsonObject["annotations"].toString()
-                    )
+                    message.jsonObject["annotations"]?.let {
+                        span.setAttribute("gen_ai.completion.$index.annotations", it.toString())
+                    }
                 }
             }
         }
@@ -201,6 +200,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var usageObject: JsonObject? = null
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -211,6 +211,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                 val event = runCatching {
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
+
+                // capture top-level usage when present (final SSE chunk)
+                event["usage"]?.jsonObject?.let { usageObject = it }
 
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
                 val delta = choice["delta"]?.jsonObject ?: continue
@@ -227,6 +230,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        usageObject?.let { setUsageAttributes(span, it) }
 
         return@runCatching
     }.getOrElse { exception ->
