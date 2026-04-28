@@ -138,7 +138,6 @@ internal class ResponsesOpenAIApiEndpointHandler(
      */
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
@@ -229,11 +228,26 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 Json.parseToJsonElement(data).jsonObject
             }.getOrNull() ?: continue
 
-            val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            when (event["type"]?.jsonPrimitive?.content) {
+                "response.output_text.done" -> {
+                    event["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
+                        span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+                    }
+                }
+                "response.function_call_arguments.done" -> {
+                    val outputIndex = event["output_index"]?.jsonPrimitive?.intOrNull ?: 0
+                    event["call_id"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute("gen_ai.completion.$outputIndex.tool_call_id", it)
+                    }
+                    event["arguments"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute("gen_ai.completion.$outputIndex.tool_arguments", it.orRedactedOutput())
+                    }
+                }
+                "response.completed" -> {
+                    event["response"]?.jsonObject?.get("usage")?.jsonObject?.let { usage ->
+                        setUsageAttributes(span, usage)
+                    }
                 }
             }
         }
