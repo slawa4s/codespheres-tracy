@@ -23,6 +23,7 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.Json
@@ -201,6 +202,10 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var responseModel: String? = null
+        var finishReason: String? = null
+        val toolCallsById = mutableMapOf<Int, MutableMap<String, StringBuilder>>()
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -212,21 +217,89 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
+                // Extract response model from the first chunk that has a non-null model field
+                if (responseModel == null) {
+                    val model = event["model"]?.jsonPrimitive?.content
+                    if (model != null && model != "null") {
+                        responseModel = model
+                    }
+                }
+
+                // Parse usage from any chunk that contains it (present when stream_options.include_usage=true)
+                event["usage"]?.let { usage ->
+                    if (usage is JsonObject) {
+                        setUsageAttributes(span, usage)
+                    }
+                }
+
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
                     role = delta["role"]?.jsonPrimitive?.content
                 }
+
+                // Track the last non-null finish_reason
+                val frContent = choice["finish_reason"]?.jsonPrimitive?.content
+                if (frContent != null && frContent != "null" && frContent.isNotBlank()) {
+                    finishReason = frContent
+                }
+
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+
+                // Accumulate streaming tool call deltas keyed by tool call index
+                delta["tool_calls"]?.let { toolCallsElement ->
+                    if (toolCallsElement is JsonArray) {
+                        for (toolCallDelta in toolCallsElement) {
+                            val tcObj = toolCallDelta.jsonObject
+                            val tcIndex = tcObj["index"]?.jsonPrimitive?.intOrNull
+                            if (tcIndex != null) {
+                                val tc = toolCallsById.getOrPut(tcIndex) { mutableMapOf() }
+                                tcObj["id"]?.jsonPrimitive?.content?.let { id ->
+                                    tc.getOrPut("id") { StringBuilder() }.append(id)
+                                }
+                                tcObj["type"]?.jsonPrimitive?.content?.let { type ->
+                                    tc.getOrPut("type") { StringBuilder() }.append(type)
+                                }
+                                tcObj["function"]?.jsonObject?.let { fn ->
+                                    fn["name"]?.jsonPrimitive?.content?.let { name ->
+                                        tc.getOrPut("name") { StringBuilder() }.append(name)
+                                    }
+                                    fn["arguments"]?.jsonPrimitive?.content?.let { args ->
+                                        tc.getOrPut("arguments") { StringBuilder() }.append(args)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
 
         if (out.isNotEmpty()) {
             val kind = kindByRole(role)
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+
+        // Set accumulated tool call attributes after streaming completes
+        for ((toolCallIndex, tc) in toolCallsById) {
+            tc["id"]?.toString()?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.call.id", it)
+            }
+            tc["type"]?.toString()?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.call.type", it)
+            }
+            tc["name"]?.toString()?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.name", it.orRedactedOutput())
+            }
+            tc["arguments"]?.toString()?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.arguments", it.orRedactedOutput())
+            }
+        }
 
         return@runCatching
     }.getOrElse { exception ->
@@ -325,6 +398,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     // https://platform.openai.com/docs/api-reference/chat/object
     private val mappedResponseAttributes: List<String> = listOf(
+        "id",
+        "object",
+        "model",
         "choices",
         "usage"
     )
