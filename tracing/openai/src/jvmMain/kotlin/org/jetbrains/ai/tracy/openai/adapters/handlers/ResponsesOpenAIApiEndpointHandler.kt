@@ -71,7 +71,11 @@ internal class ResponsesOpenAIApiEndpointHandler(
 
         // because of inserting instructions property as the first prompt,
         // other input properties will have a position shifted by one
-        val instructionsInsertedAsFirstPrompt: Boolean = body["instructions"]?.jsonPrimitive?.contentOrNull?.let {
+        val instructionsInsertedAsFirstPrompt: Boolean = when (val instr = body["instructions"]) {
+            is JsonPrimitive -> instr.contentOrNull
+            is JsonArray -> instr.toString()
+            else -> null
+        }?.let {
             span.setAttribute("gen_ai.prompt.0.content", it.orRedactedInput())
             span.setAttribute("gen_ai.prompt.0.role", "system")
             true
@@ -138,7 +142,6 @@ internal class ResponsesOpenAIApiEndpointHandler(
      */
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
@@ -170,7 +173,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
                                 message["text"]?.jsonPrimitive?.content?.let {
                                     span.setAttribute(
                                         "gen_ai.completion.$index.content",
-                                        it
+                                        it.orRedactedOutput()
                                     )
                                 }
                                 message["annotations"]?.let {

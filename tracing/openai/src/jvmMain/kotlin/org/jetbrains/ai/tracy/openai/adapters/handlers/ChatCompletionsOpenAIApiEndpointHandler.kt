@@ -184,10 +184,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                         }
                     }
 
-                    span.setAttribute(
-                        "gen_ai.completion.$index.annotations",
-                        message.jsonObject["annotations"].toString()
-                    )
+                    message.jsonObject["annotations"]?.let {
+                        span.setAttribute("gen_ai.completion.$index.annotations", it.toString())
+                    }
                 }
             }
         }
@@ -211,6 +210,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                 val event = runCatching {
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
+
+                // The final SSE chunk from OpenAI includes a top-level `usage` field
+                event["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
 
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
                 val delta = choice["delta"]?.jsonObject ?: continue
