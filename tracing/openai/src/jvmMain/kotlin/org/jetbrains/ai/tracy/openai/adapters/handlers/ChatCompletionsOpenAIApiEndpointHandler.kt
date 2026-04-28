@@ -135,6 +135,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
+        OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
         body["choices"]?.let { choices ->
             for ((index, choice) in choices.jsonArray.withIndex()) {
@@ -201,6 +202,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var lastFinishReason: String? = null
+        val toolCalls = mutableMapOf<Int, ToolCallAccumulator>()
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -212,13 +215,35 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
+                // Handle usage chunk emitted when stream_options.include_usage=true
+                (event["usage"] as? JsonObject)?.let { usage ->
+                    setUsageAttributes(span, usage)
+                }
+
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
                 val delta = choice["delta"]?.jsonObject ?: continue
+
+                // Capture last non-null finish_reason
+                (choice["finish_reason"] as? JsonPrimitive)?.content?.let { lastFinishReason = it }
 
                 if (role == null) {
                     role = delta["role"]?.jsonPrimitive?.content
                 }
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+
+                // Accumulate tool_calls deltas by index
+                (delta["tool_calls"] as? JsonArray)?.let { toolCallDeltas ->
+                    for (toolCallDelta in toolCallDeltas) {
+                        val index = toolCallDelta.jsonObject["index"]?.jsonPrimitive?.intOrNull ?: continue
+                        val acc = toolCalls.getOrPut(index) { ToolCallAccumulator() }
+                        (toolCallDelta.jsonObject["id"] as? JsonPrimitive)?.content?.let { acc.id = it }
+                        (toolCallDelta.jsonObject["type"] as? JsonPrimitive)?.content?.let { acc.type = it }
+                        (toolCallDelta.jsonObject["function"] as? JsonObject)?.let { fn ->
+                            (fn["name"] as? JsonPrimitive)?.content?.let { acc.name = it }
+                            (fn["arguments"] as? JsonPrimitive)?.content?.let { acc.arguments.append(it) }
+                        }
+                    }
+                }
             }
         }
 
@@ -227,11 +252,30 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        lastFinishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+
+        // Write accumulated tool-call attributes
+        for ((toolIndex, acc) in toolCalls) {
+            acc.id?.let { span.setAttribute("gen_ai.completion.0.tool.$toolIndex.call.id", it) }
+            acc.type?.let { span.setAttribute("gen_ai.completion.0.tool.$toolIndex.call.type", it) }
+            acc.name?.let { span.setAttribute("gen_ai.completion.0.tool.$toolIndex.name", it.orRedactedOutput()) }
+            val args = acc.arguments.toString()
+            if (args.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$toolIndex.arguments", args.orRedactedOutput())
+            }
+        }
 
         return@runCatching
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
         span.recordException(exception)
+    }
+
+    private class ToolCallAccumulator {
+        var id: String? = null
+        var type: String? = null
+        var name: String? = null
+        val arguments = StringBuilder()
     }
 
     /**
@@ -326,7 +370,11 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     // https://platform.openai.com/docs/api-reference/chat/object
     private val mappedResponseAttributes: List<String> = listOf(
         "choices",
-        "usage"
+        "usage",
+        // parsed by `OpenAIApiUtils.setCommonResponseAttributes`
+        "id",
+        "object",
+        "model"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes

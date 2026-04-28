@@ -229,11 +229,26 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 Json.parseToJsonElement(data).jsonObject
             }.getOrNull() ?: continue
 
-            val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            when (event["type"]?.jsonPrimitive?.content) {
+                "response.output_text.done" -> {
+                    event["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
+                        span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+                    }
+                }
+                "response.output_item.added" -> {
+                    (event["item"] as? JsonObject)?.let { item ->
+                        item["role"]?.jsonPrimitive?.content?.let {
+                            span.setAttribute("gen_ai.completion.0.role", it)
+                        }
+                    }
+                }
+                "response.completed" -> {
+                    (event["response"] as? JsonObject)?.let { response ->
+                        (response["usage"] as? JsonObject)?.let { usage ->
+                            setUsageAttributes(span, usage)
+                        }
+                    }
                 }
             }
         }
