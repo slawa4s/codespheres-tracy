@@ -156,9 +156,6 @@ fun instrument(client: HttpClient, adapter: LLMTracingAdapter): HttpClient {
 }
 
 private class TracingPlugin(private val adapter: LLMTracingAdapter) {
-    private val httpSpanKey = AttributeKey<Span>("HttpSpanKey")
-    private val tracingEnabledKey = AttributeKey<Boolean>("TracingEnabledKey")
-    private val isStreamingRequestKey = AttributeKey<Boolean>("IsStreamingRequestKey")
 
     @OptIn(InternalAPI::class, InternalIoApi::class)
     fun setup(config: HttpClientConfig<*>) {
@@ -173,7 +170,7 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
                     return@onRequest
                 }
 
-                val span = tracer.spanBuilder("http-client-span").startSpan()
+                val span = tracer.spanBuilder(HTTP_CLIENT_SPAN_NAME).startSpan()
 
                 span.makeCurrent().use {
                     request.attributes.put(httpSpanKey, span)
@@ -357,6 +354,11 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
     }
 
     companion object {
+        const val HTTP_CLIENT_SPAN_NAME = "http-client-span"
+        val httpSpanKey = AttributeKey<Span>("HttpSpanKey")
+        val tracingEnabledKey = AttributeKey<Boolean>("TracingEnabledKey")
+        val isStreamingRequestKey = AttributeKey<Boolean>("IsStreamingRequestKey")
+
         private val logger = KotlinLogging.logger {}
 
         private val JSON_CONFIG = Json {
