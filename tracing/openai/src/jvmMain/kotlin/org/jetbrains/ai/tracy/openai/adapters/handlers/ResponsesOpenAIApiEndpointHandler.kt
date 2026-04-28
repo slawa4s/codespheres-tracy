@@ -138,7 +138,6 @@ internal class ResponsesOpenAIApiEndpointHandler(
      */
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
@@ -221,6 +220,10 @@ internal class ResponsesOpenAIApiEndpointHandler(
     }
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
+        // Tracks function-call names keyed by output_index so they are available
+        // when response.function_call_arguments.done fires (which carries no name).
+        val functionCallNames = mutableMapOf<Int, String>()
+
         for (line in events.lineSequence()) {
             if (!line.startsWith("data:")) continue
             val data = line.removePrefix("data:").trim()
@@ -229,11 +232,40 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 Json.parseToJsonElement(data).jsonObject
             }.getOrNull() ?: continue
 
-            val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            when (event["type"]?.jsonPrimitive?.content) {
+                "response.output_text.done" -> {
+                    event["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
+                        span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+                    }
+                }
+                "response.output_item.added" -> {
+                    // Capture function-call name so it is available when arguments.done fires.
+                    val item = event["item"]?.jsonObject
+                    if (item?.get("type")?.jsonPrimitive?.contentOrNull == "function_call") {
+                        val outputIndex = event["output_index"]?.jsonPrimitive?.intOrNull
+                        val name = item["name"]?.jsonPrimitive?.contentOrNull
+                        if (outputIndex != null && name != null) {
+                            functionCallNames[outputIndex] = name
+                        }
+                    }
+                }
+                "response.function_call_arguments.done" -> {
+                    val outputIndex = event["output_index"]?.jsonPrimitive?.intOrNull ?: 0
+                    val name = functionCallNames[outputIndex]
+                    val arguments = event["arguments"]?.jsonPrimitive?.contentOrNull
+                    name?.let {
+                        span.setAttribute("gen_ai.completion.$outputIndex.tool_name", it.orRedactedOutput())
+                    }
+                    arguments?.let {
+                        span.setAttribute("gen_ai.completion.$outputIndex.tool_arguments", it.orRedactedOutput())
+                    }
+                    span.setAttribute("gen_ai.completion.$outputIndex.finish_reason", "tool_calls")
+                }
+                "response.completed" -> {
+                    event["response"]?.jsonObject?.get("usage")?.jsonObject?.let { usage ->
+                        setUsageAttributes(span, usage)
+                    }
                 }
             }
         }
