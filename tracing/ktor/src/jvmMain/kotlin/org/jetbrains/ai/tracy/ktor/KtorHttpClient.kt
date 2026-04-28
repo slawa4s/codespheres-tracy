@@ -347,12 +347,10 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
         }
 
         val bodyType = this.bodyType?.type
-        return when {
-            bodyType != null && bodyType.hasAnnotation<Serializable>() -> {
-                serializeToJson(body)?.toByteArray()
-            }
-
-            else -> null
+        return if (bodyType != null) {
+            serializeToJson(body)?.toByteArray()
+        } else {
+            null
         }
     }
 
