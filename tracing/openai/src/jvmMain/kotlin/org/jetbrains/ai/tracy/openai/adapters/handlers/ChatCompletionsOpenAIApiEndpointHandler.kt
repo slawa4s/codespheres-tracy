@@ -235,7 +235,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     }
 
     /**
-     * Sets usage attributes (prompt_tokens/completion_tokens)
+     * Sets usage attributes (prompt_tokens/completion_tokens/cached_tokens)
      */
     private fun setUsageAttributes(span: Span, usage: JsonObject) {
         usage["prompt_tokens"]?.jsonPrimitive?.intOrNull?.let {
@@ -243,6 +243,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         }
         usage["completion_tokens"]?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+        }
+        usage["prompt_tokens_details"]?.jsonObject?.get("cached_tokens")?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
         }
     }
 
