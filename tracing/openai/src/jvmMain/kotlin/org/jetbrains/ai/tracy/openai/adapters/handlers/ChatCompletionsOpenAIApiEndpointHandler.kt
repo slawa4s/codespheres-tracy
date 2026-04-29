@@ -201,6 +201,14 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
+
+        // Per-tool-call-index accumulators; OpenAI streaming uses `index` to identify each call.
+        val toolCallIds = mutableMapOf<Int, String>()
+        val toolCallTypes = mutableMapOf<Int, String>()
+        val toolCallNames = mutableMapOf<Int, String>()
+        val toolCallArgBuilders = mutableMapOf<Int, StringBuilder>()
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -219,6 +227,29 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     role = delta["role"]?.jsonPrimitive?.content
                 }
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+
+                choice["finish_reason"]?.jsonPrimitive?.content?.let { finishReason = it }
+
+                // Accumulate tool_call deltas across SSE events.
+                val toolCallDeltas = delta["tool_calls"]
+                if (toolCallDeltas is JsonArray) {
+                    for (toolCallDelta in toolCallDeltas) {
+                        val tcObj = toolCallDelta.jsonObject
+                        val toolIndex = tcObj["index"]?.jsonPrimitive?.intOrNull ?: continue
+
+                        tcObj["id"]?.jsonPrimitive?.content?.let { toolCallIds[toolIndex] = it }
+                        tcObj["type"]?.jsonPrimitive?.content?.let { toolCallTypes[toolIndex] = it }
+
+                        tcObj["function"]?.jsonObject?.let { fn ->
+                            fn["name"]?.jsonPrimitive?.content?.let { name ->
+                                toolCallNames[toolIndex] = (toolCallNames[toolIndex] ?: "") + name
+                            }
+                            fn["arguments"]?.jsonPrimitive?.content?.let { args ->
+                                toolCallArgBuilders.getOrPut(toolIndex) { StringBuilder() }.append(args)
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -227,6 +258,25 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+
+        // Emit accumulated tool call attributes once streaming is complete.
+        val allToolIndices = (toolCallIds.keys + toolCallTypes.keys + toolCallNames.keys + toolCallArgBuilders.keys)
+            .toSortedSet()
+        for (toolIndex in allToolIndices) {
+            toolCallIds[toolIndex]?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolIndex.call.id", it)
+            }
+            toolCallTypes[toolIndex]?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolIndex.call.type", it)
+            }
+            toolCallNames[toolIndex]?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolIndex.name", it.orRedactedOutput())
+            }
+            toolCallArgBuilders[toolIndex]?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolIndex.arguments", it.toString().orRedactedOutput())
+            }
+        }
 
         return@runCatching
     }.getOrElse { exception ->
@@ -251,9 +301,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
      */
     private fun kindByRole(role: String?): ContentKind = when (role) {
         // role may be:
-        //   1. input: developer/system/user
-        "developer", "system", "user" -> ContentKind.INPUT
-        //   2. output: assistant/tool/function
+        //   1. input: developer/system/user/tool (tool messages carry tool-execution results sent back to the model)
+        "developer", "system", "user", "tool" -> ContentKind.INPUT
+        //   2. output: assistant/function
         else -> ContentKind.OUTPUT
     }
 
@@ -320,13 +370,22 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "model",
         "tools",
         "choices",
-        "temperature"
+        "temperature",
+        "max_tokens",
+        "top_p",
+        "stream",
+        "n"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
     private val mappedResponseAttributes: List<String> = listOf(
         "choices",
-        "usage"
+        "usage",
+        "id",
+        "model",
+        "object",
+        "created",
+        "system_fingerprint"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
