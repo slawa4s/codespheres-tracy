@@ -18,13 +18,26 @@ import kotlinx.serialization.json.*
 internal object OpenAIApiUtils {
 
     /**
-     * Sets common request attributes (temperature, model)
+     * Sets common request attributes (temperature, model, top_p, max_tokens, frequency_penalty, presence_penalty).
+     *
+     * Handles field name variations across API versions:
+     * - max tokens: `max_completion_tokens` (newer Chat API) / `max_tokens` (legacy Chat API) / `max_output_tokens` (Responses API)
      */
     fun setCommonRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it.jsonPrimitive.doubleOrNull) }
         body["model"]?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it.jsonPrimitive.content) }
+        body["top_p"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_P, it) }
+        // Prefer max_completion_tokens (newer), fall back to max_tokens (legacy) or max_output_tokens (Responses API)
+        (body["max_completion_tokens"] ?: body["max_tokens"] ?: body["max_output_tokens"])
+            ?.jsonPrimitive?.longOrNull?.let { span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it) }
+        body["frequency_penalty"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_FREQUENCY_PENALTY, it)
+        }
+        body["presence_penalty"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_PRESENCE_PENALTY, it)
+        }
     }
 
     /**

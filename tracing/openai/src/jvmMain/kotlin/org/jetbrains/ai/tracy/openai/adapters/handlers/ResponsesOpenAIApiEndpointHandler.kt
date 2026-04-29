@@ -37,12 +37,6 @@ internal class ResponsesOpenAIApiEndpointHandler(
         body["store"]?.jsonPrimitive?.booleanOrNull?.let {
             span.setAttribute("gen_ai.request.store", it)
         }
-        body["top_p"]?.jsonPrimitive?.doubleOrNull?.let {
-            span.setAttribute(GEN_AI_REQUEST_TOP_P, it)
-        }
-        body["max_output_tokens"]?.jsonPrimitive?.longOrNull?.let {
-            span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it)
-        }
         body["truncation"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.truncation", it)
         }
@@ -406,6 +400,8 @@ internal class ResponsesOpenAIApiEndpointHandler(
         "store",
         "top_p",
         "max_output_tokens",
+        "frequency_penalty",
+        "presence_penalty",
         "truncation",
         "parallel_tool_calls",
         "stream",
