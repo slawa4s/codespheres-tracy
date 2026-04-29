@@ -30,6 +30,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -111,6 +113,16 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                 else -> return@let
             }
             span.setAttribute(GEN_AI_REQUEST_STOP_SEQUENCES, stopSequences)
+        }
+        body["tool_choice"]?.let {
+            val content = when (it) {
+                is JsonPrimitive -> it.content
+                else -> it.toString()
+            }
+            span.setAttribute("gen_ai.request.tool_choice", content)
+        }
+        body["parallel_tool_calls"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("gen_ai.request.parallel_tool_calls", it)
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.REQUEST)
@@ -224,6 +236,13 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
+
+        // Accumulate partial tool call data keyed by the index reported in each delta chunk.
+        val toolCallIds = mutableMapOf<Int, String>()
+        val toolCallNames = mutableMapOf<Int, StringBuilder>()
+        val toolCallArgs = mutableMapOf<Int, StringBuilder>()
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -235,13 +254,47 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
-                val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+                val choices = event["choices"]?.jsonArray
+                if (choices == null || choices.isEmpty()) {
+                    // Usage-only event emitted when stream_options.include_usage is true
+                    event["usage"]?.jsonObject?.let { usage ->
+                        setUsageAttributes(span, usage)
+                    }
+                    continue
+                }
+
+                val choice = choices.firstOrNull()?.jsonObject ?: continue
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
                     role = delta["role"]?.jsonPrimitive?.content
                 }
+
+                // Track finish_reason; last non-null value from any chunk wins
+                choice["finish_reason"]?.jsonPrimitive?.contentOrNull?.let {
+                    finishReason = it
+                }
+
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+
+                // Accumulate tool_calls deltas across chunks
+                delta["tool_calls"]?.let { toolCallsJson ->
+                    if (toolCallsJson is JsonArray) {
+                        for (toolCallChunk in toolCallsJson) {
+                            val tcObj = toolCallChunk.jsonObject
+                            val tcIndex = tcObj["index"]?.jsonPrimitive?.intOrNull ?: continue
+                            tcObj["id"]?.jsonPrimitive?.contentOrNull?.let { toolCallIds[tcIndex] = it }
+                            tcObj["function"]?.jsonObject?.let { fn ->
+                                fn["name"]?.jsonPrimitive?.contentOrNull?.let {
+                                    toolCallNames.getOrPut(tcIndex) { StringBuilder() }.append(it)
+                                }
+                                fn["arguments"]?.jsonPrimitive?.contentOrNull?.let {
+                                    toolCallArgs.getOrPut(tcIndex) { StringBuilder() }.append(it)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -250,6 +303,21 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+
+        val toolCallIndices = (toolCallIds.keys + toolCallNames.keys + toolCallArgs.keys).toSortedSet()
+        val effectiveFinishReason = finishReason ?: if (toolCallIndices.isNotEmpty()) "tool_calls" else null
+        effectiveFinishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+
+        // Emit accumulated tool call attributes
+        for (tcIndex in toolCallIndices) {
+            toolCallIds[tcIndex]?.let { span.setAttribute("gen_ai.completion.0.tool.$tcIndex.call.id", it) }
+            toolCallNames[tcIndex]?.toString()?.takeIf { it.isNotEmpty() }?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$tcIndex.name", it.orRedactedOutput())
+            }
+            toolCallArgs[tcIndex]?.toString()?.takeIf { it.isNotEmpty() }?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$tcIndex.arguments", it.orRedactedOutput())
+            }
+        }
 
         return@runCatching
     }.getOrElse { exception ->
@@ -347,7 +415,6 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "messages",
         "model",
         "tools",
-        "choices",
         "temperature",
         "top_p",
         "max_tokens",
@@ -355,6 +422,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "frequency_penalty",
         "presence_penalty",
         "stop",
+        "tool_choice",
+        "parallel_tool_calls",
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
