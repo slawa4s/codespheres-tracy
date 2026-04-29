@@ -18,13 +18,17 @@ import kotlinx.serialization.json.*
 internal object OpenAIApiUtils {
 
     /**
-     * Sets common request attributes (temperature, model)
+     * Sets common request attributes (temperature, model, max_tokens, top_p)
      */
     fun setCommonRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it.jsonPrimitive.doubleOrNull) }
         body["model"]?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it.jsonPrimitive.content) }
+        (body["max_tokens"] ?: body["max_completion_tokens"])?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it)
+        }
+        body["top_p"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_P, it) }
     }
 
     /**
