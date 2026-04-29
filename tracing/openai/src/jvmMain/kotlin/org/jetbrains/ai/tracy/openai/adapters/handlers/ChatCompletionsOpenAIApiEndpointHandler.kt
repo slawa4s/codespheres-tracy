@@ -201,6 +201,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
+        var usageChunk: JsonObject? = null
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -212,7 +214,17 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
+                // Capture usage from terminal chunk (sent when stream_options.include_usage is true).
+                // The terminal chunk has choices:[] so must be extracted before the choices check below.
+                event["usage"]?.jsonObject?.let { usageChunk = it }
+
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+
+                // finish_reason is null in intermediate chunks and a string (e.g. "stop") in the final chunk
+                choice["finish_reason"]?.jsonPrimitive?.takeIf { it.isString }?.content?.let {
+                    finishReason = it
+                }
+
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
@@ -227,6 +239,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+        usageChunk?.let { setUsageAttributes(span, it) }
 
         return@runCatching
     }.getOrElse { exception ->
@@ -235,7 +249,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     }
 
     /**
-     * Sets usage attributes (prompt_tokens/completion_tokens)
+     * Sets usage attributes (prompt_tokens/completion_tokens/cached_tokens)
      */
     private fun setUsageAttributes(span: Span, usage: JsonObject) {
         usage["prompt_tokens"]?.jsonPrimitive?.intOrNull?.let {
@@ -243,6 +257,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         }
         usage["completion_tokens"]?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+        }
+        usage["prompt_tokens_details"]?.jsonObject?.get("cached_tokens")?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
         }
     }
 
@@ -320,7 +337,12 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "model",
         "tools",
         "choices",
-        "temperature"
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "max_completion_tokens",
+        "frequency_penalty",
+        "presence_penalty",
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
