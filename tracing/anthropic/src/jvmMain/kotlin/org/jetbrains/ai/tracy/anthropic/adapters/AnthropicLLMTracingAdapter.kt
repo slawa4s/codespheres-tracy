@@ -10,6 +10,7 @@ import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadT
 import org.jetbrains.ai.tracy.core.adapters.media.*
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
+import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponseBody
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.ContentKind
@@ -49,6 +50,10 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(
+            "anthropic.api.type",
+            if (request.url.pathSegments.contains("batches")) "batches" else "messages"
+        )
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -202,6 +207,13 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
+    }
+
+    override fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
+        super.getResponseErrorBodyAttributes(span, body)
+        body.asJson()?.jsonObject?.get("error")?.jsonObject?.get("type")?.jsonPrimitive?.let {
+            span.setAttribute("error.type", it.content)
+        }
     }
 
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
