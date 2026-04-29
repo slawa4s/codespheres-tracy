@@ -10,6 +10,7 @@ import org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.patchOpenAICompatibleClient
 import com.anthropic.client.AnthropicClient
+import mu.KotlinLogging
 
 /**
  * Instruments an Anthropic Claude client with OpenTelemetry tracing capabilities **inplace**.
@@ -124,8 +125,25 @@ import com.anthropic.client.AnthropicClient
  * @see TracingManager.traceSensitiveContent
  */
 fun instrument(client: AnthropicClient) {
+    val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
     patchOpenAICompatibleClient(
         client = client,
-        interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+        interceptor = interceptor
     )
+    // The batches service (client.messages().batches()) may be backed by a distinct
+    // OkHttpClient instance in certain SDK versions, because it is constructed with
+    // clientOptionsWithUserAgent rather than the raw clientOptions accessed above.
+    // Explicitly patching through the batches service accessor ensures the interceptor
+    // is installed regardless of whether the two code paths share the same underlying
+    // okhttp3.OkHttpClient object.
+    try {
+        patchOpenAICompatibleClient(
+            client = client.messages().batches(),
+            interceptor = interceptor
+        )
+    } catch (e: Exception) {
+        logger.warn(e) { "Failed to patch OkHttpClient for Anthropic batches service; batch API spans may not be traced" }
+    }
 }
+
+private val logger = KotlinLogging.logger {}
