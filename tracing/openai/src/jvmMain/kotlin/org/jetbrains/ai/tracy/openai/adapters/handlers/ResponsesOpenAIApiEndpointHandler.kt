@@ -229,11 +229,32 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 Json.parseToJsonElement(data).jsonObject
             }.getOrNull() ?: continue
 
-            val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            when (event["type"]?.jsonPrimitive?.content) {
+                "response.created" -> {
+                    // Set response envelope attributes from the first SSE event
+                    event["response"]?.jsonObject?.let { response ->
+                        response["id"]?.jsonPrimitive?.content?.let {
+                            span.setAttribute(GEN_AI_RESPONSE_ID, it)
+                        }
+                        response["model"]?.jsonPrimitive?.content?.let {
+                            span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                        }
+                        response["object"]?.jsonPrimitive?.content?.let {
+                            span.setAttribute(GEN_AI_OPERATION_NAME, it)
+                        }
+                    }
+                }
+                "response.output_text.done" -> {
+                    event["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
+                        span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+                    }
+                }
+                "response.completed" -> {
+                    // Parse token usage from the final event
+                    event["response"]?.jsonObject?.get("usage")?.jsonObject?.let { usage ->
+                        setUsageAttributes(span, usage)
+                    }
                 }
             }
         }
