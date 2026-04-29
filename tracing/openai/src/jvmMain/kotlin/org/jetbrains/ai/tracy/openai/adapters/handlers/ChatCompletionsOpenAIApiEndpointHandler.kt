@@ -104,6 +104,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         body["presence_penalty"]?.jsonPrimitive?.doubleOrNull?.let {
             span.setAttribute(GEN_AI_REQUEST_PRESENCE_PENALTY, it)
         }
+        body["seed"]?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_SEED, it.toLong())
+        }
         body["stop"]?.let { stop ->
             val stopSequences: List<String> = when (stop) {
                 is JsonPrimitive -> listOf(stop.content)
@@ -224,6 +227,16 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
+
+        class ToolCallAccumulator {
+            var id: String? = null
+            var type: String? = null
+            val name = StringBuilder()
+            val arguments = StringBuilder()
+        }
+        val toolCalls = mutableMapOf<Int, ToolCallAccumulator>()
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -235,13 +248,42 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
-                val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+                val choices = event["choices"] as? JsonArray
+                if (choices == null || choices.isEmpty()) {
+                    // Parse usage from chunks with no choices (stream_options.include_usage=true)
+                    event["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
+                    continue
+                }
+
+                val choice = choices.firstOrNull()?.jsonObject ?: continue
+
+                choice["finish_reason"]?.jsonPrimitive?.content
+                    ?.takeIf { it != "null" && it.isNotEmpty() }
+                    ?.let { finishReason = it }
+
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
                     role = delta["role"]?.jsonPrimitive?.content
                 }
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+
+                // Accumulate tool call deltas across chunks
+                delta["tool_calls"]?.let { toolCallsElement ->
+                    if (toolCallsElement is JsonArray) {
+                        for (toolCallDelta in toolCallsElement) {
+                            val tcIndex = toolCallDelta.jsonObject["index"]?.jsonPrimitive?.intOrNull ?: continue
+                            val acc = toolCalls.getOrPut(tcIndex) { ToolCallAccumulator() }
+
+                            toolCallDelta.jsonObject["id"]?.jsonPrimitive?.content?.let { acc.id = it }
+                            toolCallDelta.jsonObject["type"]?.jsonPrimitive?.content?.let { acc.type = it }
+                            toolCallDelta.jsonObject["function"]?.jsonObject?.let { func ->
+                                func["name"]?.jsonPrimitive?.content?.let { acc.name.append(it) }
+                                func["arguments"]?.jsonPrimitive?.content?.let { acc.arguments.append(it) }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -250,6 +292,20 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+
+        for ((toolCallIndex, acc) in toolCalls) {
+            acc.id?.let { span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.call.id", it) }
+            acc.type?.let { span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.call.type", it) }
+            val name = acc.name.toString()
+            if (name.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.name", name.orRedactedOutput())
+            }
+            val arguments = acc.arguments.toString()
+            if (arguments.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.arguments", arguments.orRedactedOutput())
+            }
+        }
 
         return@runCatching
     }.getOrElse { exception ->
@@ -355,12 +411,16 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "frequency_penalty",
         "presence_penalty",
         "stop",
+        "seed",
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
     private val mappedResponseAttributes: List<String> = listOf(
         "choices",
-        "usage"
+        "usage",
+        "id",
+        "object",
+        "model",
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
