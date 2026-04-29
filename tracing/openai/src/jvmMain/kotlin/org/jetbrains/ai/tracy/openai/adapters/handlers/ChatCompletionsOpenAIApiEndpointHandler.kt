@@ -184,10 +184,12 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                         }
                     }
 
-                    span.setAttribute(
-                        "gen_ai.completion.$index.annotations",
-                        message.jsonObject["annotations"].toString()
-                    )
+                    message.jsonObject["annotations"]?.let {
+                        span.setAttribute(
+                            "gen_ai.completion.$index.annotations",
+                            it.toString()
+                        )
+                    }
                 }
             }
         }
