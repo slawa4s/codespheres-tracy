@@ -221,6 +221,10 @@ internal class ResponsesOpenAIApiEndpointHandler(
     }
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
+        var responseId: String? = null
+        var responseModel: String? = null
+        var responseObject: String? = null
+
         for (line in events.lineSequence()) {
             if (!line.startsWith("data:")) continue
             val data = line.removePrefix("data:").trim()
@@ -229,14 +233,34 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 Json.parseToJsonElement(data).jsonObject
             }.getOrNull() ?: continue
 
-            val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            // Read response envelope (id, model, object) from the first event that carries it
+            if (responseId == null) {
+                val responseObj = event["response"]?.jsonObject
+                responseId = responseObj?.get("id")?.jsonPrimitive?.content
+                responseModel = responseObj?.get("model")?.jsonPrimitive?.content
+                responseObject = responseObj?.get("object")?.jsonPrimitive?.content
+            }
+
+            when (event["type"]?.jsonPrimitive?.content) {
+                "response.output_text.done" -> {
+                    event["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
+                        span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+                    }
+                }
+                "response.completed" -> {
+                    event["response"]?.jsonObject?.get("usage")?.jsonObject?.let { usage ->
+                        setUsageAttributes(span, usage)
+                    }
                 }
             }
         }
+
+        // Set response envelope attributes captured from the stream
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        responseObject?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
+        Unit
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
         span.recordException(exception)

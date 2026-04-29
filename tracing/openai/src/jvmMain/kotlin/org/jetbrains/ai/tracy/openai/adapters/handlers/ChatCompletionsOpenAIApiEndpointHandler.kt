@@ -229,6 +229,12 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
+        var responseId: String? = null
+        var responseModel: String? = null
+        var responseObject: String? = null
+        val toolCallAccumulators = mutableMapOf<Int, ToolCallAccumulator>()
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -240,13 +246,41 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
+                // Capture response envelope fields (id, model, object) from the first chunk
+                if (responseId == null) {
+                    responseId = event["id"]?.jsonPrimitive?.content
+                    responseModel = event["model"]?.jsonPrimitive?.content
+                    responseObject = event["object"]?.jsonPrimitive?.content
+                }
+
+                // Parse usage from final chunk when stream_options.include_usage=true
+                (event["usage"] as? JsonObject)?.let { usage ->
+                    setUsageAttributes(span, usage)
+                }
+
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+
+                // Capture finish_reason when present
+                choice["finish_reason"]?.jsonPrimitive?.content?.let { finishReason = it }
+
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
                     role = delta["role"]?.jsonPrimitive?.content
                 }
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+
+                // Accumulate tool-call fragments streamed across multiple chunks
+                (delta["tool_calls"] as? JsonArray)?.forEach { toolCallElement ->
+                    val toolCall = toolCallElement.jsonObject
+                    val index = toolCall["index"]?.jsonPrimitive?.intOrNull ?: return@forEach
+                    val acc = toolCallAccumulators.getOrPut(index) { ToolCallAccumulator() }
+                    toolCall["id"]?.jsonPrimitive?.content?.let { acc.id = it }
+                    toolCall["function"]?.jsonObject?.let { func ->
+                        func["name"]?.jsonPrimitive?.content?.let { acc.name = it }
+                        func["arguments"]?.jsonPrimitive?.content?.let { acc.arguments.append(it) }
+                    }
+                }
             }
         }
 
@@ -255,11 +289,33 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+
+        // Set response envelope attributes captured from the stream
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        responseObject?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
+
+        // Emit accumulated tool-call attributes
+        for ((toolIndex, acc) in toolCallAccumulators) {
+            acc.id?.let { span.setAttribute("gen_ai.completion.0.tool.$toolIndex.call.id", it) }
+            acc.name?.let { span.setAttribute("gen_ai.completion.0.tool.$toolIndex.name", it.orRedactedOutput()) }
+            val args = acc.arguments.toString()
+            if (args.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$toolIndex.arguments", args.orRedactedOutput())
+            }
+        }
 
         return@runCatching
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
         span.recordException(exception)
+    }
+
+    private class ToolCallAccumulator {
+        var id: String? = null
+        var name: String? = null
+        val arguments = StringBuilder()
     }
 
     /**
