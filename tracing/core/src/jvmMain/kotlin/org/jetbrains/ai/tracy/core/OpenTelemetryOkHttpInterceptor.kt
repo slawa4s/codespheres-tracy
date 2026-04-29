@@ -146,8 +146,12 @@ fun instrument(client: OkHttpClient, adapter: LLMTracingAdapter): OkHttpClient {
  * @param client The instance of the OpenAI-compatible client to patch.
  * @param interceptor The interceptor to be injected into the internal HTTP client of the OpenAI-compatible client.
  */
-fun <T> patchOpenAICompatibleClient(client: T, interceptor: Interceptor) {
-    val clientOptions = getFieldValue(client as Any, "clientOptions")
+fun <T> patchOpenAICompatibleClient(
+    client: T,
+    interceptor: Interceptor,
+    clientOptionsFieldName: String = "clientOptions",
+) {
+    val clientOptions = getFieldValue(client as Any, clientOptionsFieldName)
     val originalHttpClient = getFieldValue(clientOptions, "originalHttpClient")
 
     val okHttpHolder = if (originalHttpClient::class.simpleName == "OkHttpClient") {
@@ -251,15 +255,30 @@ class OpenTelemetryOkHttpInterceptor(
                     wrapStreamingResponse(response, url, span)
                 } else {
                     // if the content type is `application/json`, we decode a response body;
+                    // for audio/* responses, we embed the byte size so handlers can record it;
                     // otherwise (e.g., when the body is binary), we pass an empty JSON object as the response body.
                     val contentType = response.body?.contentType()
                     val mimeType = if (contentType != null) "${contentType.type}/${contentType.subtype}" else null
-                    val responseBody = when (mimeType?.lowercase()) {
-                        "application/json" -> try {
+                    val normalizedMime = mimeType?.lowercase()
+                    val responseBody = when {
+                        normalizedMime == "application/json" -> try {
                             val peekedBody = response.peekBody(Long.MAX_VALUE).string()
                             Json.decodeFromString<JsonObject>(peekedBody)
                         } catch (_: Exception) {
                             JsonObject(emptyMap())
+                        }
+                        normalizedMime?.startsWith("audio/") == true -> {
+                            val contentLength = response.body?.contentLength() ?: -1L
+                            val sizeBytes = if (contentLength >= 0L) {
+                                contentLength
+                            } else {
+                                try { response.peekBody(Long.MAX_VALUE).bytes().size.toLong() } catch (_: Exception) { -1L }
+                            }
+                            if (sizeBytes >= 0L) {
+                                JsonObject(mapOf("_tracy.response.size_bytes" to JsonPrimitive(sizeBytes)))
+                            } else {
+                                JsonObject(emptyMap())
+                            }
                         }
                         else -> {
                             JsonObject(emptyMap())

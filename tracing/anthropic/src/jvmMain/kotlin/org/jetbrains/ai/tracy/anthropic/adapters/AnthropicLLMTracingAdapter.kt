@@ -50,10 +50,23 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
-        span.setAttribute(
-            "anthropic.api.type",
-            if (request.url.pathSegments.contains("batches")) "batches" else "messages"
-        )
+        val pathSegments = request.url.pathSegments
+        val apiType = when {
+            pathSegments.contains("models") -> "models"
+            pathSegments.contains("batches") -> "batches"
+            else -> "messages"
+        }
+        span.setAttribute("anthropic.api.type", apiType)
+
+        if (apiType == "models") {
+            span.setAttribute("gen_ai.operation.name", "models.retrieve")
+            val modelsIdx = pathSegments.indexOf("models")
+            if (modelsIdx + 1 < pathSegments.size && pathSegments[modelsIdx + 1].isNotEmpty()) {
+                span.setAttribute(GEN_AI_REQUEST_MODEL, pathSegments[modelsIdx + 1])
+            }
+            return
+        }
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -130,6 +143,40 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
+
+        // models-API response detection
+        val isModelsResponse = body["type"]?.jsonPrimitive?.contentOrNull == "model" ||
+            response.url.pathSegments.contains("models")
+
+        if (isModelsResponse) {
+            val modelId = body["id"]?.jsonPrimitive?.contentOrNull
+            modelId?.let {
+                span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                span.setAttribute("gen_ai.response.model.id", it)
+            }
+            body["display_name"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("gen_ai.response.model.display_name", it)
+            }
+            body["created_at"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("gen_ai.response.model.created_at", it)
+            }
+            body["max_input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_input_tokens", it.toLong())
+            }
+            body["max_output_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_output_tokens", it.toLong())
+            }
+            body["capabilities"]?.let { caps ->
+                if (caps is JsonArray) {
+                    val capsList = caps.mapNotNull { it.jsonPrimitive.contentOrNull }
+                    span.setAttribute("gen_ai.response.model.capabilities.batch", "batch" in capsList)
+                    span.setAttribute("gen_ai.response.model.capabilities.citations", "citations" in capsList)
+                    span.setAttribute("gen_ai.response.model.capabilities.vision", "vision" in capsList)
+                }
+            }
+            span.populateUnmappedAttributes(body, mappedModelResponseAttributes, PayloadType.RESPONSE)
+            return
+        }
 
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
@@ -371,6 +418,16 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "content",
         "stop_reason",
         "usage"
+    )
+
+    private val mappedModelResponseAttributes: List<String> = listOf(
+        "id",
+        "type",
+        "display_name",
+        "created_at",
+        "max_input_tokens",
+        "max_output_tokens",
+        "capabilities"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
