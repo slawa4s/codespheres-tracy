@@ -46,6 +46,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
 
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -229,6 +230,11 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
+        var responseModel: String? = null
+        var responseId: String? = null
+        var usageObject: JsonObject? = null
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -240,12 +246,28 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
+                // Extract response model and ID from the first valid event
+                if (responseModel == null) {
+                    responseModel = event["model"]?.jsonPrimitive?.content
+                }
+                if (responseId == null) {
+                    responseId = event["id"]?.jsonPrimitive?.content
+                }
+
+                // Track usage (emitted in the final chunk when stream_options.include_usage=true)
+                event["usage"]?.jsonObject?.let { usageObject = it }
+
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
                     role = delta["role"]?.jsonPrimitive?.content
                 }
+
+                // finish_reason is JSON null in intermediate chunks and a real string in the final chunk
+                choice["finish_reason"]?.jsonPrimitive?.content?.takeIf { it != "null" }
+                    ?.let { finishReason = it }
+
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
             }
         }
@@ -255,6 +277,11 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
+        usageObject?.let { setUsageAttributes(span, it) }
 
         return@runCatching
     }.getOrElse { exception ->
@@ -365,7 +392,10 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     // https://platform.openai.com/docs/api-reference/chat/object
     private val mappedResponseAttributes: List<String> = listOf(
         "choices",
-        "usage"
+        "usage",
+        "id",
+        "object",
+        "model"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
