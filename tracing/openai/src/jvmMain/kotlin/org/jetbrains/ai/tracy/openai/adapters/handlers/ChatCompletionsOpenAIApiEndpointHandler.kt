@@ -251,9 +251,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
      */
     private fun kindByRole(role: String?): ContentKind = when (role) {
         // role may be:
-        //   1. input: developer/system/user
-        "developer", "system", "user" -> ContentKind.INPUT
-        //   2. output: assistant/tool/function
+        //   1. input: developer/system/user/tool (tool messages carry tool-execution results sent back to the model)
+        "developer", "system", "user", "tool" -> ContentKind.INPUT
+        //   2. output: assistant/function
         else -> ContentKind.OUTPUT
     }
 
