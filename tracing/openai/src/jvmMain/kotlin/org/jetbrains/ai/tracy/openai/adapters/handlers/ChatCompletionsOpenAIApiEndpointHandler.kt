@@ -23,18 +23,23 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MAX_TOKENS
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_TOP_P
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 
 /**
@@ -46,6 +51,14 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+
+        body["top_p"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_TOP_P, it)
+        }
+        // `max_completion_tokens` is the current field; `max_tokens` is the legacy alias
+        (body["max_completion_tokens"] ?: body["max_tokens"])?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it)
+        }
 
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -184,10 +197,12 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                         }
                     }
 
-                    span.setAttribute(
-                        "gen_ai.completion.$index.annotations",
-                        message.jsonObject["annotations"].toString()
-                    )
+                    message.jsonObject["annotations"]?.let {
+                        span.setAttribute(
+                            "gen_ai.completion.$index.annotations",
+                            it.toString()
+                        )
+                    }
                 }
             }
         }
@@ -201,6 +216,11 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
+        var usageChunk: JsonObject? = null
+        // Map from tool_call index to its accumulated state across streaming chunks
+        val toolCallAccumulators = mutableMapOf<Int, ToolCallAccumulator>()
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -212,6 +232,10 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
+                // Capture the usage object from any event (including the usage-only chunk
+                // emitted when stream_options:{include_usage:true} is set, which has choices:[]).
+                event["usage"]?.jsonObject?.let { usageChunk = it }
+
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
                 val delta = choice["delta"]?.jsonObject ?: continue
 
@@ -219,6 +243,29 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     role = delta["role"]?.jsonPrimitive?.content
                 }
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+                choice["finish_reason"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content?.let { finishReason = it }
+
+                // Accumulate tool-call deltas; each chunk carries incremental fields
+                val toolCallsElement = delta["tool_calls"]
+                if (toolCallsElement is JsonArray) {
+                    for (toolCallDelta in toolCallsElement) {
+                        val tcObj = toolCallDelta.jsonObject
+                        val tcIndex = tcObj["index"]?.jsonPrimitive?.intOrNull ?: continue
+                        val accumulator = toolCallAccumulators.getOrPut(tcIndex) { ToolCallAccumulator() }
+
+                        // id and type arrive only in the first chunk for this index
+                        tcObj["id"]?.jsonPrimitive?.content?.let { accumulator.id = it }
+
+                        tcObj["function"]?.jsonObject?.let { fn ->
+                            fn["name"]?.jsonPrimitive?.content?.let {
+                                accumulator.name = (accumulator.name ?: "") + it
+                            }
+                            fn["arguments"]?.jsonPrimitive?.content?.let {
+                                accumulator.arguments.append(it)
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -227,12 +274,35 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+        usageChunk?.let { setUsageAttributes(span, it) }
+
+        // Emit span attributes for every accumulated tool call
+        for ((toolCallIndex, accumulator) in toolCallAccumulators) {
+            accumulator.id?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.call.id", it)
+            }
+            accumulator.name?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.name", it.orRedactedOutput())
+            }
+            val args = accumulator.arguments.toString()
+            if (args.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.arguments", args.orRedactedOutput())
+            }
+        }
 
         return@runCatching
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
         span.recordException(exception)
     }
+
+    /** Mutable accumulator for a single tool-call reconstructed from streaming deltas. */
+    private class ToolCallAccumulator(
+        var id: String? = null,
+        var name: String? = null,
+        val arguments: StringBuilder = StringBuilder()
+    )
 
     /**
      * Sets usage attributes (prompt_tokens/completion_tokens)
@@ -320,7 +390,10 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "model",
         "tools",
         "choices",
-        "temperature"
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "max_completion_tokens",
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
