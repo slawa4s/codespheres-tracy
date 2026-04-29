@@ -221,6 +221,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
     }
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
+        var responseEnvelopeSet = false
         for (line in events.lineSequence()) {
             if (!line.startsWith("data:")) continue
             val data = line.removePrefix("data:").trim()
@@ -229,11 +230,30 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 Json.parseToJsonElement(data).jsonObject
             }.getOrNull() ?: continue
 
+            // Set response envelope attributes (id, model, object) from the first event
+            // that contains the nested response object (e.g. response.created)
+            if (!responseEnvelopeSet) {
+                event["response"]?.jsonObject?.let { response ->
+                    response["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+                    response["model"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+                    response["object"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
+                    responseEnvelopeSet = true
+                }
+            }
+
             val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            when (type) {
+                "response.output_text.done" -> {
+                    event["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
+                        span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+                    }
+                }
+                // response.completed carries the final usage object for the Responses API
+                "response.completed" -> {
+                    event["response"]?.jsonObject?.get("usage")?.jsonObject?.let {
+                        setUsageAttributes(span, it)
+                    }
                 }
             }
         }

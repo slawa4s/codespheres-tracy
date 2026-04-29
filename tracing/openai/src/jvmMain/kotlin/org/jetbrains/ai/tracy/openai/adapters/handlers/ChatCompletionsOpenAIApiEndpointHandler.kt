@@ -27,6 +27,7 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
@@ -229,6 +230,10 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
+        var responseEnvelopeSet = false
+        val toolCalls = mutableMapOf<Int, ToolCallData>()
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -240,13 +245,52 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
+                // Set response envelope attributes from the first SSE chunk (id, model, object)
+                if (!responseEnvelopeSet) {
+                    event["id"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+                    event["model"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+                    event["object"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
+                    responseEnvelopeSet = true
+                }
+
+                // Parse usage from the final chunk when stream_options.include_usage=true
+                event["usage"]?.let { usageElem ->
+                    if (usageElem is JsonObject) {
+                        setUsageAttributes(span, usageElem)
+                    }
+                }
+
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+
+                // Extract finish_reason; JSON null appears in intermediate chunks, so skip it
+                choice["finish_reason"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content?.let {
+                    finishReason = it
+                }
+
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
                     role = delta["role"]?.jsonPrimitive?.content
                 }
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+
+                // Accumulate tool-call fragments streamed across multiple SSE chunks
+                delta["tool_calls"]?.jsonArray?.forEach { toolCallElem ->
+                    val toolCallObj = toolCallElem.jsonObject
+                    val index = toolCallObj["index"]?.jsonPrimitive?.intOrNull ?: return@forEach
+                    val acc = toolCalls.getOrPut(index) { ToolCallData() }
+
+                    if (acc.id == null) {
+                        toolCallObj["id"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content?.let {
+                            acc.id = it
+                        }
+                    }
+
+                    toolCallObj["function"]?.jsonObject?.let { func ->
+                        func["name"]?.jsonPrimitive?.content?.let { acc.nameBuilder.append(it) }
+                        func["arguments"]?.jsonPrimitive?.content?.let { acc.argumentsBuilder.append(it) }
+                    }
+                }
             }
         }
 
@@ -255,12 +299,32 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+
+        // Emit accumulated tool-call attributes after all chunks are processed
+        for ((index, toolCall) in toolCalls) {
+            toolCall.id?.let { span.setAttribute("gen_ai.completion.0.tool.$index.call.id", it) }
+            val name = toolCall.nameBuilder.toString()
+            if (name.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$index.name", name.orRedactedOutput())
+            }
+            val arguments = toolCall.argumentsBuilder.toString()
+            if (arguments.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$index.arguments", arguments.orRedactedOutput())
+            }
+        }
 
         return@runCatching
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
         span.recordException(exception)
     }
+
+    private class ToolCallData(
+        var id: String? = null,
+        val nameBuilder: StringBuilder = StringBuilder(),
+        val argumentsBuilder: StringBuilder = StringBuilder()
+    )
 
     /**
      * Sets usage attributes (prompt_tokens/completion_tokens)
