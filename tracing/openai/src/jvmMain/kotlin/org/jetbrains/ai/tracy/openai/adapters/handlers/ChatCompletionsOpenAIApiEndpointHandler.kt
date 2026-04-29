@@ -201,6 +201,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -213,6 +214,12 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                 }.getOrNull() ?: continue
 
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+
+                // finish_reason is null in intermediate chunks and a string (e.g. "stop") in the final chunk
+                choice["finish_reason"]?.jsonPrimitive?.takeIf { it.isString }?.content?.let {
+                    finishReason = it
+                }
+
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
@@ -227,6 +234,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
 
         return@runCatching
     }.getOrElse { exception ->
