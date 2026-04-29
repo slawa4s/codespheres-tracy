@@ -142,7 +142,20 @@ fun instrument(client: AnthropicClient) {
             interceptor = interceptor
         )
     } catch (e: Exception) {
-        logger.warn(e) { "Failed to patch OkHttpClient for Anthropic batches service; batch API spans may not be traced" }
+        // Fallback: in some SDK versions the batches service stores its client options under
+        // clientOptionsWithUserAgent (a field that wraps clientOptions with the User-Agent header
+        // already applied) rather than the raw clientOptions field.  Trying this alternative field
+        // name gives us a second chance to install the interceptor on the distinct OkHttpClient
+        // instance that the batches service uses, so batch API spans are not silently dropped.
+        try {
+            patchOpenAICompatibleClient(
+                client = client.messages().batches(),
+                interceptor = interceptor,
+                clientOptionsFieldName = "clientOptionsWithUserAgent"
+            )
+        } catch (e2: Exception) {
+            logger.warn(e2) { "Failed to patch OkHttpClient for Anthropic batches service; batch API spans may not be traced" }
+        }
     }
 }
 
