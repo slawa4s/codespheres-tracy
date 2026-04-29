@@ -320,7 +320,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "model",
         "tools",
         "choices",
-        "temperature"
+        "temperature",
+        "max_tokens",
+        "top_p"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
