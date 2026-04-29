@@ -30,6 +30,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -111,6 +113,16 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                 else -> return@let
             }
             span.setAttribute(GEN_AI_REQUEST_STOP_SEQUENCES, stopSequences)
+        }
+        body["tool_choice"]?.let {
+            val content = when (it) {
+                is JsonPrimitive -> it.content
+                else -> it.toString()
+            }
+            span.setAttribute("gen_ai.request.tool_choice", content)
+        }
+        body["parallel_tool_calls"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("gen_ai.request.parallel_tool_calls", it)
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.REQUEST)
@@ -224,6 +236,11 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
+        val toolCallIds = mutableMapOf<Int, String>()
+        val toolCallNames = mutableMapOf<Int, String>()
+        val toolCallArguments = mutableMapOf<Int, StringBuilder>()
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -235,13 +252,40 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
-                val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+                // Detect usage-only event (stream_options.include_usage): choices absent/empty + usage present
+                val choices = event["choices"]?.jsonArray
+                if ((choices == null || choices.isEmpty()) && event.containsKey("usage")) {
+                    event["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
+                    continue
+                }
+
+                val choice = choices?.firstOrNull()?.jsonObject ?: continue
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
                     role = delta["role"]?.jsonPrimitive?.content
                 }
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+
+                // Track the last non-null finish_reason
+                choice["finish_reason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it }
+
+                // Accumulate tool_calls deltas
+                delta["tool_calls"]?.let { toolCallsJson ->
+                    if (toolCallsJson is JsonArray) {
+                        for (toolCallChunk in toolCallsJson) {
+                            val tcObj = toolCallChunk.jsonObject
+                            val idx = tcObj["index"]?.jsonPrimitive?.intOrNull ?: 0
+                            tcObj["id"]?.jsonPrimitive?.contentOrNull?.let { toolCallIds[idx] = it }
+                            tcObj["function"]?.jsonObject?.let { func ->
+                                func["name"]?.jsonPrimitive?.contentOrNull?.let { toolCallNames[idx] = it }
+                                func["arguments"]?.jsonPrimitive?.contentOrNull?.let {
+                                    toolCallArguments.getOrPut(idx) { StringBuilder() }.append(it)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -250,6 +294,22 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+
+        // Emit accumulated tool calls
+        if (toolCallIds.isNotEmpty() || toolCallNames.isNotEmpty() || toolCallArguments.isNotEmpty()) {
+            val indices = (toolCallIds.keys + toolCallNames.keys + toolCallArguments.keys).toSortedSet()
+            for (idx in indices) {
+                toolCallIds[idx]?.let { span.setAttribute("gen_ai.completion.0.tool.$idx.call.id", it) }
+                toolCallNames[idx]?.let { span.setAttribute("gen_ai.completion.0.tool.$idx.name", it.orRedactedOutput()) }
+                toolCallArguments[idx]?.toString()?.takeIf { it.isNotEmpty() }?.let {
+                    span.setAttribute("gen_ai.completion.0.tool.$idx.arguments", it.orRedactedOutput())
+                }
+            }
+            if (finishReason == null) {
+                span.setAttribute("gen_ai.completion.0.finish_reason", "tool_calls")
+            }
+        }
 
         return@runCatching
     }.getOrElse { exception ->
@@ -347,7 +407,6 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "messages",
         "model",
         "tools",
-        "choices",
         "temperature",
         "top_p",
         "max_tokens",
@@ -355,6 +414,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "frequency_penalty",
         "presence_penalty",
         "stop",
+        "tool_choice",
+        "parallel_tool_calls",
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
