@@ -23,14 +23,14 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -87,6 +87,34 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                         span.setAttribute("gen_ai.tool.$index.strict", strict)
                     }
                 }
+            }
+        }
+
+        // prefer max_completion_tokens if present, fall back to max_tokens
+        (body["max_completion_tokens"] ?: body["max_tokens"])?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it.toLong())
+        }
+
+        body["top_p"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_TOP_P, it)
+        }
+
+        body["frequency_penalty"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_FREQUENCY_PENALTY, it)
+        }
+
+        body["presence_penalty"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_PRESENCE_PENALTY, it)
+        }
+
+        body["stop"]?.let { stop ->
+            val stopSequences: List<String> = when (stop) {
+                is JsonPrimitive -> listOf(stop.content)
+                is JsonArray -> stop.jsonArray.filterIsInstance<JsonPrimitive>().map { it.content }
+                else -> emptyList()
+            }
+            if (stopSequences.isNotEmpty()) {
+                span.setAttribute(GEN_AI_REQUEST_STOP_SEQUENCES, stopSequences)
             }
         }
 
@@ -244,6 +272,11 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         usage["completion_tokens"]?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
         }
+        usage["prompt_tokens_details"]?.jsonObject?.let { details ->
+            details["cached_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
+            }
+        }
     }
 
     /**
@@ -320,7 +353,13 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "model",
         "tools",
         "choices",
-        "temperature"
+        "temperature",
+        "max_tokens",
+        "max_completion_tokens",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
