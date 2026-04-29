@@ -26,7 +26,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  *
  * Extracts model, voice, response_format, and speed from the request body.
  * Reads the response audio size from the reserved `_tracy.response.size_bytes` key
- * injected by the interceptor for audio/* MIME types, and sets
+ * injected by the interceptor for audio/TYPE MIME types, and sets
  * `gen_ai.response.audio.size_bytes` on the span.
  *
  * See [Audio Speech API Reference](https://platform.openai.com/docs/api-reference/audio/createSpeech)

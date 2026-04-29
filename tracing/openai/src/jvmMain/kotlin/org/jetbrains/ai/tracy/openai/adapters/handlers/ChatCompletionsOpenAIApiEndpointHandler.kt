@@ -201,6 +201,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        // Map from tool_call index to its accumulated state across streaming chunks
+        val toolCallAccumulators = mutableMapOf<Int, ToolCallAccumulator>()
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -219,6 +222,28 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     role = delta["role"]?.jsonPrimitive?.content
                 }
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+
+                // Accumulate tool-call deltas; each chunk carries incremental fields
+                val toolCallsElement = delta["tool_calls"]
+                if (toolCallsElement is JsonArray) {
+                    for (toolCallDelta in toolCallsElement) {
+                        val tcObj = toolCallDelta.jsonObject
+                        val tcIndex = tcObj["index"]?.jsonPrimitive?.intOrNull ?: continue
+                        val accumulator = toolCallAccumulators.getOrPut(tcIndex) { ToolCallAccumulator() }
+
+                        // id and type arrive only in the first chunk for this index
+                        tcObj["id"]?.jsonPrimitive?.content?.let { accumulator.id = it }
+
+                        tcObj["function"]?.jsonObject?.let { fn ->
+                            fn["name"]?.jsonPrimitive?.content?.let {
+                                accumulator.name = (accumulator.name ?: "") + it
+                            }
+                            fn["arguments"]?.jsonPrimitive?.content?.let {
+                                accumulator.arguments.append(it)
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -228,11 +253,32 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
 
+        // Emit span attributes for every accumulated tool call
+        for ((toolCallIndex, accumulator) in toolCallAccumulators) {
+            accumulator.id?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.call.id", it)
+            }
+            accumulator.name?.let {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.name", it.orRedactedOutput())
+            }
+            val args = accumulator.arguments.toString()
+            if (args.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.arguments", args.orRedactedOutput())
+            }
+        }
+
         return@runCatching
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
         span.recordException(exception)
     }
+
+    /** Mutable accumulator for a single tool-call reconstructed from streaming deltas. */
+    private class ToolCallAccumulator(
+        var id: String? = null,
+        var name: String? = null,
+        val arguments: StringBuilder = StringBuilder()
+    )
 
     /**
      * Sets usage attributes (prompt_tokens/completion_tokens)
