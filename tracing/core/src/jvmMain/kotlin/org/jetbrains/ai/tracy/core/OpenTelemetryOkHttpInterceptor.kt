@@ -252,14 +252,21 @@ class OpenTelemetryOkHttpInterceptor(
                 } else {
                     // if the content type is `application/json`, we decode a response body;
                     // otherwise (e.g., when the body is binary), we pass an empty JSON object as the response body.
+                    // For audio responses, we capture the body size and encode it as a reserved key so that
+                    // endpoint handlers can surface it as gen_ai.response.audio.size_bytes.
                     val contentType = response.body?.contentType()
                     val mimeType = if (contentType != null) "${contentType.type}/${contentType.subtype}" else null
-                    val responseBody = when (mimeType?.lowercase()) {
-                        "application/json" -> try {
+                    val responseBody = when {
+                        mimeType?.lowercase() == "application/json" -> try {
                             val peekedBody = response.peekBody(Long.MAX_VALUE).string()
                             Json.decodeFromString<JsonObject>(peekedBody)
                         } catch (_: Exception) {
                             JsonObject(emptyMap())
+                        }
+                        mimeType?.lowercase()?.startsWith("audio/") == true -> {
+                            val sizeBytes = response.body?.contentLength()?.takeIf { it >= 0 }
+                                ?: response.peekBody(Long.MAX_VALUE).bytes().size.toLong()
+                            JsonObject(mapOf("_tracy.response.size_bytes" to JsonPrimitive(sizeBytes)))
                         }
                         else -> {
                             JsonObject(emptyMap())
