@@ -59,6 +59,12 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
             span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
         }
 
+        if (request.method == "POST" && detectedType == "batches" && lastSegment == "batches") {
+            request.body.asJson()?.jsonObject?.get("requests")?.jsonArray?.size?.toLong()?.let {
+                span.setAttribute("gen_ai.request.batch.size", it)
+            }
+        }
+
         if (detectedType == "models" && lastSegment != null && lastSegment != "models") {
             span.setAttribute(GEN_AI_REQUEST_MODEL, lastSegment)
         }
@@ -66,6 +72,14 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         span.setAttribute("http.response.status_code", response.code.toLong())
+
+        if (response.code >= 400) {
+            response.body.asJson()?.jsonObject
+                ?.get("error")?.jsonObject
+                ?.get("type")?.jsonPrimitive?.content
+                ?.let { span.setAttribute("error.type", it) }
+            return
+        }
 
         val body = response.body.asJson()?.jsonObject ?: return
 
@@ -80,6 +94,39 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
         }
         body["last_id"]?.jsonPrimitive?.content?.let {
             span.setAttribute("gen_ai.response.list.last_id", it)
+        }
+
+        if (body["type"]?.jsonPrimitive?.content == "message_batch") {
+            span.setAttribute(GEN_AI_OUTPUT_TYPE, "message_batch")
+            body["id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.batch.id", it)
+            }
+            body["processing_status"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.batch.processing_status", it)
+            }
+            body["created_at"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.batch.created_at", it)
+            }
+            body["expires_at"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.batch.expires_at", it)
+            }
+            body["request_counts"]?.jsonObject?.let { counts ->
+                counts["processing"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.processing", it)
+                }
+                counts["succeeded"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it)
+                }
+                counts["errored"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.errored", it)
+                }
+                counts["canceled"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.canceled", it)
+                }
+                counts["expired"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.expired", it)
+                }
+            }
         }
 
         if (body["type"]?.jsonPrimitive?.content == "model") {

@@ -28,16 +28,23 @@ internal class ResponsesOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
-        val body = request.body.asJson()?.jsonObject ?: return
-        OpenAIApiUtils.setCommonRequestAttributes(span, request)
         OpenAIApiUtils.setNetworkRequestAttributes(span, request)
         span.setAttribute("openai.api.type", "responses")
+        val isCancelRequest = "cancel" in request.url.pathSegments
+        span.setAttribute(
+            GEN_AI_OPERATION_NAME,
+            if (isCancelRequest) "response.cancel" else "generate_content"
+        )
+
+        val body = request.body.asJson()?.jsonObject ?: return
+        OpenAIApiUtils.setCommonRequestAttributes(span, request)
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.previous_response_id", it)
         }
         body["store"]?.jsonPrimitive?.booleanOrNull?.let {
             span.setAttribute("gen_ai.request.store", it)
+            span.setAttribute("tracy.request.store", it)
         }
         body["top_p"]?.jsonPrimitive?.doubleOrNull?.let {
             span.setAttribute(GEN_AI_REQUEST_TOP_P, it)
@@ -141,6 +148,28 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
+
+        // Override gen_ai.operation.name: setCommonResponseAttributes incorrectly sets it from
+        // the body 'object' field. For the Responses API the correct value depends on the URL path.
+        val operationName = if ("cancel" in response.url.pathSegments) "response.cancel" else "generate_content"
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+
+        // Extract tracy.response.* attributes from the response body (mirrors handleStreaming)
+        body["object"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("tracy.response.object", it)
+        }
+        body["status"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("tracy.response.status", it)
+        }
+        body["background"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("tracy.response.background", it)
+        }
+        body["store"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("tracy.response.store", it)
+        }
+        body["created_at"]?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute("tracy.response.created_at", it)
+        }
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
@@ -454,6 +483,12 @@ internal class ResponsesOpenAIApiEndpointHandler(
         "id",
         "object",
         "model",
+
+        // parsed into tracy.response.* attributes above
+        "status",
+        "background",
+        "store",
+        "created_at",
 
         "output",
         "usage",
