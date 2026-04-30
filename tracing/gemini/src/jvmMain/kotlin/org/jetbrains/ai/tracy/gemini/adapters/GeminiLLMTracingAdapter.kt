@@ -14,6 +14,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiContentGenHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiImagenHandler
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiModelsHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 
@@ -43,10 +44,18 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
  */
 class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.GEMINI) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("gen_ai.provider.name", "gemini")
+        span.setAttribute("server.address", request.url.host)
+        span.setAttribute("server.port", if (request.url.scheme == "https") 443L else 80L)
+
         val (model, operation) = request.url.modelAndOperation()
 
         model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
         operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
+
+        if (request.url.isModelsUrl()) {
+            span.setAttribute("gemini.api.type", "models")
+        }
 
         val handler = selectHandler(request.url)
         handler.handleRequestAttributes(span, request)
@@ -67,6 +76,7 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     }
 
     private fun selectHandler(url: TracyHttpUrl): EndpointApiHandler = when {
+        url.isModelsUrl() -> GeminiModelsHandler()
         url.isImagenUrl() -> GeminiImagenHandler(extractor)
         else -> GeminiContentGenHandler(extractor)
     }
@@ -75,6 +85,11 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         // url ends with `[model]:[operation]`
         return this.pathSegments.lastOrNull()?.split(":")
             ?.let { it.firstOrNull() to it.lastOrNull() } ?: (null to null)
+    }
+
+    private fun TracyHttpUrl.isModelsUrl(): Boolean {
+        val lastSegment = this.pathSegments.lastOrNull() ?: return false
+        return "models" in this.pathSegments && !lastSegment.contains(":")
     }
 
     private fun TracyHttpUrl.isImagenUrl(): Boolean {
