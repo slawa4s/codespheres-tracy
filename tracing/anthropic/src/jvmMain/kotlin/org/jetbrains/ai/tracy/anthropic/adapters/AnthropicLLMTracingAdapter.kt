@@ -126,6 +126,22 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
 
+        if (isListEndpoint(response)) {
+            body["data"]?.jsonArray?.size?.toLong()?.let {
+                span.setAttribute("gen_ai.response.list.count", it)
+            }
+            body["has_more"]?.jsonPrimitive?.boolean?.let {
+                span.setAttribute("gen_ai.response.list.has_more", it)
+            }
+            body["first_id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.list.first_id", it)
+            }
+            body["last_id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.list.last_id", it)
+            }
+            return
+        }
+
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
         body["role"]?.let { span.setAttribute("gen_ai.response.role", it.jsonPrimitive.content) }
@@ -202,6 +218,11 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
+    }
+
+    private fun isListEndpoint(response: TracyHttpResponse): Boolean {
+        if (response.requestMethod != "GET") return false
+        return response.url.pathSegments.any { it in LIST_ENDPOINTS }
     }
 
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
@@ -336,6 +357,9 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     }
 
     private val extractor: MediaContentExtractor = MediaContentExtractorImpl()
+
+    // Anthropic list endpoints that return a page envelope with data/has_more/first_id/last_id
+    private val LIST_ENDPOINTS = setOf("batches", "files", "models")
 
     // https://docs.claude.com/en/api/messages
     private val mappedRequestAttributes: List<String> = listOf(
