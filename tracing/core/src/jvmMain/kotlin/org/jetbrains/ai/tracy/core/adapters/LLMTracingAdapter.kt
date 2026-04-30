@@ -9,6 +9,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.sdk.trace.ReadableSpan
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_FINISH_REASONS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_SYSTEM
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -109,6 +110,7 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
         }
 
     protected open fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
+        span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, listOf("error"))
         body.asJson()?.jsonObject["error"]?.jsonObject?.let { error ->
             error["message"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.message", it.content) }
             error["type"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.type", it.content) }
