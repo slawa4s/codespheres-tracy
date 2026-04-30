@@ -31,6 +31,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -235,6 +236,14 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         var responseId: String? = null
         var usageObject: JsonObject? = null
 
+        class ToolCallData {
+            var id: String? = null
+            var type: String? = null
+            val name = StringBuilder()
+            val arguments = StringBuilder()
+        }
+        val toolCallMap = mutableMapOf<Int, ToolCallData>()
+
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -268,7 +277,21 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                 choice["finish_reason"]?.jsonPrimitive?.content?.takeIf { it != "null" }
                     ?.let { finishReason = it }
 
-                delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+                delta["content"]?.jsonPrimitive?.contentOrNull?.let { append(it) }
+
+                // Accumulate tool_call deltas indexed by their position
+                delta["tool_calls"]?.jsonArray?.let { toolCallDeltas ->
+                    for (toolCallDelta in toolCallDeltas) {
+                        val idx = toolCallDelta.jsonObject["index"]?.jsonPrimitive?.intOrNull ?: continue
+                        val entry = toolCallMap.getOrPut(idx) { ToolCallData() }
+                        toolCallDelta.jsonObject["id"]?.jsonPrimitive?.contentOrNull?.let { entry.id = it }
+                        toolCallDelta.jsonObject["type"]?.jsonPrimitive?.contentOrNull?.let { entry.type = it }
+                        toolCallDelta.jsonObject["function"]?.jsonObject?.let { func ->
+                            func["name"]?.jsonPrimitive?.contentOrNull?.let { entry.name.append(it) }
+                            func["arguments"]?.jsonPrimitive?.contentOrNull?.let { entry.arguments.append(it) }
+                        }
+                    }
+                }
             }
         }
 
@@ -282,6 +305,19 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
         span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
         usageObject?.let { setUsageAttributes(span, it) }
+
+        for ((toolIndex, toolCall) in toolCallMap) {
+            toolCall.id?.let { span.setAttribute("gen_ai.completion.0.tool.$toolIndex.call.id", it) }
+            toolCall.type?.let { span.setAttribute("gen_ai.completion.0.tool.$toolIndex.call.type", it) }
+            val name = toolCall.name.toString()
+            if (name.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$toolIndex.name", name.orRedactedOutput())
+            }
+            val arguments = toolCall.arguments.toString()
+            if (arguments.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$toolIndex.arguments", arguments.orRedactedOutput())
+            }
+        }
 
         return@runCatching
     }.getOrElse { exception ->
