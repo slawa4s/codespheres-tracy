@@ -82,6 +82,39 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
             span.setAttribute("gen_ai.response.list.last_id", it)
         }
 
+        if (body["type"]?.jsonPrimitive?.content == "message_batch") {
+            span.setAttribute(GEN_AI_OUTPUT_TYPE, "message_batch")
+            body["id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.batch.id", it)
+            }
+            body["processing_status"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.batch.processing_status", it)
+            }
+            body["created_at"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.batch.created_at", it)
+            }
+            body["expires_at"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.batch.expires_at", it)
+            }
+            body["request_counts"]?.jsonObject?.let { counts ->
+                counts["processing"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.processing", it)
+                }
+                counts["succeeded"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it)
+                }
+                counts["errored"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.errored", it)
+                }
+                counts["canceled"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.canceled", it)
+                }
+                counts["expired"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.expired", it)
+                }
+            }
+        }
+
         if (body["type"]?.jsonPrimitive?.content == "model") {
             body["id"]?.jsonPrimitive?.content?.let { id ->
                 span.setAttribute(GEN_AI_RESPONSE_MODEL, id)
