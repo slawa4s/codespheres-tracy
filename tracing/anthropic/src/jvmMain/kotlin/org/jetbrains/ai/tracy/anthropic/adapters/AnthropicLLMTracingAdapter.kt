@@ -126,6 +126,8 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
 
+        span.setAttribute("http.response.status_code", response.code.toLong())
+
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
         body["role"]?.let { span.setAttribute("gen_ai.response.role", it.jsonPrimitive.content) }
