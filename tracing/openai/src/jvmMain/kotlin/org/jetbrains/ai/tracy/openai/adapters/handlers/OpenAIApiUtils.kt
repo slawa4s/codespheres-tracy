@@ -28,13 +28,17 @@ internal object OpenAIApiUtils {
     }
 
     /**
-     * Sets common response attributes (id, model, object type)
+     * Sets common response attributes (id, model).
+     *
+     * Note: gen_ai.operation.name is intentionally NOT set here because the response body's
+     * "object" field describes the returned object type (e.g. "conversation", "list",
+     * "conversation.deleted"), not the operation being performed. Each handler is responsible
+     * for setting gen_ai.operation.name to the correct dotted name for its endpoint.
      */
     fun setCommonResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
 
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
-        body["object"]?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it.jsonPrimitive.content) }
         body["model"]?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it.jsonPrimitive.content) }
     }
 }
