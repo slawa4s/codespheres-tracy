@@ -360,6 +360,7 @@ class OpenTelemetryOkHttpInterceptor(
     private fun OkHttpResponse.asResponseView(body: JsonObject): TracyHttpResponse {
         val response = this
         val mediaType = response.body?.contentType()
+        val responseContentLength = response.header("Content-Length")?.toLongOrNull()
 
         return object : TracyHttpResponse {
             override val contentType = mediaType?.toContentType()
@@ -367,6 +368,7 @@ class OpenTelemetryOkHttpInterceptor(
             override val body = TracyHttpResponseBody.Json(body)
             override val url = response.request.url.toProtocolUrl()
             override val requestMethod = response.request.method.uppercase()
+            override val contentLength = responseContentLength
 
             override fun isError() = response.isSuccessful.not()
         }
