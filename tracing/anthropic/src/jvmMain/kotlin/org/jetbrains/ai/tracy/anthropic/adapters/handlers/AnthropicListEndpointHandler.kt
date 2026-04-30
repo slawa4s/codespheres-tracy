@@ -14,6 +14,7 @@ import kotlinx.serialization.json.*
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
+import org.jetbrains.ai.tracy.core.http.protocol.asFormData
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 
 /**
@@ -22,10 +23,15 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  * Sets stable semconv network attributes on requests and parses the standard Anthropic page
  * envelope on responses (data count, has_more, first_id, last_id). Sets `gen_ai.operation.name`
  * and `anthropic.api.type` for all recognised batch lifecycle operations:
- * - GET  `…/{type}`       → `{type}.list`
- * - GET  `…/{type}/{id}`  → `{type}.retrieve`
- * - POST `…/{type}`       → `{type}.create`
- * - POST `…/cancel`       → `batches.cancel`
+ * - GET    `…/{type}`       → `{type}.list`
+ * - GET    `…/{type}/{id}`  → `{type}.retrieve`
+ * - POST   `…/{type}`       → `{type}.create`
+ * - POST   `…/cancel`       → `batches.cancel`
+ * - DELETE `…/{type}/{id}`  → `{type}.delete`
+ *
+ * For POST requests to the files endpoint with multipart/form-data body, extracts the uploaded
+ * file's `gen_ai.request.file.filename`, `gen_ai.request.file.mime_type`, and
+ * `gen_ai.request.file.size_bytes` from the `file` form part.
  *
  * See:
  * - [Messages Batches API](https://docs.anthropic.com/en/api/messages-batches)
@@ -53,6 +59,7 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
                 lastSegment == detectedType -> "$detectedType.list"
                 else -> "$detectedType.retrieve"
             }
+            "DELETE" -> "$detectedType.delete"
             else -> null
         }
         if (operationName != null) {
@@ -62,6 +69,19 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
         if (request.method == "POST" && detectedType == "batches" && lastSegment == "batches") {
             request.body.asJson()?.jsonObject?.get("requests")?.jsonArray?.size?.toLong()?.let {
                 span.setAttribute("gen_ai.request.batch.size", it)
+            }
+        }
+
+        if (request.method == "POST" && detectedType == "files" && lastSegment == "files") {
+            val formData = request.body.asFormData()
+            if (formData != null) {
+                for (part in formData.parts) {
+                    if (part.name == "file") {
+                        part.filename?.let { span.setAttribute("gen_ai.request.file.filename", it) }
+                        part.contentType?.let { span.setAttribute("gen_ai.request.file.mime_type", it.asString()) }
+                        span.setAttribute("gen_ai.request.file.size_bytes", part.content.size.toLong())
+                    }
+                }
             }
         }
 
@@ -157,6 +177,35 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
                 caps["vision"]?.jsonPrimitive?.booleanOrNull?.let {
                     span.setAttribute("gen_ai.response.model.capabilities.vision", it)
                 }
+            }
+        }
+
+        if (body["type"]?.jsonPrimitive?.content == "file") {
+            span.setAttribute(GEN_AI_OUTPUT_TYPE, "file")
+            val fileId = body["file_id"]?.jsonPrimitive?.content
+                ?: body["id"]?.jsonPrimitive?.content
+            fileId?.let { span.setAttribute("gen_ai.response.file.id", it) }
+            body["filename"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.file.filename", it)
+            }
+            (body["mime_type"] ?: body["media_type"])?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.file.mime_type", it)
+            }
+            body["size"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.file.size_bytes", it)
+            }
+            body["downloadable"]?.jsonPrimitive?.booleanOrNull?.let {
+                span.setAttribute("gen_ai.response.file.downloadable", it)
+            }
+            body["created_at"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.file.created_at", it)
+            }
+        }
+
+        if (body["deleted"]?.jsonPrimitive?.booleanOrNull == true) {
+            span.setAttribute(GEN_AI_OUTPUT_TYPE, "file_deleted")
+            body["id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.file.id", it)
             }
         }
     }

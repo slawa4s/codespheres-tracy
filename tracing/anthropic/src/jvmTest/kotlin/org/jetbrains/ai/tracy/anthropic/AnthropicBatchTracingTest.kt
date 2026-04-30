@@ -73,5 +73,21 @@ class AnthropicBatchTracingTest : BaseAnthropicTracingTest() {
             trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")],
         )
         assertEquals(StatusCode.ERROR, trace.status.statusCode)
+
+        assertEquals("anthropic", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+        assertEquals("batches", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
+        assertEquals(400L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
+        assertNotNull(
+            trace.attributes[AttributeKey.stringKey("error.type")],
+            "Expected error.type to be set on 4xx response"
+        )
+        assertNotNull(
+            trace.attributes[AttributeKey.stringKey("server.address")],
+            "Expected server.address to be set"
+        )
+        assertNotNull(
+            trace.attributes[AttributeKey.longKey("server.port")],
+            "Expected server.port to be set"
+        )
     }
 }
