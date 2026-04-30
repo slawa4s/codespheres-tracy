@@ -7,6 +7,9 @@ package org.jetbrains.ai.tracy.anthropic.adapters.handlers
 
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
 import kotlinx.serialization.json.*
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
@@ -55,6 +58,10 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
         if (operationName != null) {
             span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
         }
+
+        if (detectedType == "models" && lastSegment != null && lastSegment != "models") {
+            span.setAttribute(GEN_AI_REQUEST_MODEL, lastSegment)
+        }
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
@@ -73,6 +80,37 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
         }
         body["last_id"]?.jsonPrimitive?.content?.let {
             span.setAttribute("gen_ai.response.list.last_id", it)
+        }
+
+        if (body["type"]?.jsonPrimitive?.content == "model") {
+            body["id"]?.jsonPrimitive?.content?.let { id ->
+                span.setAttribute(GEN_AI_RESPONSE_MODEL, id)
+                span.setAttribute("gen_ai.response.model.id", id)
+            }
+            span.setAttribute(GEN_AI_OUTPUT_TYPE, "model")
+            body["display_name"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.model.display_name", it)
+            }
+            body["created_at"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.model.created_at", it)
+            }
+            body["max_input_tokens"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_input_tokens", it)
+            }
+            body["max_output_tokens"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_output_tokens", it)
+            }
+            body["capabilities"]?.jsonObject?.let { caps ->
+                caps["batch"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.capabilities.batch", it)
+                }
+                caps["citations"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.capabilities.citations", it)
+                }
+                caps["vision"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.capabilities.vision", it)
+                }
+            }
         }
     }
 

@@ -13,6 +13,10 @@ import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.core.http.protocol.asJson
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
 import java.util.concurrent.ConcurrentHashMap
@@ -82,8 +86,9 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
 
-    // streaming is not supported
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
+    override fun isStreamingRequest(request: TracyHttpRequest): Boolean {
+        return request.body.asJson()?.jsonObject?.get("stream")?.jsonPrimitive?.boolean == true
+    }
     override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) {
         handlerFor(url).handleStreaming(span, events)
     }
