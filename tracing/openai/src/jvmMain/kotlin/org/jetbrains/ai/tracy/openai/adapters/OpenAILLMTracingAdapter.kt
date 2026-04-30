@@ -16,6 +16,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOp
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
@@ -94,9 +95,21 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     }
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
+        val apiType = OpenAIApiType.detect(response.url)
         val handler = handlerFor(response.url)
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
         handler.handleResponseAttributes(span, response)
+        // Set the correct operation name based on the API type. The response body's "object" field
+        // is not a reliable source for this attribute — it produces values like "list" or
+        // "video.deleted" that are not valid operation names.
+        val operationName = when (apiType) {
+            OpenAIApiType.CHAT_COMPLETIONS, OpenAIApiType.RESPONSES_API -> "chat"
+            OpenAIApiType.IMAGES_GENERATIONS, OpenAIApiType.IMAGES_EDITS, OpenAIApiType.VIDEOS -> "generate_content"
+            null -> null
+        }
+        if (operationName != null) {
+            span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+        }
     }
 
     override fun getSpanName(request: TracyHttpRequest) = "OpenAI-generation"
