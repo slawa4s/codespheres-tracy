@@ -159,6 +159,35 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
                 }
             }
         }
+
+        if (body["type"]?.jsonPrimitive?.content == "file") {
+            span.setAttribute(GEN_AI_OUTPUT_TYPE, "file")
+            val fileId = body["file_id"]?.jsonPrimitive?.content
+                ?: body["id"]?.jsonPrimitive?.content
+            fileId?.let { span.setAttribute("gen_ai.response.file.id", it) }
+            body["filename"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.file.filename", it)
+            }
+            (body["mime_type"] ?: body["media_type"])?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.file.mime_type", it)
+            }
+            body["size"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.file.size_bytes", it)
+            }
+            body["downloadable"]?.jsonPrimitive?.booleanOrNull?.let {
+                span.setAttribute("gen_ai.response.file.downloadable", it)
+            }
+            body["created_at"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.file.created_at", it)
+            }
+        }
+
+        if (body["deleted"]?.jsonPrimitive?.booleanOrNull == true) {
+            span.setAttribute(GEN_AI_OUTPUT_TYPE, "file_deleted")
+            body["id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.file.id", it)
+            }
+        }
     }
 
     override fun handleStreaming(span: Span, events: String) = Unit
