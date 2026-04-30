@@ -41,6 +41,8 @@ internal class AnthropicMessagesHandler(
         span.setAttribute("gen_ai.provider.name", "anthropic")
         span.setAttribute("server.address", request.url.host)
         span.setAttribute("server.port", if (request.url.scheme == "https") 443L else 80L)
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
+        span.setAttribute("anthropic.api.type", "messages")
 
         val body = request.body.asJson()?.jsonObject ?: return
 
