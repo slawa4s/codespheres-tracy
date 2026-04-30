@@ -30,6 +30,8 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+        OpenAIApiUtils.setNetworkRequestAttributes(span, request)
+        span.setAttribute("openai.api.type", "responses")
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.previous_response_id", it)
@@ -229,11 +231,39 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 Json.parseToJsonElement(data).jsonObject
             }.getOrNull() ?: continue
 
-            val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            when (event["type"]?.jsonPrimitive?.content) {
+                "response.output_text.done" -> {
+                    event["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
+                        span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+                    }
+                }
+
+                "response.done" -> {
+                    val response = event["response"]?.jsonObject ?: continue
+                    response["id"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_ID, it)
+                    }
+                    response["model"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                    }
+                    response["object"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute("tracy.response.object", it)
+                    }
+                    response["status"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute("tracy.response.status", it)
+                    }
+                    response["created_at"]?.jsonPrimitive?.longOrNull?.let {
+                        span.setAttribute("tracy.response.created_at", it)
+                    }
+                    response["completed_at"]?.jsonPrimitive?.longOrNull?.let {
+                        span.setAttribute("tracy.response.completed_at", it)
+                    }
+                    response["usage"]?.jsonObject?.let { usage ->
+                        setUsageAttributes(span, usage)
+                    }
+                    // Streaming completed via SSE — the underlying HTTP response was 200
+                    span.setAttribute("http.response.status_code", 200L)
                 }
             }
         }
