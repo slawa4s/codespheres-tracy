@@ -23,6 +23,8 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_SEED
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_STOP_SEQUENCES
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.Json
@@ -31,8 +33,10 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -46,6 +50,21 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+
+        body["seed"]?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_SEED, it)
+        }
+
+        body["stop"]?.let { stop ->
+            val sequences: List<String>? = when (stop) {
+                is JsonArray -> stop.filterIsInstance<JsonPrimitive>().mapNotNull { it.contentOrNull }
+                is JsonPrimitive -> stop.contentOrNull?.let { listOf(it) }
+                else -> null
+            }
+            sequences?.takeIf { it.isNotEmpty() }?.let {
+                span.setAttribute(GEN_AI_REQUEST_STOP_SEQUENCES, it)
+            }
+        }
 
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -320,7 +339,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "model",
         "tools",
         "choices",
-        "temperature"
+        "temperature",
+        "seed",
+        "stop"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
