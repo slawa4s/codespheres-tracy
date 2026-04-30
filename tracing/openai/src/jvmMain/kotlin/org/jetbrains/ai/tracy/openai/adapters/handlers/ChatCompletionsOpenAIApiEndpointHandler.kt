@@ -23,6 +23,7 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.Json
@@ -48,6 +49,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
         OpenAIApiUtils.setNetworkRequestAttributes(span, request)
 
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
+        span.setAttribute("openai.api.type", "chat_completions")
+
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
                 val role = message.jsonObject["role"]?.jsonPrimitive?.content
@@ -72,6 +76,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         // See: https://platform.openai.com/docs/api-reference/chat/create
         body["tools"]?.let { tools ->
             if (tools is JsonArray) {
+                span.setAttribute("tracy.request.tool.count", tools.size.toLong())
                 for ((index, tool) in tools.jsonArray.withIndex()) {
                     val toolType = tool.jsonObject["type"]?.jsonPrimitive?.content
                     span.setAttribute("gen_ai.tool.$index.type", toolType)
@@ -89,6 +94,16 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     }
                 }
             }
+        }
+
+        body["tool_choice"]?.let { toolChoice ->
+            val toolChoiceValue = when {
+                toolChoice is JsonObject && toolChoice["type"]?.jsonPrimitive?.content == "function" ->
+                    toolChoice["function"]?.jsonObject?.get("name")?.jsonPrimitive?.content ?: toolChoice.toString()
+                toolChoice is JsonPrimitive -> toolChoice.content
+                else -> toolChoice.toString()
+            }
+            span.setAttribute("tracy.request.tool_choice", toolChoiceValue)
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.REQUEST)
@@ -322,7 +337,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "model",
         "tools",
         "choices",
-        "temperature"
+        "temperature",
+        "tool_choice"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
