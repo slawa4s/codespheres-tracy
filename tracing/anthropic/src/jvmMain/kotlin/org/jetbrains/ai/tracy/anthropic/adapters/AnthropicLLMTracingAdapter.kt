@@ -49,6 +49,14 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        val detectedType = detectApiType(request.url)
+        span.setAttribute("anthropic.api.type", detectedType)
+
+        // For list endpoints (GET with no trailing resource ID), populate gen_ai.operation.name
+        if (request.method == "GET" && request.url.pathSegments.lastOrNull() == detectedType) {
+            span.setAttribute(GEN_AI_OPERATION_NAME, "$detectedType.list")
+        }
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -333,6 +341,16 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
 
         return resources
+    }
+
+    private fun detectApiType(url: TracyHttpUrl): String {
+        val segments = url.pathSegments
+        return when {
+            "batches" in segments -> "batches"
+            "files" in segments -> "files"
+            "models" in segments -> "models"
+            else -> "messages"
+        }
     }
 
     private val extractor: MediaContentExtractor = MediaContentExtractorImpl()
