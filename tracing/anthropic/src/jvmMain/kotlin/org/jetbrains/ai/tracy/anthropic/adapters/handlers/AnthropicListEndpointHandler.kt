@@ -59,6 +59,12 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
             span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
         }
 
+        if (request.method == "POST" && detectedType == "batches" && lastSegment == "batches") {
+            request.body.asJson()?.jsonObject?.get("requests")?.jsonArray?.size?.toLong()?.let {
+                span.setAttribute("gen_ai.request.batch.size", it)
+            }
+        }
+
         if (detectedType == "models" && lastSegment != null && lastSegment != "models") {
             span.setAttribute(GEN_AI_REQUEST_MODEL, lastSegment)
         }
@@ -66,6 +72,14 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         span.setAttribute("http.response.status_code", response.code.toLong())
+
+        if (response.code >= 400) {
+            response.body.asJson()?.jsonObject
+                ?.get("error")?.jsonObject
+                ?.get("type")?.jsonPrimitive?.content
+                ?.let { span.setAttribute("error.type", it) }
+            return
+        }
 
         val body = response.body.asJson()?.jsonObject ?: return
 
