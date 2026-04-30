@@ -30,6 +30,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.previous_response_id", it)
@@ -221,6 +222,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
     }
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
+        var responseModel: String? = null
+        var responseId: String? = null
+
         for (line in events.lineSequence()) {
             if (!line.startsWith("data:")) continue
             val data = line.removePrefix("data:").trim()
@@ -230,6 +234,12 @@ internal class ResponsesOpenAIApiEndpointHandler(
             }.getOrNull() ?: continue
 
             val type = event["type"]?.jsonPrimitive?.content
+            if (type == "response.created") {
+                event["response"]?.jsonObject?.let { response ->
+                    if (responseId == null) responseId = response["id"]?.jsonPrimitive?.contentOrNull
+                    if (responseModel == null) responseModel = response["model"]?.jsonPrimitive?.contentOrNull
+                }
+            }
             if (type == "response.output_text.done") {
                 event["text"]?.jsonPrimitive?.content?.let {
                     span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
@@ -237,6 +247,11 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 }
             }
         }
+
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
+        return@runCatching
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
         span.recordException(exception)
@@ -348,6 +363,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
         usage["output_tokens"]?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+        }
+        usage["input_tokens_details"]?.jsonObject?.get("cached_tokens")?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
         }
     }
 
