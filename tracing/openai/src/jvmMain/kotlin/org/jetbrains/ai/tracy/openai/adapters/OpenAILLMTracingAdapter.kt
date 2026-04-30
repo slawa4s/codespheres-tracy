@@ -12,6 +12,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
@@ -53,7 +54,10 @@ private enum class OpenAIApiType(val route: String) {
     FILES("files"),
 
     // See: https://platform.openai.com/docs/api-reference/models
-    MODELS("models");
+    MODELS("models"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio
+    AUDIO("audio");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -176,6 +180,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.MODELS -> handlers.getOrPut(OpenAIApiType.MODELS) {
                 ModelsOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.AUDIO -> handlers.getOrPut(OpenAIApiType.AUDIO) {
+                AudioOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
