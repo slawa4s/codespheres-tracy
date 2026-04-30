@@ -38,6 +38,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
         body["store"]?.jsonPrimitive?.booleanOrNull?.let {
             span.setAttribute("gen_ai.request.store", it)
+            span.setAttribute("tracy.request.store", it)
         }
         body["top_p"]?.jsonPrimitive?.doubleOrNull?.let {
             span.setAttribute(GEN_AI_REQUEST_TOP_P, it)
