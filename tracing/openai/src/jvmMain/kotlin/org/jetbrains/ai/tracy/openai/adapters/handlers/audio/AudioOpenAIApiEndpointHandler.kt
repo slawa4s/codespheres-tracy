@@ -92,6 +92,7 @@ internal class AudioOpenAIApiEndpointHandler : EndpointApiHandler {
             return when {
                 pathSegments.any { it == "transcriptions" } -> "audio.transcription"
                 pathSegments.any { it == "translations" } -> "audio.translation"
+                pathSegments.any { it == "speech" } -> "audio.speech"
                 else -> {
                     logger.warn { "Unknown audio endpoint. Path: ${pathSegments.joinToString("/")} Defaulting to 'audio'." }
                     "audio"
