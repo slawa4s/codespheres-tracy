@@ -46,6 +46,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+        OpenAIApiUtils.setNetworkRequestAttributes(span, request)
 
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -134,6 +135,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        OpenAIApiUtils.setHttpStatusCode(span, response)
         val body = response.body.asJson()?.jsonObject ?: return
 
         body["choices"]?.let { choices ->
