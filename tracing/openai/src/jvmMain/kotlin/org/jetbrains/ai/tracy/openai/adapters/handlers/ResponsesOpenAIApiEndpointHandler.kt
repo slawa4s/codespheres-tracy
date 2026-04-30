@@ -28,10 +28,16 @@ internal class ResponsesOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
-        val body = request.body.asJson()?.jsonObject ?: return
-        OpenAIApiUtils.setCommonRequestAttributes(span, request)
         OpenAIApiUtils.setNetworkRequestAttributes(span, request)
         span.setAttribute("openai.api.type", "responses")
+        val isCancelRequest = "cancel" in request.url.pathSegments
+        span.setAttribute(
+            GEN_AI_OPERATION_NAME,
+            if (isCancelRequest) "response.cancel" else "generate_content"
+        )
+
+        val body = request.body.asJson()?.jsonObject ?: return
+        OpenAIApiUtils.setCommonRequestAttributes(span, request)
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.previous_response_id", it)
