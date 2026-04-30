@@ -119,6 +119,10 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             }
         }
 
+        body["seed"]?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.request.seed", it.toLong())
+        }
+
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.REQUEST)
     }
 
@@ -166,13 +170,16 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         val body = response.body.asJson()?.jsonObject ?: return
 
         body["choices"]?.let { choices ->
+            val finishReasons = mutableListOf<String>()
             for ((index, choice) in choices.jsonArray.withIndex()) {
                 val index = choice.jsonObject["index"]?.jsonPrimitive?.intOrNull ?: index
 
+                val finishReason = choice.jsonObject["finish_reason"]?.jsonPrimitive?.content
                 span.setAttribute(
                     "gen_ai.completion.$index.finish_reason",
-                    choice.jsonObject["finish_reason"]?.jsonPrimitive?.content
+                    finishReason
                 )
+                finishReason?.let { finishReasons.add(it) }
 
                 choice.jsonObject["message"]?.jsonObject?.let { message ->
                     val role = message.jsonObject["role"]?.jsonPrimitive?.content
@@ -219,6 +226,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     )
                 }
             }
+            if (finishReasons.isNotEmpty()) {
+                span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons)
+            }
         }
 
         body["usage"]?.let { usage ->
@@ -233,6 +243,15 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         var finishReason: String? = null
         var firstChunkProcessed = false
         var lastParsedChunk: JsonObject? = null
+
+        class ToolCallBuilder {
+            var id: String? = null
+            var type: String? = null
+            var functionName: String? = null
+            val functionArguments = StringBuilder()
+        }
+
+        val toolCallBuilders = mutableMapOf<Int, ToolCallBuilder>()
 
         val out = buildString {
             for (line in events.lineSequence()) {
@@ -268,6 +287,19 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     role = delta["role"]?.jsonPrimitive?.content
                 }
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+
+                // Accumulate tool_calls delta fragments across SSE events
+                delta["tool_calls"]?.jsonArray?.forEach { toolCallDelta ->
+                    val tcObj = toolCallDelta.jsonObject
+                    val toolCallIndex = tcObj["index"]?.jsonPrimitive?.intOrNull ?: return@forEach
+                    val builder = toolCallBuilders.getOrPut(toolCallIndex) { ToolCallBuilder() }
+                    tcObj["id"]?.jsonPrimitive?.content?.let { builder.id = it }
+                    tcObj["type"]?.jsonPrimitive?.content?.let { builder.type = it }
+                    tcObj["function"]?.jsonObject?.let { fn ->
+                        fn["name"]?.jsonPrimitive?.content?.let { builder.functionName = it }
+                        fn["arguments"]?.jsonPrimitive?.content?.let { builder.functionArguments.append(it) }
+                    }
+                }
             }
         }
 
@@ -277,6 +309,18 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
         finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+        finishReason?.let { span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, listOf(it)) }
+
+        // Emit accumulated tool call attributes
+        for ((toolCallIndex, builder) in toolCallBuilders) {
+            builder.id?.let { span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.call.id", it) }
+            builder.type?.let { span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.call.type", it) }
+            builder.functionName?.let { span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.name", it.orRedactedOutput()) }
+            val args = builder.functionArguments.toString()
+            if (args.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.0.tool.$toolCallIndex.arguments", args.orRedactedOutput())
+            }
+        }
 
         // Extract usage from the last chunk when stream_options.include_usage is enabled
         lastParsedChunk?.get("usage")?.jsonObject?.let { setUsageAttributes(span, it) }
@@ -384,7 +428,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "top_p",
         "frequency_penalty",
         "presence_penalty",
-        "stop"
+        "stop",
+        "seed"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
