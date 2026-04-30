@@ -82,26 +82,29 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                     )
                 }
                 // either a single image or an array of images
-                "image", "image[]" -> if (contentTracingAllowed(ContentKind.INPUT)) {
-                    // trace images only when input content tracing is allowed.
-                    // base64-encoded image content
-                    span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
-                    span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
-                    if (part.filename != null) {
-                        span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                "image", "image[]" -> {
+                    span.setAttribute("tracy.request.image.size_bytes", part.content.size.toLong())
+                    if (contentTracingAllowed(ContentKind.INPUT)) {
+                        // trace images only when input content tracing is allowed.
+                        // base64-encoded image content
+                        span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
+                        span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
+                        if (part.filename != null) {
+                            span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                        }
+                        // save image for further upload
+                        mediaContentParts.add(
+                            MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
+                        )
+                        ++imagesCount
                     }
-                    // save image for further upload
-                    mediaContentParts.add(
-                        MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
-                    )
-                    ++imagesCount
                 }
 
                 null -> logger.warn { "Form data part with missing name ignored. Content type: '$contentType'" }
                 else -> {
                     // since we don't know how sensitive other fields may be,
                     // we disguise their content if input tracing is disallowed.
-                    span.setAttribute("gen_ai.request.${part.name}", content.orRedactedInput())
+                    span.setAttribute("tracy.request.${part.name}", content.orRedactedInput())
                 }
             }
         }
