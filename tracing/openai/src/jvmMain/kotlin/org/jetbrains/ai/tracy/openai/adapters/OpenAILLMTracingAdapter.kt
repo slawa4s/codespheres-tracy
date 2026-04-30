@@ -10,6 +10,7 @@ import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.EmbeddingsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
@@ -56,7 +57,10 @@ private enum class OpenAIApiType(val route: String) {
     AUDIO_TRANSLATIONS("audio/translations"),
 
     // See: https://platform.openai.com/docs/api-reference/audio/createSpeech
-    AUDIO_SPEECH("audio/speech");
+    AUDIO_SPEECH("audio/speech"),
+
+    // See: https://platform.openai.com/docs/api-reference/embeddings
+    EMBEDDINGS("embeddings");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -183,6 +187,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.AUDIO_SPEECH -> handlers.getOrPut(OpenAIApiType.AUDIO_SPEECH) {
                 AudioSpeechOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.EMBEDDINGS -> handlers.getOrPut(OpenAIApiType.EMBEDDINGS) {
+                EmbeddingsOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
