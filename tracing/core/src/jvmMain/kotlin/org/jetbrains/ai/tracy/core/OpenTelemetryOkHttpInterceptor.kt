@@ -10,6 +10,7 @@ import io.opentelemetry.api.trace.StatusCode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import mu.KotlinLogging
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.OkHttpClient
@@ -23,6 +24,8 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import okhttp3.Request as OkHttpRequest
 import okhttp3.Response as OkHttpResponse
 import okhttp3.ResponseBody as OkHttpResponseBody
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Instruments an [OkHttpClient] with OpenTelemetry tracing for LLM provider API calls,
@@ -147,20 +150,27 @@ fun instrument(client: OkHttpClient, adapter: LLMTracingAdapter): OkHttpClient {
  * @param interceptor The interceptor to be injected into the internal HTTP client of the OpenAI-compatible client.
  */
 fun <T> patchOpenAICompatibleClient(client: T, interceptor: Interceptor) {
-    val clientOptions = getFieldValue(client as Any, "clientOptions")
-    val originalHttpClient = getFieldValue(clientOptions, "originalHttpClient")
+    try {
+        val clientOptions = getFieldValue(client as Any, "clientOptions")
+        val originalHttpClient = getFieldValue(clientOptions, "originalHttpClient")
 
-    val okHttpHolder = if (originalHttpClient::class.simpleName == "OkHttpClient") {
-        originalHttpClient
-    } else {
-        getFieldValue(originalHttpClient, "httpClient")
+        val okHttpHolder = if (originalHttpClient::class.simpleName == "OkHttpClient") {
+            originalHttpClient
+        } else {
+            getFieldValue(originalHttpClient, "httpClient")
+        }
+
+        val okHttpClient = getFieldValue(okHttpHolder, "okHttpClient") as OkHttpClient
+
+        // add a given interceptor if the current list of interceptors doesn't contain it already
+        val updatedInterceptors = patchInterceptors(okHttpClient.interceptors, interceptor)
+        setFieldValue(okHttpClient, "interceptors", updatedInterceptors)
+    } catch (e: Exception) {
+        logger.warn(e) {
+            "Tracy: failed to instrument client via reflection; tracing will be skipped for this client. " +
+                "This may occur if the client's internal structure has changed. Client type: ${(client as Any)::class.qualifiedName}"
+        }
     }
-
-    val okHttpClient = getFieldValue(okHttpHolder, "okHttpClient") as OkHttpClient
-
-    // add a given interceptor if the current list of interceptors doesn't contain it already
-    val updatedInterceptors = patchInterceptors(okHttpClient.interceptors, interceptor)
-    setFieldValue(okHttpClient, "interceptors", updatedInterceptors)
 }
 
 internal fun getFieldValue(instance: Any, fieldName: String): Any {

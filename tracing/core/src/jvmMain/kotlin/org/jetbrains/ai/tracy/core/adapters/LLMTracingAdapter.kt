@@ -10,7 +10,10 @@ import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_SYSTEM
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -66,6 +69,16 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
 
     fun registerResponse(span: Span, response: TracyHttpResponse): Unit =
         runCatching {
+            span.setAttribute("http.status_code", response.code.toLong())
+            span.setAttribute("http.response.status_code", response.code.toLong())
+
+            if (response.isError()) {
+                getResponseErrorBodyAttributes(span, response.body)
+                span.setStatus(StatusCode.ERROR)
+            } else {
+                span.setStatus(StatusCode.OK)
+            }
+
             val body = response.body.asJson()?.jsonObject ?: return
             val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
             val mimeType = response.contentType?.mimeType
@@ -84,16 +97,6 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
                         span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
                     }
                 }
-            }
-
-            span.setAttribute("http.status_code", response.code.toLong())
-            span.setAttribute("http.response.status_code", response.code.toLong())
-
-            if (response.isError()) {
-                getResponseErrorBodyAttributes(span, response.body)
-                span.setStatus(StatusCode.ERROR)
-            } else {
-                span.setStatus(StatusCode.OK)
             }
 
             val spanData = (span as? ReadableSpan)?.toSpanData() ?: return@runCatching
@@ -146,10 +149,17 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             body.entries.forEach { (key, value) ->
                 if (key !in (mappedAttributes)) {
                     val attributeKey = "tracy.${payloadType.value}.$key"
-                    setAttribute(attributeKey, value.toString())
+                    setAttribute(attributeKey, value.asString)
                 }
             }
         }
+
+        private val JsonElement.asString: String
+            get() = when (this) {
+                is JsonArray -> toString()
+                is JsonObject -> toString()
+                is JsonPrimitive -> content
+            }
 
         enum class PayloadType(val value: String) {
             REQUEST("request"),

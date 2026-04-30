@@ -45,11 +45,21 @@ internal fun handleImageGenerationResponseAttributes(
             val mediaContent = parseMediaContent(data, mediaType)
             extractor.setUploadableContentAttributes(span, field = "output", mediaContent)
         }
+
+        // extract URL from first image if present
+        data.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content?.let { url ->
+            span.setAttribute("tracy.response.image.url", url)
+        }
     }
 
     body["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
 
-    val manuallyParsedKeys = listOf("data", "usage")
+    // extract created timestamp explicitly under the tracy.response.* namespace
+    body["created"]?.jsonPrimitive?.content?.let { created ->
+        span.setAttribute("tracy.response.created", created)
+    }
+
+    val manuallyParsedKeys = listOf("data", "usage", "created")
     for ((key, value) in body.entries) {
         if (key in manuallyParsedKeys) {
             continue
