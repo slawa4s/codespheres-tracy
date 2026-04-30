@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.anthropic.adapters.handlers
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 import mu.KotlinLogging
@@ -199,8 +200,51 @@ internal class AnthropicMessagesHandler(
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
 
-    // streaming is not supported for the Messages API
-    override fun handleStreaming(span: Span, events: String) = Unit
+    override fun handleStreaming(span: Span, events: String): Unit = runCatching {
+        for (sseEvent in events.split("\n\n")) {
+            val dataLine = sseEvent.lineSequence()
+                .firstOrNull { it.startsWith("data:") } ?: continue
+            val data = dataLine.removePrefix("data:").trim()
+
+            val event = runCatching {
+                Json.parseToJsonElement(data).jsonObject
+            }.getOrNull() ?: continue
+
+            when (event["type"]?.jsonPrimitive?.contentOrNull) {
+                "message_start" -> {
+                    val message = event["message"]?.jsonObject ?: continue
+                    message["id"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_ID, it)
+                    }
+                    message["model"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                    }
+                    message["role"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute("gen_ai.response.role", it)
+                    }
+                    message["type"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute(GEN_AI_OUTPUT_TYPE, it)
+                    }
+                    message["usage"]?.jsonObject?.let { usage ->
+                        usage["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                            span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
+                        }
+                    }
+                }
+
+                "message_delta" -> {
+                    event["usage"]?.jsonObject?.let { usage ->
+                        usage["output_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                            span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+                        }
+                    }
+                }
+            }
+        }
+    }.getOrElse { exception ->
+        span.setStatus(StatusCode.ERROR)
+        span.recordException(exception)
+    }
 
     /**
      * Parses content of the `messages` field when its type is
