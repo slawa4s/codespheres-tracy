@@ -17,8 +17,12 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  * Handler for Anthropic list endpoints (batches, files, models).
  *
  * Sets stable semconv network attributes on requests and parses the standard Anthropic page
- * envelope on responses (data count, has_more, first_id, last_id). For GET list requests,
- * also sets `gen_ai.operation.name` and `anthropic.api.type` to identify the operation.
+ * envelope on responses (data count, has_more, first_id, last_id). Sets `gen_ai.operation.name`
+ * and `anthropic.api.type` for all recognised batch lifecycle operations:
+ * - GET  `…/{type}`       → `{type}.list`
+ * - GET  `…/{type}/{id}`  → `{type}.retrieve`
+ * - POST `…/{type}`       → `{type}.create`
+ * - POST `…/cancel`       → `batches.cancel`
  *
  * See:
  * - [Messages Batches API](https://docs.anthropic.com/en/api/messages-batches)
@@ -35,9 +39,21 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
         val detectedType = detectApiType(request.url.pathSegments)
         span.setAttribute("anthropic.api.type", detectedType)
 
-        // For GET list endpoints (no trailing resource ID after the type segment), set gen_ai.operation.name
-        if (request.method == "GET" && request.url.pathSegments.lastOrNull() == detectedType) {
-            span.setAttribute(GEN_AI_OPERATION_NAME, "$detectedType.list")
+        val lastSegment = request.url.pathSegments.lastOrNull()
+        val operationName = when (request.method) {
+            "POST" -> when {
+                lastSegment == "cancel" -> "batches.cancel"
+                lastSegment == detectedType -> "$detectedType.create"
+                else -> null
+            }
+            "GET" -> when {
+                lastSegment == detectedType -> "$detectedType.list"
+                else -> "$detectedType.retrieve"
+            }
+            else -> null
+        }
+        if (operationName != null) {
+            span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
         }
     }
 

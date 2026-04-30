@@ -27,6 +27,7 @@ interface TracyHttpResponse {
     val body: TracyHttpResponseBody
     val url: TracyHttpUrl
     val requestMethod: String
+    val contentLength: Long? get() = null
 
     fun isError(): Boolean
 }
