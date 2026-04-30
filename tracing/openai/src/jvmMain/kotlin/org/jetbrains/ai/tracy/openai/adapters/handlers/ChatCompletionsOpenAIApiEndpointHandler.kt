@@ -229,39 +229,42 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     }
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
-        var role: String? = null
         var responseId: String? = null
         var responseModel: String? = null
-        var finishReason: String? = null
         var lastEvent: JsonObject? = null
 
-        val out = buildString {
-            for (line in events.lineSequence()) {
-                if (!line.startsWith("data:")) {
-                    continue
-                }
-                val data = line.removePrefix("data:").trim()
+        // Accumulate per-choice data keyed by choice index to support n > 1
+        val accumulatedChoices = mutableMapOf<Int, AccumulatedChoice>()
 
-                val event = runCatching {
-                    Json.parseToJsonElement(data).jsonObject
-                }.getOrNull() ?: continue
+        for (line in events.lineSequence()) {
+            if (!line.startsWith("data:")) {
+                continue
+            }
+            val data = line.removePrefix("data:").trim()
 
-                lastEvent = event
+            val event = runCatching {
+                Json.parseToJsonElement(data).jsonObject
+            }.getOrNull() ?: continue
 
-                if (responseId == null) {
-                    responseId = event["id"]?.jsonPrimitive?.content
-                    responseModel = event["model"]?.jsonPrimitive?.content
-                }
+            lastEvent = event
 
-                val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+            if (responseId == null) {
+                responseId = event["id"]?.jsonPrimitive?.content
+                responseModel = event["model"]?.jsonPrimitive?.content
+            }
+
+            val choicesArray = event["choices"]?.jsonArray ?: continue
+            for (choiceElement in choicesArray) {
+                val choice = choiceElement.jsonObject
+                val choiceIndex = choice["index"]?.jsonPrimitive?.intOrNull ?: 0
+                val accumulated = accumulatedChoices.getOrPut(choiceIndex) { AccumulatedChoice() }
                 val delta = choice["delta"]?.jsonObject ?: continue
 
-                if (role == null) {
-                    role = delta["role"]?.jsonPrimitive?.content
+                if (accumulated.role == null) {
+                    accumulated.role = delta["role"]?.jsonPrimitive?.content
                 }
-                delta["content"]?.jsonPrimitive?.content?.let { append(it) }
-
-                (choice["finish_reason"] as? JsonPrimitive)?.content?.let { finishReason = it }
+                delta["content"]?.jsonPrimitive?.content?.let { accumulated.content.append(it) }
+                (choice["finish_reason"] as? JsonPrimitive)?.content?.let { accumulated.finishReason = it }
             }
         }
 
@@ -269,12 +272,21 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
         responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
 
-        if (out.isNotEmpty()) {
-            val kind = kindByRole(role)
-            span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
+        for ((index, accumulated) in accumulatedChoices) {
+            val kind = kindByRole(accumulated.role)
+            val content = accumulated.content.toString()
+            if (content.isNotEmpty()) {
+                span.setAttribute("gen_ai.completion.$index.content", content.orRedacted(kind))
+            }
+            accumulated.role?.let { span.setAttribute("gen_ai.completion.$index.role", it) }
+            accumulated.finishReason?.let { span.setAttribute("gen_ai.completion.$index.finish_reason", it) }
         }
-        role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
-        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+
+        // Set the response-level finish reasons array across all choices
+        val finishReasons = accumulatedChoices.values.mapNotNull { it.finishReason }
+        if (finishReasons.isNotEmpty()) {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons)
+        }
 
         lastEvent?.get("usage")?.jsonObject?.let { usage ->
             setUsageAttributes(span, usage)
@@ -284,6 +296,12 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
         span.recordException(exception)
+    }
+
+    private class AccumulatedChoice {
+        val content = StringBuilder()
+        var role: String? = null
+        var finishReason: String? = null
     }
 
     /**

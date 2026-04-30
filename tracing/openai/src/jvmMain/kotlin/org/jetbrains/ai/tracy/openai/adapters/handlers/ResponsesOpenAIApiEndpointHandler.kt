@@ -222,6 +222,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
     }
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
+        var completionContent: String? = null
+        var finishReason: String? = null
+
         for (line in events.lineSequence()) {
             if (!line.startsWith("data:")) continue
             val data = line.removePrefix("data:").trim()
@@ -230,13 +233,24 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 Json.parseToJsonElement(data).jsonObject
             }.getOrNull() ?: continue
 
-            val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            when (event["type"]?.jsonPrimitive?.content) {
+                "response.output_text.done" -> {
+                    completionContent = event["text"]?.jsonPrimitive?.content
+                }
+                "response.done" -> {
+                    // Extract actual finish reason from the terminal response event
+                    finishReason = event["response"]?.jsonObject?.get("status")?.jsonPrimitive?.content
                 }
             }
+        }
+
+        if (completionContent != null) {
+            span.setAttribute("gen_ai.completion.0.content", completionContent.orRedactedOutput())
+        }
+        // Use the actual finish reason from response.done; fall back to "stop" when text was received
+        val resolvedFinishReason = finishReason ?: if (completionContent != null) "stop" else null
+        if (resolvedFinishReason != null) {
+            span.setAttribute("gen_ai.completion.0.finish_reason", resolvedFinishReason)
         }
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
