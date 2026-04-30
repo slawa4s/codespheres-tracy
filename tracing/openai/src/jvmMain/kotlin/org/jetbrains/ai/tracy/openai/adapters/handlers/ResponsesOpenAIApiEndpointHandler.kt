@@ -340,7 +340,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
     }
 
     /**
-     * Sets usage attributes (input_tokens/output_tokens)
+     * Sets usage attributes (input_tokens/output_tokens and nested detail fields)
      */
     private fun setUsageAttributes(span: Span, usage: JsonObject) {
         usage["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
@@ -348,6 +348,16 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
         usage["output_tokens"]?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+        }
+        usage["input_tokens_details"]?.jsonObject?.let { details ->
+            details["cached_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
+            }
+        }
+        usage["output_tokens_details"]?.jsonObject?.let { details ->
+            details["reasoning_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.usage.reasoning.output_tokens", it.toLong())
+            }
         }
     }
 
