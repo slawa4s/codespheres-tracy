@@ -53,7 +53,13 @@ private enum class OpenAIApiType(val route: String) {
     FILES("files"),
 
     // See: https://platform.openai.com/docs/api-reference/models
-    MODELS("models");
+    MODELS("models"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createTranscription
+    AUDIO_TRANSCRIPTIONS("audio/transcriptions"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createTranslation
+    AUDIO_TRANSLATIONS("audio/translations");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -176,6 +182,14 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.MODELS -> handlers.getOrPut(OpenAIApiType.MODELS) {
                 ModelsOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.AUDIO_TRANSCRIPTIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSCRIPTIONS) {
+                ChatCompletionsOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.AUDIO_TRANSLATIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSLATIONS) {
+                ChatCompletionsOpenAIApiEndpointHandler(extractor)
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
