@@ -222,6 +222,8 @@ internal class ResponsesOpenAIApiEndpointHandler(
     }
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
+        var finishReason: String? = null
+
         for (line in events.lineSequence()) {
             if (!line.startsWith("data:")) continue
             val data = line.removePrefix("data:").trim()
@@ -230,13 +232,21 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 Json.parseToJsonElement(data).jsonObject
             }.getOrNull() ?: continue
 
-            val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            when (event["type"]?.jsonPrimitive?.content) {
+                "response.output_text.done" -> {
+                    event["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
+                    }
+                }
+                "response.done" -> {
+                    finishReason = event["response"]?.jsonObject
+                        ?.get("status")?.jsonPrimitive?.contentOrNull
                 }
             }
+        }
+
+        if (finishReason != null) {
+            span.setAttribute("gen_ai.completion.0.finish_reason", finishReason)
         }
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)

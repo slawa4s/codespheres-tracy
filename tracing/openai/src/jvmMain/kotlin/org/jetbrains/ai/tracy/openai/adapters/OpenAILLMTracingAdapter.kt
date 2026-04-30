@@ -99,7 +99,17 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         handler.handleResponseAttributes(span, response)
     }
 
-    override fun getSpanName(request: TracyHttpRequest) = "OpenAI-generation"
+    override fun getSpanName(request: TracyHttpRequest): String {
+        val operationName = when (OpenAIApiType.detect(request.url)) {
+            OpenAIApiType.CHAT_COMPLETIONS -> "chat"
+            OpenAIApiType.RESPONSES_API -> "chat"
+            OpenAIApiType.IMAGES_GENERATIONS -> "generate_image"
+            OpenAIApiType.IMAGES_EDITS -> "edit_image"
+            OpenAIApiType.VIDEOS -> "generate_video"
+            null -> "chat"
+        }
+        return "${GenAiSystemIncubatingValues.OPENAI} $operationName"
+    }
 
     override fun isStreamingRequest(request: TracyHttpRequest): Boolean {
         return when (request.body) {

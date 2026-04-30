@@ -228,40 +228,49 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
 
+    private class AccumulatedChoice(
+        var role: String? = null,
+        val content: StringBuilder = StringBuilder(),
+        var finishReason: String? = null
+    )
+
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
-        var role: String? = null
         var responseId: String? = null
         var responseModel: String? = null
-        var finishReason: String? = null
         var lastEvent: JsonObject? = null
+        val accumulatedChoices = mutableMapOf<Int, AccumulatedChoice>()
 
-        val out = buildString {
-            for (line in events.lineSequence()) {
-                if (!line.startsWith("data:")) {
-                    continue
+        for (line in events.lineSequence()) {
+            if (!line.startsWith("data:")) {
+                continue
+            }
+            val data = line.removePrefix("data:").trim()
+
+            val event = runCatching {
+                Json.parseToJsonElement(data).jsonObject
+            }.getOrNull() ?: continue
+
+            lastEvent = event
+
+            if (responseId == null) {
+                responseId = event["id"]?.jsonPrimitive?.content
+                responseModel = event["model"]?.jsonPrimitive?.content
+            }
+
+            event["choices"]?.jsonArray?.forEach { choiceElement ->
+                val choiceObj = choiceElement.jsonObject
+                val choiceIndex = choiceObj["index"]?.jsonPrimitive?.intOrNull ?: 0
+                val accumulated = accumulatedChoices.getOrPut(choiceIndex) { AccumulatedChoice() }
+                val delta = choiceObj["delta"]?.jsonObject ?: return@forEach
+
+                if (accumulated.role == null) {
+                    accumulated.role = delta["role"]?.jsonPrimitive?.content
                 }
-                val data = line.removePrefix("data:").trim()
+                delta["content"]?.jsonPrimitive?.content?.let { accumulated.content.append(it) }
 
-                val event = runCatching {
-                    Json.parseToJsonElement(data).jsonObject
-                }.getOrNull() ?: continue
-
-                lastEvent = event
-
-                if (responseId == null) {
-                    responseId = event["id"]?.jsonPrimitive?.content
-                    responseModel = event["model"]?.jsonPrimitive?.content
+                (choiceObj["finish_reason"] as? JsonPrimitive)?.content?.let {
+                    accumulated.finishReason = it
                 }
-
-                val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
-                val delta = choice["delta"]?.jsonObject ?: continue
-
-                if (role == null) {
-                    role = delta["role"]?.jsonPrimitive?.content
-                }
-                delta["content"]?.jsonPrimitive?.content?.let { append(it) }
-
-                (choice["finish_reason"] as? JsonPrimitive)?.content?.let { finishReason = it }
             }
         }
 
@@ -269,12 +278,20 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
         responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
 
-        if (out.isNotEmpty()) {
-            val kind = kindByRole(role)
-            span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
+        for ((index, choice) in accumulatedChoices) {
+            val out = choice.content.toString()
+            if (out.isNotEmpty()) {
+                val kind = kindByRole(choice.role)
+                span.setAttribute("gen_ai.completion.$index.content", out.orRedacted(kind))
+            }
+            choice.role?.let { span.setAttribute("gen_ai.completion.$index.role", it) }
+            choice.finishReason?.let { span.setAttribute("gen_ai.completion.$index.finish_reason", it) }
         }
-        role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
-        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+
+        val accumulatedFinishReasons = accumulatedChoices.values.mapNotNull { it.finishReason }
+        if (accumulatedFinishReasons.isNotEmpty()) {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, accumulatedFinishReasons)
+        }
 
         lastEvent?.get("usage")?.jsonObject?.let { usage ->
             setUsageAttributes(span, usage)
