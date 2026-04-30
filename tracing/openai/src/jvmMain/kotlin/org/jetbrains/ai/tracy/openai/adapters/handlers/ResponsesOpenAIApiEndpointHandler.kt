@@ -142,6 +142,28 @@ internal class ResponsesOpenAIApiEndpointHandler(
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
+        // Override gen_ai.operation.name: setCommonResponseAttributes incorrectly sets it from
+        // the body 'object' field. For the Responses API the correct value depends on the URL path.
+        val operationName = if ("cancel" in response.url.pathSegments) "response.cancel" else "generate_content"
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+
+        // Extract tracy.response.* attributes from the response body (mirrors handleStreaming)
+        body["object"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("tracy.response.object", it)
+        }
+        body["status"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("tracy.response.status", it)
+        }
+        body["background"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("tracy.response.background", it)
+        }
+        body["store"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("tracy.response.store", it)
+        }
+        body["created_at"]?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute("tracy.response.created_at", it)
+        }
+
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
         body["output"]?.let { outputs ->
@@ -454,6 +476,12 @@ internal class ResponsesOpenAIApiEndpointHandler(
         "id",
         "object",
         "model",
+
+        // parsed into tracy.response.* attributes above
+        "status",
+        "background",
+        "store",
+        "created_at",
 
         "output",
         "usage",
