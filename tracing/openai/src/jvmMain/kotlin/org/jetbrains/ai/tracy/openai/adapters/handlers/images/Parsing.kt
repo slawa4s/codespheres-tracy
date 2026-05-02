@@ -17,6 +17,7 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import org.jetbrains.ai.tracy.openai.adapters.handlers.asString
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.*
@@ -30,12 +31,21 @@ internal fun handleImageGenerationResponseAttributes(
     response: TracyHttpResponse,
     extractor: MediaContentExtractor,
 ) {
+    span.setAttribute(GEN_AI_OUTPUT_TYPE, "image")
+
     val body = response.body.asJson()?.jsonObject ?: return
 
     body["data"]?.jsonArray?.let { data ->
         // collect AI response content
         for ((index, image) in data.withIndex()) {
             span.setAttribute("gen_ai.completion.$index.content", image.asString.orRedactedOutput())
+        }
+        // extract URL from first element with a non-null url field
+        val firstUrl = data.asSequence()
+            .mapNotNull { it.jsonObject["url"]?.jsonPrimitive?.content }
+            .firstOrNull()
+        if (firstUrl != null) {
+            span.setAttribute("tracy.response.image.url", firstUrl)
         }
         // install media content for further upload
         val format = body["output_format"]?.jsonPrimitive?.content ?: defaultImageFormat
@@ -54,7 +64,7 @@ internal fun handleImageGenerationResponseAttributes(
         if (key in manuallyParsedKeys) {
             continue
         }
-        span.setAttribute("gen_ai.response.$key", value.asString)
+        span.setAttribute("tracy.response.$key", value.asString)
     }
 }
 
