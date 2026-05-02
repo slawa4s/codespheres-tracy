@@ -13,6 +13,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiE
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.SpeechOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
@@ -54,7 +55,10 @@ private enum class OpenAIApiType(val route: String) {
     AUDIO_TRANSCRIPTIONS("audio/transcriptions"),
 
     // See: https://platform.openai.com/docs/api-reference/audio/createTranslation
-    AUDIO_TRANSLATIONS("audio/translations");
+    AUDIO_TRANSLATIONS("audio/translations"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createSpeech
+    AUDIO_SPEECH("audio/speech");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -81,6 +85,7 @@ private enum class OpenAIApiType(val route: String) {
  * - **Video Generation**: `/v1/videos`
  * - **Audio Transcriptions**: `/v1/audio/transcriptions`
  * - **Audio Translations**: `/v1/audio/translations`
+ * - **Audio Speech**: `/v1/audio/speech`
  *
  * ## Example Usage
  * ```kotlin
@@ -180,6 +185,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.AUDIO_TRANSLATIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSLATIONS) {
                 AudioOpenAIApiEndpointHandler("audio.translation")
+            }
+
+            OpenAIApiType.AUDIO_SPEECH -> handlers.getOrPut(OpenAIApiType.AUDIO_SPEECH) {
+                SpeechOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
