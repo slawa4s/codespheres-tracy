@@ -9,6 +9,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 
@@ -34,7 +35,14 @@ internal object OpenAIApiUtils {
         val body = response.body.asJson()?.jsonObject ?: return
 
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
-        body["object"]?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it.jsonPrimitive.content) }
+        // Only set operation name if not already set by a handler (e.g. conversation sub-handlers set it
+        // explicitly because the raw "object" field values like "conversation" or "list" do not map to
+        // the expected gen_ai.operation.name values like "conversations.create" or "conversations.items.list")
+        val operationNameAlreadySet = (span as? ReadableSpan)
+            ?.toSpanData()?.attributes?.get(GEN_AI_OPERATION_NAME) != null
+        if (!operationNameAlreadySet) {
+            body["object"]?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it.jsonPrimitive.content) }
+        }
         body["model"]?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it.jsonPrimitive.content) }
     }
 }

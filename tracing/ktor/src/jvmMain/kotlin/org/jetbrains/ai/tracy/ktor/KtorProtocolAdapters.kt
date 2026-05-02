@@ -56,6 +56,7 @@ internal fun URLBuilder.toProtocolUrl(): TracyHttpUrl {
     return TracyHttpUrlImpl(
         scheme = builder.protocol.name,
         host = builder.host,
+        port = builder.port.takeIf { it > 0 } ?: 443,
         pathSegments = builder.pathSegments,
         parameters = params,
     )
@@ -72,6 +73,7 @@ internal fun KtorUrl.toProtocolUrl(): TracyHttpUrl {
     return TracyHttpUrlImpl(
         scheme = url.protocol.name,
         host = url.host,
+        port = url.port.takeIf { it > 0 } ?: 443,
         pathSegments = url.segments,
         parameters = params,
     )
