@@ -12,6 +12,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
@@ -45,7 +46,10 @@ private enum class OpenAIApiType(val route: String) {
     CONVERSATIONS("conversations"),
 
     // See: https://platform.openai.com/docs/api-reference/videos
-    VIDEOS("videos");
+    VIDEOS("videos"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio
+    AUDIO("audio");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -69,6 +73,7 @@ private enum class OpenAIApiType(val route: String) {
  * - **Image Generation**: `/v1/images/generations`
  * - **Image Editing**: `/v1/images/edits`
  * - **Video Generation**: `/v1/videos`
+ * - **Audio (transcription, translation, speech)**: `/v1/audio/transcriptions`, `/v1/audio/translations`, `/v1/audio/speech`
  *
  * ## Example Usage
  * ```kotlin
@@ -162,6 +167,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.VIDEOS -> handlers.getOrPut(OpenAIApiType.VIDEOS) {
                 VideosOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.AUDIO -> handlers.getOrPut(OpenAIApiType.AUDIO) {
+                AudioOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
