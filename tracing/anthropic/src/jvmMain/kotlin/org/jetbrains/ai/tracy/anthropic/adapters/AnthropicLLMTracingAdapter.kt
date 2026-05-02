@@ -129,6 +129,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
 
+        if ("models" in response.url.pathSegments) {
+            parseModelResponseAttributes(span, body)
+            span.populateUnmappedAttributes(body, mappedModelResponseAttributes, PayloadType.RESPONSE)
+            return
+        }
+
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
         body["role"]?.let { span.setAttribute("gen_ai.response.role", it.jsonPrimitive.content) }
@@ -338,6 +344,41 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         return resources
     }
 
+    /**
+     * Parses the response body of `GET /v1/models/{model_id}` and sets model metadata attributes.
+     *
+     * See: [Anthropic Models API](https://docs.anthropic.com/en/api/models)
+     */
+    private fun parseModelResponseAttributes(span: Span, body: JsonObject) {
+        body["id"]?.jsonPrimitive?.content?.let { id ->
+            span.setAttribute(GEN_AI_RESPONSE_MODEL, id)
+            span.setAttribute("gen_ai.response.model.id", id)
+        }
+        body["display_name"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.model.display_name", it)
+        }
+        body["created_at"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("gen_ai.response.model.created_at", it)
+        }
+        body["max_input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.response.model.max_input_tokens", it.toLong())
+        }
+        body["max_output_tokens"]?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.response.model.max_output_tokens", it.toLong())
+        }
+        body["capabilities"]?.jsonObject?.let { caps ->
+            caps["batch"]?.jsonPrimitive?.booleanOrNull?.let {
+                span.setAttribute("gen_ai.response.model.capabilities.batch", it)
+            }
+            caps["vision"]?.jsonPrimitive?.booleanOrNull?.let {
+                span.setAttribute("gen_ai.response.model.capabilities.vision", it)
+            }
+            caps["citations"]?.jsonPrimitive?.booleanOrNull?.let {
+                span.setAttribute("gen_ai.response.model.capabilities.citations", it)
+            }
+        }
+    }
+
     private val extractor: MediaContentExtractor = MediaContentExtractorImpl()
 
     // https://docs.claude.com/en/api/messages
@@ -362,6 +403,17 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "content",
         "stop_reason",
         "usage"
+    )
+
+    // https://docs.anthropic.com/en/api/models
+    private val mappedModelResponseAttributes: List<String> = listOf(
+        "id",
+        "type",
+        "display_name",
+        "created_at",
+        "max_input_tokens",
+        "max_output_tokens",
+        "capabilities"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
