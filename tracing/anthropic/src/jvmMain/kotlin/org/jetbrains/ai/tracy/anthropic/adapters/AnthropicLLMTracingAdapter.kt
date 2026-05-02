@@ -49,6 +49,14 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        val pathSegments = request.url.pathSegments
+        val apiType = when {
+            "batches" in pathSegments -> "batches"
+            "models" in pathSegments -> "models"
+            else -> "messages"
+        }
+        span.setAttribute("anthropic.api.type", apiType)
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
