@@ -39,15 +39,18 @@ interface TracyHttpResponse {
  *
  * - [Json]: Represents a JSON response body containing structured data, which can be parsed
  *           and accessed as a [JsonElement].
+ * - [Binary]: Represents a binary (non-JSON) response body, e.g. audio or video data.
  */
 @InternalTracyApi
 sealed class TracyHttpResponseBody {
     data class Json(val json: JsonElement) : TracyHttpResponseBody()
+    class Binary(val bytes: ByteArray) : TracyHttpResponseBody()
 }
 
 @InternalTracyApi
 fun TracyHttpResponseBody.asJson(): JsonElement? {
     return when (this) {
         is TracyHttpResponseBody.Json -> this.json
+        is TracyHttpResponseBody.Binary -> null
     }
 }
