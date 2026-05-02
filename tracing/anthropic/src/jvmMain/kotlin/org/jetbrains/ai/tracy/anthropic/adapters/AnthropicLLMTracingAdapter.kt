@@ -157,6 +157,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             return
         }
 
+        if ("batches" in response.url.pathSegments) {
+            parseBatchResponseAttributes(span, body)
+            span.populateUnmappedAttributes(body, mappedBatchResponseAttributes, PayloadType.RESPONSE)
+            return
+        }
+
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
         body["role"]?.let { span.setAttribute("gen_ai.response.role", it.jsonPrimitive.content) }
@@ -401,6 +407,43 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
     }
 
+    /**
+     * Parses the response body of batch API calls and sets batch metadata attributes.
+     *
+     * See: [Anthropic Message Batches API](https://docs.anthropic.com/en/api/creating-message-batches)
+     */
+    private fun parseBatchResponseAttributes(span: Span, body: JsonObject) {
+        body["id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("gen_ai.response.batch.id", it)
+        }
+        body["processing_status"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.batch.processing_status", it)
+        }
+        body["created_at"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.batch.created_at", it)
+        }
+        body["expires_at"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.batch.expires_at", it)
+        }
+        body["request_counts"]?.jsonObject?.let { counts ->
+            counts["processing"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.processing", it)
+            }
+            counts["succeeded"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it)
+            }
+            counts["errored"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.errored", it)
+            }
+            counts["canceled"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.canceled", it)
+            }
+            counts["expired"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.expired", it)
+            }
+        }
+    }
+
     private val extractor: MediaContentExtractor = MediaContentExtractorImpl()
 
     // https://docs.claude.com/en/api/messages
@@ -428,6 +471,15 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "content",
         "stop_reason",
         "usage"
+    )
+
+    // https://docs.anthropic.com/en/api/creating-message-batches
+    private val mappedBatchResponseAttributes: List<String> = listOf(
+        "id",
+        "processing_status",
+        "created_at",
+        "expires_at",
+        "request_counts"
     )
 
     // https://docs.anthropic.com/en/api/models
