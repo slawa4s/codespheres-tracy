@@ -49,6 +49,12 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        val modelIdFromPath = getModelIdFromPath(request.url)
+        if (modelIdFromPath != null) {
+            span.setAttribute(GEN_AI_REQUEST_MODEL, modelIdFromPath)
+            return
+        }
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -125,6 +131,11 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
+
+        if (getModelIdFromPath(response.url) != null) {
+            extractModelResponseAttributes(span, body)
+            return
+        }
 
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
@@ -333,6 +344,46 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
 
         return resources
+    }
+
+    /**
+     * Returns the model ID from the URL path if this is a `/v1/models/{id}` request,
+     * otherwise returns null.
+     */
+    private fun getModelIdFromPath(url: TracyHttpUrl): String? {
+        val segments = url.pathSegments
+        val modelsIndex = segments.indexOf("models")
+        return if (modelsIndex >= 0 && modelsIndex < segments.size - 1) segments[modelsIndex + 1] else null
+    }
+
+    /**
+     * Extracts model-specific attributes from the response body of a `/v1/models/{id}` request.
+     * See: [Anthropic Models API](https://docs.anthropic.com/en/api/models-get)
+     */
+    private fun extractModelResponseAttributes(span: Span, body: JsonObject) {
+        body["id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+            span.setAttribute("gen_ai.response.model.id", it)
+        }
+        body["display_name"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("gen_ai.response.model.display_name", it)
+        }
+        body["created_at"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("gen_ai.response.model.created_at", it)
+        }
+        body["max_input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.response.model.max_input_tokens", it.toLong())
+        }
+        body["max_output_tokens"]?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.response.model.max_output_tokens", it.toLong())
+        }
+        body["capabilities"]?.jsonObject?.let { capabilities ->
+            for ((key, value) in capabilities) {
+                val primitive = value.jsonPrimitive
+                primitive.booleanOrNull?.let { span.setAttribute("gen_ai.response.model.capabilities.$key", it) }
+                    ?: span.setAttribute("gen_ai.response.model.capabilities.$key", primitive.content)
+            }
+        }
     }
 
     private val extractor: MediaContentExtractor = MediaContentExtractorImpl()
