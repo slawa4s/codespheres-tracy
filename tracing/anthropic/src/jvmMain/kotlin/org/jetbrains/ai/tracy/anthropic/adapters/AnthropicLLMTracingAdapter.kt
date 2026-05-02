@@ -49,6 +49,8 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        resolveOperationName(request)?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -209,6 +211,25 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     // streaming is not supported
     override fun isStreamingRequest(request: TracyHttpRequest) = false
     override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+
+    private fun resolveOperationName(request: TracyHttpRequest): String? {
+        val segments = request.url.pathSegments.filter { it.isNotBlank() }
+        val method = request.method.uppercase()
+        return when {
+            "batches" in segments -> when {
+                "cancel" in segments -> "cancel"
+                method == "GET" -> "retrieve"
+                method == "POST" -> "create"
+                else -> null
+            }
+            "models" in segments -> when {
+                segments.indexOf("models") < segments.size - 1 -> "retrieve"
+                else -> "list"
+            }
+            "messages" in segments -> "create"
+            else -> null
+        }
+    }
 
     /**
      * Parses content of the `messages` field when its type is
