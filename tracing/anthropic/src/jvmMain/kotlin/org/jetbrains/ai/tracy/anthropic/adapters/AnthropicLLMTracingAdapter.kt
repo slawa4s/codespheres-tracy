@@ -269,9 +269,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     override fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
         super.getResponseErrorBodyAttributes(span, body)
-        body.asJson()?.jsonObject?.get("error")?.jsonObject?.get("type")?.jsonPrimitive?.content?.let {
-            span.setAttribute("error.type", it)
-        }
+        // Extract the Anthropic-specific error type; fall back to "http_error" when the
+        // response body cannot be parsed as Anthropic's error envelope (e.g. a raw HTTP
+        // error from a gateway or the batches endpoint returning a non-standard body) so
+        // that error.type is never silently absent on error responses.
+        val errorType = body.asJson()?.jsonObject?.get("error")?.jsonObject?.get("type")?.jsonPrimitive?.content
+        span.setAttribute("error.type", errorType ?: "http_error")
     }
 
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
