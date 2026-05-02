@@ -56,6 +56,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         val apiType = when {
             "batches" in pathSegments -> "batches"
             "models" in pathSegments -> "models"
+            "files" in pathSegments -> "files"
             else -> "messages"
         }
         span.setAttribute("anthropic.api.type", apiType)
@@ -296,6 +297,15 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             "models" in segments -> when {
                 getModelIdFromPath(request.url) != null -> "retrieve"
                 else -> "list"
+            }
+            "files" in segments -> when (method) {
+                "DELETE" -> "delete"
+                "POST" -> "create"
+                "GET" -> {
+                    val filesIndex = segments.indexOf("files")
+                    if (filesIndex >= 0 && filesIndex < segments.size - 1) "retrieve" else "list"
+                }
+                else -> null
             }
             "messages" in segments -> "create"
             else -> null
