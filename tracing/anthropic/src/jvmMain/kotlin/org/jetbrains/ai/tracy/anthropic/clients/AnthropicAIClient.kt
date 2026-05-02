@@ -145,4 +145,18 @@ fun instrument(client: AnthropicClient) {
     } catch (_: Exception) {
         // If the batches sub-client cannot be patched the main-client patch still applies.
     }
+
+    // Attempt to patch a potential top-level batches() accessor. Some SDK builds or beta
+    // namespaces route POST /v1/messages/batches through a service instance reachable only
+    // via client.batches() rather than client.messages().batches(). Since this accessor is
+    // not part of the AnthropicClient interface in all SDK versions, we use reflection so
+    // the call compiles regardless of the SDK variant in use.
+    try {
+        val batchesService = client.javaClass.getMethod("batches").invoke(client)
+        if (batchesService != null) {
+            patchOpenAICompatibleClient(client = batchesService, interceptor = interceptor)
+        }
+    } catch (_: Exception) {
+        // No top-level batches() accessor in this SDK build — the messages().batches() patch covers it.
+    }
 }
