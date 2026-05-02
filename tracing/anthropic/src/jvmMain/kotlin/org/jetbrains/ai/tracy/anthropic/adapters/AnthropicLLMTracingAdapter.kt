@@ -72,6 +72,24 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         // Parsing messages-specific fields for batch payloads is a no-op, but calling
         // populateUnmappedAttributes on a batch body would emit `tracy.request.requests` as a
         // potentially enormous span attribute. Guard all body-field parsing to messages only.
+        if (apiType == "batches") {
+            val lastSegment = pathSegments.lastOrNull { it.isNotEmpty() }
+            val operationName = when {
+                lastSegment == "cancel" -> "batches.cancel"
+                lastSegment == "results" -> "batches.results"
+                lastSegment == "batches" && request.method == "POST" -> "batches.create"
+                lastSegment == "batches" && request.method == "GET" -> "batches.list"
+                else -> "batches.retrieve"
+            }
+            span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+            if (operationName == "batches.create") {
+                val size = request.body.asJson()?.jsonObject?.get("requests")?.jsonArray?.size
+                if (size != null) {
+                    span.setAttribute("gen_ai.request.batch.size", size.toLong())
+                }
+            }
+            return
+        }
         if (apiType != "messages") return
 
         val body = request.body.asJson()?.jsonObject ?: return
@@ -154,6 +172,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         if ("models" in response.url.pathSegments) {
             parseModelResponseAttributes(span, body)
             span.populateUnmappedAttributes(body, mappedModelResponseAttributes, PayloadType.RESPONSE)
+            return
+        }
+
+        if ("batches" in response.url.pathSegments) {
+            parseBatchResponseAttributes(span, body)
+            span.populateUnmappedAttributes(body, mappedBatchResponseAttributes, PayloadType.RESPONSE)
             return
         }
 
@@ -401,6 +425,43 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
     }
 
+    /**
+     * Parses the response body of batch API calls and sets batch metadata attributes.
+     *
+     * See: [Anthropic Message Batches API](https://docs.anthropic.com/en/api/creating-message-batches)
+     */
+    private fun parseBatchResponseAttributes(span: Span, body: JsonObject) {
+        body["id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("gen_ai.response.batch.id", it)
+        }
+        body["processing_status"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.batch.processing_status", it)
+        }
+        body["created_at"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.batch.created_at", it)
+        }
+        body["expires_at"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.batch.expires_at", it)
+        }
+        body["request_counts"]?.jsonObject?.let { counts ->
+            counts["processing"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.processing", it)
+            }
+            counts["succeeded"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it)
+            }
+            counts["errored"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.errored", it)
+            }
+            counts["canceled"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.canceled", it)
+            }
+            counts["expired"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.expired", it)
+            }
+        }
+    }
+
     private val extractor: MediaContentExtractor = MediaContentExtractorImpl()
 
     // https://docs.claude.com/en/api/messages
@@ -439,6 +500,15 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "max_input_tokens",
         "max_output_tokens",
         "capabilities"
+    )
+
+    // https://docs.anthropic.com/en/api/creating-message-batches
+    private val mappedBatchResponseAttributes: List<String> = listOf(
+        "id",
+        "processing_status",
+        "created_at",
+        "expires_at",
+        "request_counts"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
