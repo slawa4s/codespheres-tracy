@@ -10,6 +10,7 @@ import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioOpenAIApiEndpointHandler
@@ -31,6 +32,11 @@ import java.util.concurrent.ConcurrentHashMap
  * Detects which OpenAI API is being used based on the request / response structure
  */
 private enum class OpenAIApiType(val route: String) {
+    // See: https://platform.openai.com/docs/api-reference/files
+    // Must be listed first: file IDs could contain other route strings (e.g. "responses"),
+    // so FILES must match before any other type to avoid misidentification.
+    FILES("files"),
+
     // See: https://platform.openai.com/docs/api-reference/conversations
     // Must be listed before CHAT_COMPLETIONS: /v1/conversations/{id}/completions contains
     // "completions", so CONVERSATIONS must match first to avoid misidentification.
@@ -77,6 +83,7 @@ private enum class OpenAIApiType(val route: String) {
  * streaming, and media content.
  *
  * ## Supported Endpoints
+ * - **Files**: `/v1/files`
  * - **Conversations**: `/v1/conversations`
  * - **Chat Completions**: `/v1/chat/completions`
  * - **Responses API**: `/v1/responses`
@@ -155,6 +162,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         val extractor = MediaContentExtractorImpl()
 
         val handler = when (apiType) {
+            OpenAIApiType.FILES -> handlers.getOrPut(OpenAIApiType.FILES) {
+                FilesOpenAIApiEndpointHandler()
+            }
+
             OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
                 ConversationsOpenAIApiEndpointHandler()
             }
