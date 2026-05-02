@@ -139,4 +139,10 @@ fun instrument(client: AnthropicClient) {
     } catch (_: Exception) {
         // If the messages sub-client cannot be patched the main-client patch still applies.
     }
+
+    try {
+        patchOpenAICompatibleClient(client = client.messages().batches() as Any, interceptor = interceptor)
+    } catch (_: Exception) {
+        // If the batches sub-client cannot be patched the main-client patch still applies.
+    }
 }
