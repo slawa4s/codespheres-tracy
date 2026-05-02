@@ -34,7 +34,7 @@ private enum class OpenAIApiType(val route: String) {
     CHAT_COMPLETIONS("completions"),
 
     // See: https://platform.openai.com/docs/api-reference/responses
-    RESPONSES_API("responses"),
+    RESPONSES("responses"),
 
     // See: https://platform.openai.com/docs/api-reference/images/create
     IMAGES_GENERATIONS("images/generations"),
@@ -153,7 +153,7 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
                 ChatCompletionsOpenAIApiEndpointHandler(extractor)
             }
 
-            OpenAIApiType.RESPONSES_API -> handlers.getOrPut(OpenAIApiType.RESPONSES_API) {
+            OpenAIApiType.RESPONSES -> handlers.getOrPut(OpenAIApiType.RESPONSES) {
                 ResponsesOpenAIApiEndpointHandler(extractor)
             }
 

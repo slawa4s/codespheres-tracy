@@ -30,6 +30,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.previous_response_id", it)
@@ -236,6 +237,18 @@ internal class ResponsesOpenAIApiEndpointHandler(
                     span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
                 }
             }
+            if (type == "response.completed") {
+                val response = event["response"]?.jsonObject
+                response?.get("id")?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute(GEN_AI_RESPONSE_ID, it)
+                }
+                response?.get("model")?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                }
+                response?.get("usage")?.jsonObject?.let { usage ->
+                    setUsageAttributes(span, usage)
+                }
+            }
         }
     }.getOrElse { exception ->
         span.setStatus(StatusCode.ERROR)
@@ -422,7 +435,6 @@ internal class ResponsesOpenAIApiEndpointHandler(
     private val mappedResponseAttributes: List<String> = listOf(
         // parsed by `OpenAIApiUtils.setCommonResponseAttributes`
         "id",
-        "object",
         "model",
 
         "output",

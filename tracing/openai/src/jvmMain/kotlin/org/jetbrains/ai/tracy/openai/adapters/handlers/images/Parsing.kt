@@ -37,6 +37,10 @@ internal fun handleImageGenerationResponseAttributes(
         for ((index, image) in data.withIndex()) {
             span.setAttribute("gen_ai.completion.$index.content", image.asString.orRedactedOutput())
         }
+        // extract URL from the first image element
+        data.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content?.let { url ->
+            span.setAttribute("tracy.response.image.url", url)
+        }
         // install media content for further upload
         val format = body["output_format"]?.jsonPrimitive?.content ?: defaultImageFormat
         val mediaType = "image/$format"
@@ -54,7 +58,7 @@ internal fun handleImageGenerationResponseAttributes(
         if (key in manuallyParsedKeys) {
             continue
         }
-        span.setAttribute("gen_ai.response.$key", value.asString)
+        span.setAttribute("tracy.response.$key", value.asString)
     }
 }
 
