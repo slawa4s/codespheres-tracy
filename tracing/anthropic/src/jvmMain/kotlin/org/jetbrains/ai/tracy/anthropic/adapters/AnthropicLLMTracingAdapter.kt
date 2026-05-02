@@ -53,6 +53,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         val apiType = when {
             "batches" in pathSegments -> "batches"
             "models" in pathSegments -> "models"
+            "files" in pathSegments -> "files"
             else -> "messages"
         }
         span.setAttribute("anthropic.api.type", apiType)
@@ -90,6 +91,19 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             }
             return
         }
+        if (apiType == "files") {
+            val lastSegment = pathSegments.lastOrNull { it.isNotEmpty() }
+            val operationName = when {
+                lastSegment == "files" && request.method == "GET" -> "files.list"
+                lastSegment == "files" && request.method == "POST" -> "files.upload"
+                request.method == "GET" -> "files.retrieve"
+                request.method == "DELETE" -> "files.delete"
+                else -> "files.retrieve"
+            }
+            span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+            return
+        }
+
         if (apiType != "messages") return
 
         val body = request.body.asJson()?.jsonObject ?: return
@@ -178,6 +192,11 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         if ("batches" in response.url.pathSegments) {
             parseBatchResponseAttributes(span, body)
             span.populateUnmappedAttributes(body, mappedBatchResponseAttributes, PayloadType.RESPONSE)
+            return
+        }
+
+        if ("files" in response.url.pathSegments) {
+            parseFilesResponseAttributes(span, body)
             return
         }
 
@@ -459,6 +478,26 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             counts["expired"]?.jsonPrimitive?.longOrNull?.let {
                 span.setAttribute("gen_ai.response.batch.request_counts.expired", it)
             }
+        }
+    }
+
+    /**
+     * Parses the response body of files API calls and sets list metadata attributes.
+     *
+     * See: [Anthropic Files API](https://docs.anthropic.com/en/api/files)
+     */
+    private fun parseFilesResponseAttributes(span: Span, body: JsonObject) {
+        body["data"]?.jsonArray?.size?.toLong()?.let {
+            span.setAttribute("gen_ai.response.list.count", it)
+        }
+        body["has_more"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("gen_ai.response.list.has_more", it)
+        }
+        body["first_id"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.list.first_id", it)
+        }
+        body["last_id"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.list.last_id", it)
         }
     }
 

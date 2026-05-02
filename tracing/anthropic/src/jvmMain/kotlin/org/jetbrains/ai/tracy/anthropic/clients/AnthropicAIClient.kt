@@ -124,8 +124,19 @@ import com.anthropic.client.AnthropicClient
  * @see TracingManager.traceSensitiveContent
  */
 fun instrument(client: AnthropicClient) {
-    patchOpenAICompatibleClient(
-        client = client,
-        interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
-    )
+    val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+    patchOpenAICompatibleClient(client = client, interceptor = interceptor)
+
+    // Also patch the HTTP client held by the messages sub-service, which is the parent
+    // of the batches resource (client.messages().batches()). In some SDK builds the
+    // messages service stores a separate ClientOptions — and therefore a separate
+    // OkHttpClient — from the top-level client. Patching it explicitly guarantees that
+    // the OkHttp interceptor runs for every batch request/error.
+    // patchOpenAICompatibleClient is idempotent: if both paths share the same underlying
+    // OkHttpClient instance the second call is a no-op.
+    try {
+        patchOpenAICompatibleClient(client = client.messages() as Any, interceptor = interceptor)
+    } catch (_: Exception) {
+        // If the messages sub-client cannot be patched the main-client patch still applies.
+    }
 }

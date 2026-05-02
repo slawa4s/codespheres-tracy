@@ -13,6 +13,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiE
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.SpeechOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
@@ -50,6 +51,9 @@ private enum class OpenAIApiType(val route: String) {
     // See: https://platform.openai.com/docs/api-reference/videos
     VIDEOS("videos"),
 
+    // See: https://platform.openai.com/docs/api-reference/audio/createSpeech
+    AUDIO_SPEECH("audio/speech"),
+
     // See: https://platform.openai.com/docs/api-reference/audio/createTranscription
     AUDIO_TRANSCRIPTIONS("audio/transcriptions"),
 
@@ -79,6 +83,7 @@ private enum class OpenAIApiType(val route: String) {
  * - **Image Generation**: `/v1/images/generations`
  * - **Image Editing**: `/v1/images/edits`
  * - **Video Generation**: `/v1/videos`
+ * - **Audio Speech**: `/v1/audio/speech`
  * - **Audio Transcriptions**: `/v1/audio/transcriptions`
  * - **Audio Translations**: `/v1/audio/translations`
  *
@@ -172,6 +177,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.VIDEOS -> handlers.getOrPut(OpenAIApiType.VIDEOS) {
                 VideosOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.AUDIO_SPEECH -> handlers.getOrPut(OpenAIApiType.AUDIO_SPEECH) {
+                SpeechOpenAIApiEndpointHandler()
             }
 
             OpenAIApiType.AUDIO_TRANSCRIPTIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSCRIPTIONS) {
