@@ -423,7 +423,6 @@ internal class ResponsesOpenAIApiEndpointHandler(
     private val mappedResponseAttributes: List<String> = listOf(
         // parsed by `OpenAIApiUtils.setCommonResponseAttributes`
         "id",
-        "object",
         "model",
 
         "output",
