@@ -17,6 +17,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioSpeechOpenAIAp
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
@@ -56,7 +57,10 @@ private enum class OpenAIApiType(val route: String) {
     CONVERSATIONS("conversations"),
 
     // See: https://platform.openai.com/docs/api-reference/videos
-    VIDEOS("videos");
+    VIDEOS("videos"),
+
+    // See: https://platform.openai.com/docs/api-reference/files
+    FILES("files");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -188,6 +192,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.VIDEOS -> handlers.getOrPut(OpenAIApiType.VIDEOS) {
                 VideosOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.FILES -> handlers.getOrPut(OpenAIApiType.FILES) {
+                FilesOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
