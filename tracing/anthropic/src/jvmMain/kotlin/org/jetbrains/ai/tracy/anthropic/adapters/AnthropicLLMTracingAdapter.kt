@@ -52,6 +52,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         val apiType = if ("batches" in request.url.pathSegments) "batches" else "messages"
         span.setAttribute("anthropic.api.type", apiType)
 
+        // Batch request bodies use a top-level `requests` array rather than `messages`/`tools`/`system`.
+        // Parsing messages-specific fields for batch payloads is a no-op, but calling
+        // populateUnmappedAttributes on a batch body would emit `tracy.request.requests` as a
+        // potentially enormous span attribute. Guard all body-field parsing to messages only.
+        if (apiType != "messages") return
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -351,7 +357,10 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "top_k",
         "top_p",
         "messages",
-        "tools"
+        "tools",
+        // Batch API top-level field — listed here so populateUnmappedAttributes never emits the full
+        // requests array (which can be arbitrarily large) even if the messages-only guard is bypassed.
+        "requests"
     )
 
     private val mappedResponseAttributes: List<String> = listOf(
