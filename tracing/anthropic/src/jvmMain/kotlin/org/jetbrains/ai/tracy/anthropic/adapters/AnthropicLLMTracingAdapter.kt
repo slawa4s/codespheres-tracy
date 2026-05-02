@@ -181,6 +181,11 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             return
         }
 
+        if ("files" in response.url.pathSegments) {
+            parseFilesResponseAttributes(span, body)
+            return
+        }
+
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
         body["role"]?.let { span.setAttribute("gen_ai.response.role", it.jsonPrimitive.content) }
@@ -459,6 +464,26 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             counts["expired"]?.jsonPrimitive?.longOrNull?.let {
                 span.setAttribute("gen_ai.response.batch.request_counts.expired", it)
             }
+        }
+    }
+
+    /**
+     * Parses the response body of files API calls and sets list metadata attributes.
+     *
+     * See: [Anthropic Files API](https://docs.anthropic.com/en/api/files)
+     */
+    private fun parseFilesResponseAttributes(span: Span, body: JsonObject) {
+        body["data"]?.jsonArray?.size?.toLong()?.let {
+            span.setAttribute("gen_ai.response.list.count", it)
+        }
+        body["has_more"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("gen_ai.response.list.has_more", it)
+        }
+        body["first_id"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.list.first_id", it)
+        }
+        body["last_id"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.response.list.last_id", it)
         }
     }
 
