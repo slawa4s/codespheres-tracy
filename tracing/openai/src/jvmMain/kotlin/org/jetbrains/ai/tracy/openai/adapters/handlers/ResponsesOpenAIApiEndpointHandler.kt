@@ -236,6 +236,29 @@ internal class ResponsesOpenAIApiEndpointHandler(
                     span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
                     span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
                 }
+            } else if (type == "response.completed") {
+                val response = event["response"]?.jsonObject ?: continue
+                response["id"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute(GEN_AI_RESPONSE_ID, it)
+                }
+                response["model"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                }
+                response["object"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.response.object", it)
+                }
+                response["status"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.response.status", it)
+                }
+                response["created_at"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.response.created_at", it)
+                }
+                response["completed_at"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.response.completed_at", it)
+                }
+                response["usage"]?.jsonObject?.let { usage ->
+                    setUsageAttributes(span, usage)
+                }
             }
         }
     }.getOrElse { exception ->
