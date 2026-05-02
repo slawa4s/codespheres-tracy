@@ -93,6 +93,11 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
 
             if (response.isError()) {
                 getResponseErrorBodyAttributes(span, response.body)
+                val errorType = response.body.asJson()?.jsonObject
+                    ?.get("error")?.jsonObject
+                    ?.get("type")?.jsonPrimitive?.content
+                    ?: response.code.toString()
+                span.setAttribute("error.type", errorType)
                 span.setStatus(StatusCode.ERROR)
             } else {
                 span.setStatus(StatusCode.OK)
