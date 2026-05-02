@@ -12,6 +12,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
@@ -41,6 +42,12 @@ private enum class OpenAIApiType(val route: String) {
     // See: https://platform.openai.com/docs/api-reference/images/createEdit
     IMAGES_EDITS("images/edits"),
 
+    // See: https://platform.openai.com/docs/api-reference/audio/createTranscription
+    AUDIO_TRANSCRIPTIONS("audio/transcriptions"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createTranslation
+    AUDIO_TRANSLATIONS("audio/translations"),
+
     // See: https://platform.openai.com/docs/api-reference/conversations
     CONVERSATIONS("conversations"),
 
@@ -69,6 +76,8 @@ private enum class OpenAIApiType(val route: String) {
  * - **Image Generation**: `/v1/images/generations`
  * - **Image Editing**: `/v1/images/edits`
  * - **Video Generation**: `/v1/videos`
+ * - **Audio Transcription**: `/v1/audio/transcriptions`
+ * - **Audio Translation**: `/v1/audio/translations`
  *
  * ## Example Usage
  * ```kotlin
@@ -154,6 +163,14 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.IMAGES_EDITS -> handlers.getOrPut(OpenAIApiType.IMAGES_EDITS) {
                 ImagesCreateEditOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.AUDIO_TRANSCRIPTIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSCRIPTIONS) {
+                AudioOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.AUDIO_TRANSLATIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSLATIONS) {
+                AudioOpenAIApiEndpointHandler()
             }
 
             OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
