@@ -189,6 +189,19 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             return
         }
 
+        // Files list response (GET /v1/files)
+        if ("files" in response.url.pathSegments) {
+            val dataArray = body["data"]?.jsonArray
+            if (dataArray != null) {
+                span.setAttribute("gen_ai.response.list.count", dataArray.size.toLong())
+                body["has_more"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("gen_ai.response.list.has_more", it) }
+                body["first_id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("gen_ai.response.list.first_id", it) }
+                body["last_id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("gen_ai.response.list.last_id", it) }
+                span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
+                return
+            }
+        }
+
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
         body["role"]?.let { span.setAttribute("gen_ai.response.role", it.jsonPrimitive.content) }
@@ -497,7 +510,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "processing_status",
         "request_counts",
         "created_at",
-        "expires_at"
+        "expires_at",
+        // files list response: https://docs.anthropic.com/en/api/files-list
+        "data",
+        "has_more",
+        "first_id",
+        "last_id"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
