@@ -56,6 +56,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         val apiType = when {
             "batches" in pathSegments -> "batches"
             "models" in pathSegments -> "models"
+            "files" in pathSegments -> "files"
             else -> "messages"
         }
         span.setAttribute("anthropic.api.type", apiType)
@@ -158,6 +159,19 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         if (getModelIdFromPath(response.url) != null) {
             extractModelResponseAttributes(span, body)
             return
+        }
+
+        // Files list response (GET /v1/files)
+        if ("files" in response.url.pathSegments) {
+            val dataArray = body["data"]?.jsonArray
+            if (dataArray != null) {
+                span.setAttribute("gen_ai.response.list.count", dataArray.size.toLong())
+                body["has_more"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("gen_ai.response.list.has_more", it) }
+                body["first_id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("gen_ai.response.list.first_id", it) }
+                body["last_id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("gen_ai.response.list.last_id", it) }
+                span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
+                return
+            }
         }
 
         // Batch response (any method to /v1/messages/batches/*)
@@ -296,6 +310,15 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             "models" in segments -> when {
                 getModelIdFromPath(request.url) != null -> "retrieve"
                 else -> "list"
+            }
+            "files" in segments -> when (method) {
+                "DELETE" -> "delete"
+                "POST" -> "create"
+                "GET" -> {
+                    val filesIndex = segments.indexOf("files")
+                    if (filesIndex >= 0 && filesIndex < segments.size - 1) "retrieve" else "list"
+                }
+                else -> null
             }
             "messages" in segments -> "create"
             else -> null
@@ -497,7 +520,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "processing_status",
         "request_counts",
         "created_at",
-        "expires_at"
+        "expires_at",
+        // files list response: https://docs.anthropic.com/en/api/files-list
+        "data",
+        "has_more",
+        "first_id",
+        "last_id"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes

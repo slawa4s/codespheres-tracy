@@ -39,6 +39,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.serializer
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequestBody
+import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponseBody
 import kotlin.reflect.full.hasAnnotation
 import kotlin.reflect.full.starProjectedType
 
@@ -220,11 +221,11 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
                 if (isStreamingRequest) return@onResponse
 
 
-                // when the content type is `application/json`, we decode the response body;
-                // otherwise, (e.g., when the body is binary), we pass an empty JSON object as the response body.
-                val responseBody = when (response.contentType()?.withoutParameters()) {
+                // when the content type is `application/json`, we decode the response body as JSON;
+                // otherwise (e.g., when the body is binary audio/video), we capture the raw bytes.
+                val responseBody: TracyHttpResponseBody = when (response.contentType()?.withoutParameters()) {
                     ContentType.Application.Json -> try {
-                        val body = run {
+                        val jsonString = run {
                             // peek the response body to avoid consuming the underlying channel
                             // NOTE: we must first peek and only then await.
                             // otherwise there are cases when an empty body gets peeked
@@ -235,13 +236,26 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
                             buffer.write(peeked, peeked.buffer.size)
                             buffer.readString()
                         }
-                        Json.parseToJsonElement(body).jsonObject
+                        TracyHttpResponseBody.Json(Json.parseToJsonElement(jsonString).jsonObject)
                     } catch (err: Exception) {
                         logger.trace("Error while parsing response body", err)
-                        JsonObject(emptyMap())
+                        TracyHttpResponseBody.Json(JsonObject(emptyMap()))
                     }
                     else -> {
-                        JsonObject(emptyMap())
+                        try {
+                            val bytes = run {
+                                val peeked = response.rawContent.readBuffer.peek()
+                                response.rawContent.awaitContent(Int.MAX_VALUE)
+                                peeked.request(Long.MAX_VALUE)
+                                val buffer = Buffer()
+                                buffer.write(peeked, peeked.buffer.size)
+                                buffer.readByteArray()
+                            }
+                            TracyHttpResponseBody.Binary(bytes)
+                        } catch (err: Exception) {
+                            logger.trace("Error while reading binary response body", err)
+                            TracyHttpResponseBody.Binary(ByteArray(0))
+                        }
                     }
                 }
 
@@ -262,7 +276,7 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
                     return@transformResponseBody null
                 }
 
-                val body = JsonObject(mapOf("stream" to JsonPrimitive(true)))
+                val body = TracyHttpResponseBody.Json(JsonObject(mapOf("stream" to JsonPrimitive(true))))
                 // registering response attributes into span
                 adapter.registerResponse(span, response = response.asResponseView(body))
 
@@ -304,7 +318,7 @@ private class TracingPlugin(private val adapter: LLMTracingAdapter) {
         })
     }
 
-    private fun HttpResponse.asResponseView(body: JsonObject): TracyHttpResponse = TracyHttpResponseView(response = this, body)
+    private fun HttpResponse.asResponseView(body: TracyHttpResponseBody): TracyHttpResponse = TracyHttpResponseView(response = this, body)
 
     /**
      * Helper function to serialize `@Serializable` objects with an unknown type

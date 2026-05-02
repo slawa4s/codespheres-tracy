@@ -244,25 +244,30 @@ class OpenTelemetryOkHttpInterceptor(
                 val response = chain.proceed(request)
 
                 return if (isStreamingRequest) {
-                    val streamingMarker = JsonObject(mapOf("stream" to JsonPrimitive(true)))
+                    val streamingMarker = TracyHttpResponseBody.Json(JsonObject(mapOf("stream" to JsonPrimitive(true))))
                     val url = request.url.toProtocolUrl()
                     adapter.registerResponse(span, response = response.asResponseView(streamingMarker))
 
                     wrapStreamingResponse(response, url, span)
                 } else {
-                    // if the content type is `application/json`, we decode a response body;
-                    // otherwise (e.g., when the body is binary), we pass an empty JSON object as the response body.
+                    // if the content type is `application/json`, we decode the response body as JSON;
+                    // otherwise (e.g., when the body is binary audio/video), we capture the raw bytes.
                     val contentType = response.body?.contentType()
                     val mimeType = if (contentType != null) "${contentType.type}/${contentType.subtype}" else null
-                    val responseBody = when (mimeType?.lowercase()) {
+                    val responseBody: TracyHttpResponseBody = when (mimeType?.lowercase()) {
                         "application/json" -> try {
                             val peekedBody = response.peekBody(Long.MAX_VALUE).string()
-                            Json.decodeFromString<JsonObject>(peekedBody)
+                            TracyHttpResponseBody.Json(Json.decodeFromString<JsonObject>(peekedBody))
                         } catch (_: Exception) {
-                            JsonObject(emptyMap())
+                            TracyHttpResponseBody.Json(JsonObject(emptyMap()))
                         }
                         else -> {
-                            JsonObject(emptyMap())
+                            val bytes = try {
+                                response.peekBody(Long.MAX_VALUE).bytes()
+                            } catch (_: Exception) {
+                                ByteArray(0)
+                            }
+                            TracyHttpResponseBody.Binary(bytes)
                         }
                     }
 
@@ -357,14 +362,14 @@ class OpenTelemetryOkHttpInterceptor(
         return content to request
     }
 
-    private fun OkHttpResponse.asResponseView(body: JsonObject): TracyHttpResponse {
+    private fun OkHttpResponse.asResponseView(body: TracyHttpResponseBody): TracyHttpResponse {
         val response = this
         val mediaType = response.body?.contentType()
 
         return object : TracyHttpResponse {
             override val contentType = mediaType?.toContentType()
             override val code = response.code
-            override val body = TracyHttpResponseBody.Json(body)
+            override val body = body
             override val url = response.request.url.toProtocolUrl()
             override val requestMethod = response.request.method.uppercase()
 

@@ -18,7 +18,6 @@ import io.ktor.http.Url as KtorUrl
 import io.ktor.http.charset
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
-import kotlinx.serialization.json.JsonObject
 
 internal fun io.ktor.http.ContentType.toContentType(): TracyContentType {
     val contentType = this
@@ -33,11 +32,11 @@ internal fun io.ktor.http.ContentType.toContentType(): TracyContentType {
 
 internal class TracyHttpResponseView(
     private val response: HttpResponse,
-    body: JsonObject,
+    body: TracyHttpResponseBody,
 ) : TracyHttpResponse {
     override val contentType = response.contentType()?.toContentType()
     override val code = response.status.value
-    override val body = TracyHttpResponseBody.Json(body)
+    override val body = body
     override val url = response.request.url.toProtocolUrl()
     override val requestMethod = response.request.method.value.uppercase()
 
