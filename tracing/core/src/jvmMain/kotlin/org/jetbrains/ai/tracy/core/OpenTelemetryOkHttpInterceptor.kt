@@ -145,9 +145,16 @@ fun instrument(client: OkHttpClient, adapter: LLMTracingAdapter): OkHttpClient {
  *
  * @param client The instance of the OpenAI-compatible client to patch.
  * @param interceptor The interceptor to be injected into the internal HTTP client of the OpenAI-compatible client.
+ * @param clientOptionsFieldName The name of the field that holds the `ClientOptions` object on [client].
+ *   Defaults to `"clientOptions"`. Pass an alternative name (e.g. `"options"` or `"serviceOptions"`)
+ *   when sub-services use a non-standard field name.
  */
-fun <T> patchOpenAICompatibleClient(client: T, interceptor: Interceptor) {
-    val clientOptions = getFieldValue(client as Any, "clientOptions")
+fun <T> patchOpenAICompatibleClient(
+    client: T,
+    interceptor: Interceptor,
+    clientOptionsFieldName: String = "clientOptions",
+) {
+    val clientOptions = getFieldValue(client as Any, clientOptionsFieldName)
     val originalHttpClient = getFieldValue(clientOptions, "originalHttpClient")
 
     val okHttpHolder = if (originalHttpClient::class.simpleName == "OkHttpClient") {
