@@ -49,8 +49,24 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
-        val apiType = if ("batches" in request.url.pathSegments) "batches" else "messages"
+        val pathSegments = request.url.pathSegments
+        val apiType = when {
+            "batches" in pathSegments -> "batches"
+            "models" in pathSegments -> "models"
+            else -> "messages"
+        }
         span.setAttribute("anthropic.api.type", apiType)
+
+        if (apiType == "models") {
+            // Extract model ID from last non-empty path segment after "models"
+            val modelsIndex = pathSegments.indexOf("models")
+            val modelId = pathSegments.drop(modelsIndex + 1).firstOrNull { it.isNotEmpty() }
+            if (modelId != null) {
+                span.setAttribute(GEN_AI_REQUEST_MODEL, modelId)
+            }
+            span.setAttribute(GEN_AI_OPERATION_NAME, "models.retrieve")
+            return
+        }
 
         val body = request.body.asJson()?.jsonObject ?: return
 
