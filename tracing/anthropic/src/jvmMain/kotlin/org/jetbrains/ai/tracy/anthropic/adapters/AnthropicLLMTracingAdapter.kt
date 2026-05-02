@@ -72,6 +72,24 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         // Parsing messages-specific fields for batch payloads is a no-op, but calling
         // populateUnmappedAttributes on a batch body would emit `tracy.request.requests` as a
         // potentially enormous span attribute. Guard all body-field parsing to messages only.
+        if (apiType == "batches") {
+            val lastSegment = pathSegments.lastOrNull { it.isNotEmpty() }
+            val operationName = when {
+                lastSegment == "cancel" -> "batches.cancel"
+                lastSegment == "results" -> "batches.results"
+                lastSegment == "batches" && request.method == "POST" -> "batches.create"
+                lastSegment == "batches" && request.method == "GET" -> "batches.list"
+                else -> "batches.retrieve"
+            }
+            span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+            if (operationName == "batches.create") {
+                val size = request.body.asJson()?.jsonObject?.get("requests")?.jsonArray?.size
+                if (size != null) {
+                    span.setAttribute("gen_ai.request.batch.size", size.toLong())
+                }
+            }
+            return
+        }
         if (apiType != "messages") return
 
         val body = request.body.asJson()?.jsonObject ?: return
