@@ -31,6 +31,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
         span.setAttribute("openai.api.type", "responses")
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.previous_response_id", it)
