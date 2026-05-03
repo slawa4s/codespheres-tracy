@@ -58,6 +58,10 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             span.setAttribute("gemini.api.type", "models")
         }
 
+        if ("cachedContents" in request.url.pathSegments) {
+            span.setAttribute("gemini.api.type", "cachedContents")
+        }
+
         val handler = selectHandler(request.url)
         handler.handleRequestAttributes(span, request)
     }
@@ -83,6 +87,7 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
     private fun selectHandler(url: TracyHttpUrl): EndpointApiHandler = when {
         url.isModelsUrl() -> GeminiModelsHandler()
+        url.isCachedContentsUrl() -> GeminiModelsHandler()
         url.isImagenUrl() -> GeminiImagenHandler(extractor)
         url.isEmbeddingsUrl() -> GeminiEmbeddingsHandler()
         else -> GeminiContentGenHandler(extractor)
@@ -97,6 +102,10 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private fun TracyHttpUrl.isModelsUrl(): Boolean {
         val lastSegment = this.pathSegments.lastOrNull() ?: return false
         return "models" in this.pathSegments && !lastSegment.contains(":")
+    }
+
+    private fun TracyHttpUrl.isCachedContentsUrl(): Boolean {
+        return "cachedContents" in this.pathSegments
     }
 
     private fun TracyHttpUrl.isImagenUrl(): Boolean {
