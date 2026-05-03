@@ -6,7 +6,10 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.files.routes
 
 import io.opentelemetry.api.trace.Span
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asFormData
@@ -18,6 +21,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  * Request is `multipart/form-data` with:
  * - `purpose` text part → `gen_ai.request.file.purpose`
  * - `file` part: filename → `tracy.request.file.filename`, content size → `gen_ai.request.file.size_bytes`
+ * - `expires_after` JSON part → `tracy.request.expires_after.anchor`, `tracy.request.expires_after.seconds`
  *
  * Response is a File object.
  *
@@ -35,6 +39,19 @@ internal class CreateFileHandler : FileRouteHandler {
                 "file" -> {
                     part.filename?.let { span.setAttribute("tracy.request.file.filename", it) }
                     span.setAttribute("gen_ai.request.file.size_bytes", part.content.size.toLong())
+                }
+                "expires_after" -> {
+                    val charset = part.contentType?.charset() ?: Charsets.UTF_8
+                    runCatching {
+                        Json.parseToJsonElement(part.content.toString(charset)).jsonObject
+                    }.getOrNull()?.let { json ->
+                        json["anchor"]?.jsonPrimitive?.content?.let {
+                            span.setAttribute("tracy.request.expires_after.anchor", it)
+                        }
+                        json["seconds"]?.jsonPrimitive?.longOrNull?.let {
+                            span.setAttribute("tracy.request.expires_after.seconds", it)
+                        }
+                    }
                 }
             }
         }
