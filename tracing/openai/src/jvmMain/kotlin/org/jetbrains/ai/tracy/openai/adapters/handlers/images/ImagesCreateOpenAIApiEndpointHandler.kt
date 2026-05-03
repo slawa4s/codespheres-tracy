@@ -5,6 +5,8 @@
 
 package org.jetbrains.ai.tracy.openai.adapters.handlers.images
 
+import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
+import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.populateUnmappedAttributes
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
@@ -12,7 +14,6 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
-import org.jetbrains.ai.tracy.openai.adapters.handlers.asString
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
@@ -38,12 +39,7 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
         body["model"]?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it.jsonPrimitive.content) }
 
         val manuallyParsedKeys = listOf("prompt", "model")
-        for ((key, value) in body.entries) {
-            if (key in manuallyParsedKeys) {
-                continue
-            }
-            span.setAttribute("gen_ai.request.$key", value.asString.orRedactedInput())
-        }
+        span.populateUnmappedAttributes(body, manuallyParsedKeys, PayloadType.REQUEST)
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {

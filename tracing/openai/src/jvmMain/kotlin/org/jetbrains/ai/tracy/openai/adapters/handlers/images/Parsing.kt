@@ -56,7 +56,7 @@ internal fun handleImageGenerationResponseAttributes(
 
     // extract created timestamp explicitly under the tracy.response.* namespace
     body["created"]?.jsonPrimitive?.content?.let { created ->
-        span.setAttribute("tracy.response.created", created)
+        span.setAttribute("tracy.response.created_at", created)
     }
 
     val manuallyParsedKeys = listOf("data", "usage", "created")
@@ -94,7 +94,7 @@ internal fun handleStreamedImage(
             val manuallyParsedKeys = listOf("b64_json", "usage")
             for ((key, value) in data.entries) {
                 if (key !in manuallyParsedKeys) {
-                    span.setAttribute("gen_ai.response.$key", value.asString)
+                    span.setAttribute("tracy.response.$key", value.asString)
                 }
             }
         }
