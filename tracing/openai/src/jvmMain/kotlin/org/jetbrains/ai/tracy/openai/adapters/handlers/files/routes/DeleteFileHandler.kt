@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.files.routes
 
 import io.opentelemetry.api.trace.Span
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import mu.KotlinLogging
@@ -18,7 +19,7 @@ private val logger = KotlinLogging.logger {}
 /**
  * Handles `DELETE /v1/files/{file_id}` — delete a file (`files.delete`).
  *
- * Response: `id` → `gen_ai.response.file.id`.
+ * Response: `id` → `tracy.response.file.id`, `deleted` → `tracy.response.deleted`.
  *
  * See [Delete file](https://platform.openai.com/docs/api-reference/files/delete)
  */
@@ -34,6 +35,7 @@ internal class DeleteFileHandler : FileRouteHandler {
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        body["id"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.file.id", it) }
+        body["id"]?.jsonPrimitive?.content?.let { span.setAttribute("tracy.response.file.id", it) }
+        body["deleted"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("tracy.response.deleted", it.toString()) }
     }
 }
