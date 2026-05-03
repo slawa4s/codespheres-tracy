@@ -54,7 +54,7 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
         operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
 
-        if (request.url.isModelsUrl() || request.url.isEmbeddingsUrl()) {
+        if ("models" in request.url.pathSegments) {
             span.setAttribute("gemini.api.type", "models")
         }
 
@@ -69,8 +69,13 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
     override fun getSpanName(request: TracyHttpRequest) = "Gemini-generation"
 
-    // streaming is not supported
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
+    override fun isStreamingRequest(request: TracyHttpRequest): Boolean {
+        val url = request.url
+        val lastSegment = url.pathSegments.lastOrNull() ?: return false
+        return lastSegment.endsWith(":streamGenerateContent") ||
+                url.parameters.queryParameter("alt") == "sse"
+    }
+
     override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) {
         val handler = selectHandler(url)
         handler.handleStreaming(span, events)

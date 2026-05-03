@@ -18,6 +18,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpo
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.models.ModelsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.moderations.ModerationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
@@ -63,7 +64,10 @@ private enum class OpenAIApiType(val route: String) {
     AUDIO_TRANSLATIONS("audio/translations"),
 
     // See: https://platform.openai.com/docs/api-reference/audio/createSpeech
-    AUDIO_SPEECH("audio/speech");
+    AUDIO_SPEECH("audio/speech"),
+
+    // See: https://platform.openai.com/docs/api-reference/moderations
+    MODERATIONS("moderations");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -198,6 +202,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.AUDIO_SPEECH -> handlers.getOrPut(OpenAIApiType.AUDIO_SPEECH) {
                 AudioOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.MODERATIONS -> handlers.getOrPut(OpenAIApiType.MODERATIONS) {
+                ModerationsOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
