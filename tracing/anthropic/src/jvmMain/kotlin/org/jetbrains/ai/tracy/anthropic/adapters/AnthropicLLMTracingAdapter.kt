@@ -5,6 +5,7 @@
 
 package org.jetbrains.ai.tracy.anthropic.adapters
 
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.AnthropicCountTokensHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.AnthropicListEndpointHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.AnthropicMessagesHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
@@ -31,7 +32,10 @@ internal enum class AnthropicApiType {
     // See: https://docs.anthropic.com/en/api/messages-batches (batches),
     //      https://docs.anthropic.com/en/api/files (files),
     //      https://docs.anthropic.com/en/api/models (models)
-    LIST;
+    LIST,
+
+    // See: https://docs.anthropic.com/en/api/messages-count-tokens
+    COUNT_TOKENS;
 
     companion object {
         fun detect(url: TracyHttpUrl): AnthropicApiType {
@@ -40,6 +44,7 @@ internal enum class AnthropicApiType {
                 segments.contains("batches") ||
                 segments.contains("files") ||
                 segments.contains("models") -> LIST
+                segments.contains("count_tokens") -> COUNT_TOKENS
                 else -> MESSAGES
             }
         }
@@ -107,6 +112,9 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             }
             AnthropicApiType.LIST -> handlers.getOrPut(AnthropicApiType.LIST) {
                 AnthropicListEndpointHandler()
+            }
+            AnthropicApiType.COUNT_TOKENS -> handlers.getOrPut(AnthropicApiType.COUNT_TOKENS) {
+                AnthropicCountTokensHandler()
             }
         }
     }
