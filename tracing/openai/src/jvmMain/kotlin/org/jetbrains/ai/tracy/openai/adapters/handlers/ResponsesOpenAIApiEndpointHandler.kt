@@ -74,6 +74,10 @@ internal class ResponsesOpenAIApiEndpointHandler(
         body["reasoning"]?.let {
             span.setAttribute("gen_ai.request.reasoning", it.toString())
         }
+        body["reasoning"]?.jsonObject?.let { r ->
+            r["effort"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.request.reasoning.effort", it) }
+            r["summary"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.request.reasoning.summary", it) }
+        }
         body["text"]?.let {
             span.setAttribute("gen_ai.request.text", it.toString())
         }
@@ -247,6 +251,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
         body["usage"]?.let { usage ->
             setUsageAttributes(span, usage.jsonObject)
         }
+        body["input_tokens"]?.jsonPrimitive?.intOrNull?.let { span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it) }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
@@ -492,6 +497,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
 
         "output",
         "usage",
+        "input_tokens",
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
