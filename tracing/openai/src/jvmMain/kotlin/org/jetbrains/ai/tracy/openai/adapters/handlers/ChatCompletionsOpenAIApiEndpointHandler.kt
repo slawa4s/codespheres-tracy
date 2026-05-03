@@ -33,6 +33,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -52,6 +53,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
         span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
         span.setAttribute("openai.api.type", "chat_completions")
+
+        body["stream"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("gen_ai.request.stream", it) }
 
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -370,7 +373,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "tools",
         "choices",
         "temperature",
-        "tool_choice"
+        "tool_choice",
+        "stream"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
