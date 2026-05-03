@@ -268,7 +268,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
                     }
                 }
 
-                "response.done" -> {
+                "response.completed" -> {
                     val response = event["response"]?.jsonObject ?: continue
                     response["id"]?.jsonPrimitive?.contentOrNull?.let {
                         span.setAttribute(GEN_AI_RESPONSE_ID, it)
