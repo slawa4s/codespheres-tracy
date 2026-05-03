@@ -30,11 +30,12 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         OpenAIApiUtils.setNetworkRequestAttributes(span, request)
         span.setAttribute("openai.api.type", "responses")
-        val isCancelRequest = "cancel" in request.url.pathSegments
-        span.setAttribute(
-            GEN_AI_OPERATION_NAME,
-            if (isCancelRequest) "response.cancel" else "generate_content"
-        )
+        val operationName = when {
+            "cancel" in request.url.pathSegments -> "response.cancel"
+            "input_tokens" in request.url.pathSegments -> "response.input_tokens.count"
+            else -> "generate_content"
+        }
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
 
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
@@ -151,7 +152,11 @@ internal class ResponsesOpenAIApiEndpointHandler(
 
         // Override gen_ai.operation.name: setCommonResponseAttributes incorrectly sets it from
         // the body 'object' field. For the Responses API the correct value depends on the URL path.
-        val operationName = if ("cancel" in response.url.pathSegments) "response.cancel" else "generate_content"
+        val operationName = when {
+            "cancel" in response.url.pathSegments -> "response.cancel"
+            "input_tokens" in response.url.pathSegments -> "response.input_tokens.count"
+            else -> "generate_content"
+        }
         span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
 
         // Extract tracy.response.* attributes from the response body (mirrors handleStreaming)
