@@ -16,8 +16,8 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  * Handles `POST /v1/files` — upload a file (`files.create`).
  *
  * Request is `multipart/form-data` with:
- * - `purpose` text part → `gen_ai.request.file.purpose`
- * - `file` part: filename → `tracy.request.file.filename`, content size → `gen_ai.request.file.size_bytes`
+ * - `purpose` text part → `tracy.request.purpose`
+ * - `file` part: filename → `tracy.request.file.filename`, content size → `tracy.request.file.size_bytes`
  *
  * Response is a File object.
  *
@@ -30,11 +30,11 @@ internal class CreateFileHandler : FileRouteHandler {
             when (part.name) {
                 "purpose" -> {
                     val charset = part.contentType?.charset() ?: Charsets.UTF_8
-                    span.setAttribute("gen_ai.request.file.purpose", part.content.toString(charset))
+                    span.setAttribute("tracy.request.purpose", part.content.toString(charset))
                 }
                 "file" -> {
                     part.filename?.let { span.setAttribute("tracy.request.file.filename", it) }
-                    span.setAttribute("gen_ai.request.file.size_bytes", part.content.size.toLong())
+                    span.setAttribute("tracy.request.file.size_bytes", part.content.size.toLong())
                 }
             }
         }
