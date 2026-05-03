@@ -18,7 +18,7 @@ private val logger = KotlinLogging.logger {}
 /**
  * Handles `DELETE /v1/files/{file_id}` — delete a file (`files.delete`).
  *
- * Response: `id` → `tracy.response.file.id`.
+ * Response: `id` → `gen_ai.response.file.id`.
  *
  * See [Delete file](https://platform.openai.com/docs/api-reference/files/delete)
  */
@@ -34,6 +34,6 @@ internal class DeleteFileHandler : FileRouteHandler {
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        body["id"]?.jsonPrimitive?.content?.let { span.setAttribute("tracy.response.file.id", it) }
+        body["id"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.file.id", it) }
     }
 }
