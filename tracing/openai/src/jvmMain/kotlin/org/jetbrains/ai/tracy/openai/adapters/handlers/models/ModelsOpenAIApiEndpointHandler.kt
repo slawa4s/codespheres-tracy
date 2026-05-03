@@ -7,6 +7,7 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.models
 
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
@@ -32,9 +33,16 @@ internal class ModelsOpenAIApiEndpointHandler : EndpointApiHandler {
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         OpenAIApiUtils.setNetworkRequestAttributes(span, request)
-        val operationName = deriveOperationName(request.url)
+        val url = request.url
+        val operationName = deriveOperationName(url)
         span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
         span.setAttribute("openai.api.type", "models")
+        val segments = url.pathSegments
+        val modelsIndex = segments.indexOf("models")
+        val hasModelId = modelsIndex != -1 &&
+                segments.size > modelsIndex + 1 &&
+                segments[modelsIndex + 1].isNotBlank()
+        if (hasModelId) span.setAttribute(GEN_AI_REQUEST_MODEL, segments[modelsIndex + 1])
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
