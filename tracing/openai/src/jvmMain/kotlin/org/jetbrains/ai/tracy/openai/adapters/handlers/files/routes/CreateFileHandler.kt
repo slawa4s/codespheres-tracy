@@ -42,6 +42,6 @@ internal class CreateFileHandler : FileRouteHandler {
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceFileModel(body, "gen_ai.response.file")
+        span.traceFileModel(body, "tracy.response.file")
     }
 }
