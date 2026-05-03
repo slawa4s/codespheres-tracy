@@ -7,11 +7,16 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.models
 
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 
 /**
@@ -43,6 +48,12 @@ internal class ModelsOpenAIApiEndpointHandler : EndpointApiHandler {
         // response "object" field (which yields bare "list") with the URL-derived value.
         val operationName = deriveOperationName(response.url)
         span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+
+        val body = response.body.asJson()?.jsonObject ?: return
+        body["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.model.id", it) }
+        body["object"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.object", it) }
+        body["created"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.created", it) }
+        body["owned_by"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.owned_by", it) }
     }
 
     override fun handleStreaming(span: Span, events: String) {
