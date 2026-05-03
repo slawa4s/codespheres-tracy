@@ -5,6 +5,7 @@
 
 package org.jetbrains.ai.tracy.anthropic.adapters
 
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.AnthropicCountTokensHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.AnthropicListEndpointHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.AnthropicMessagesHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
@@ -28,6 +29,9 @@ internal enum class AnthropicApiType {
     // See: https://docs.anthropic.com/en/api/messages
     MESSAGES,
 
+    // See: https://docs.anthropic.com/en/api/messages-count-tokens
+    COUNT_TOKENS,
+
     // See: https://docs.anthropic.com/en/api/messages-batches (batches),
     //      https://docs.anthropic.com/en/api/files (files),
     //      https://docs.anthropic.com/en/api/models (models)
@@ -37,6 +41,7 @@ internal enum class AnthropicApiType {
         fun detect(url: TracyHttpUrl): AnthropicApiType {
             val segments = url.pathSegments
             return when {
+                segments.contains("count_tokens") -> COUNT_TOKENS
                 segments.contains("batches") ||
                 segments.contains("files") ||
                 segments.contains("models") -> LIST
@@ -104,6 +109,9 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         return when (apiType) {
             AnthropicApiType.MESSAGES -> handlers.getOrPut(AnthropicApiType.MESSAGES) {
                 AnthropicMessagesHandler(MediaContentExtractorImpl())
+            }
+            AnthropicApiType.COUNT_TOKENS -> handlers.getOrPut(AnthropicApiType.COUNT_TOKENS) {
+                AnthropicCountTokensHandler()
             }
             AnthropicApiType.LIST -> handlers.getOrPut(AnthropicApiType.LIST) {
                 AnthropicListEndpointHandler()
