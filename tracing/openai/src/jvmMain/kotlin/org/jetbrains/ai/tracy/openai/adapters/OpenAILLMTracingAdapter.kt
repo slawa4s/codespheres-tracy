@@ -17,6 +17,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.Conversatio
 import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.BatchesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.models.ModelsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.moderations.ModerationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
@@ -67,7 +68,10 @@ private enum class OpenAIApiType(val route: String) {
     AUDIO_SPEECH("audio/speech"),
 
     // See: https://platform.openai.com/docs/api-reference/moderations
-    MODERATIONS("moderations");
+    MODERATIONS("moderations"),
+
+    // See: https://platform.openai.com/docs/api-reference/batch
+    BATCHES("batches");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -206,6 +210,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.MODERATIONS -> handlers.getOrPut(OpenAIApiType.MODERATIONS) {
                 ModerationsOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.BATCHES -> handlers.getOrPut(OpenAIApiType.BATCHES) {
+                BatchesOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
