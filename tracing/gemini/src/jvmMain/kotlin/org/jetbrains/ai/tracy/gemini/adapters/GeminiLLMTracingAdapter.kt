@@ -12,6 +12,7 @@ import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiCachedContentsHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiContentGenHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiEmbeddingsHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiImagenHandler
@@ -82,6 +83,7 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     }
 
     private fun selectHandler(url: TracyHttpUrl): EndpointApiHandler = when {
+        url.isCachedContentsUrl() -> GeminiCachedContentsHandler()
         url.isModelsUrl() -> GeminiModelsHandler()
         url.isImagenUrl() -> GeminiImagenHandler(extractor)
         url.isEmbeddingsUrl() -> GeminiEmbeddingsHandler()
@@ -93,6 +95,8 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         return this.pathSegments.lastOrNull()?.split(":")
             ?.let { it.firstOrNull() to it.lastOrNull() } ?: (null to null)
     }
+
+    private fun TracyHttpUrl.isCachedContentsUrl(): Boolean = "cachedContents" in this.pathSegments
 
     private fun TracyHttpUrl.isModelsUrl(): Boolean {
         val lastSegment = this.pathSegments.lastOrNull() ?: return false
