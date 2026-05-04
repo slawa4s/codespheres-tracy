@@ -62,6 +62,14 @@ internal class ResponsesOpenAIApiEndpointHandler(
         body["stream"]?.jsonPrimitive?.booleanOrNull?.let {
             span.setAttribute("gen_ai.request.stream", it)
         }
+        body["include"]?.let {
+            val content = when (it) {
+                is JsonArray -> it.jsonArray.mapNotNull { el -> (el as? JsonPrimitive)?.content }.joinToString(",")
+                is JsonPrimitive -> it.content
+                else -> null
+            }
+            content?.let { value -> span.setAttribute("gen_ai.request.include", value) }
+        }
         body["response_format"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute(GEN_AI_OUTPUT_TYPE, it)
         }
@@ -489,6 +497,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
         "truncation",
         "parallel_tool_calls",
         "stream",
+        "include",
         "response_format",
         "tool_choice",
         "reasoning",
