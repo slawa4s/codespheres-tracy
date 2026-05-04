@@ -253,6 +253,16 @@ internal class ResponsesOpenAIApiEndpointHandler(
                             }
                             span.setAttribute("gen_ai.completion.$index.$key", value.orRedactedOutput())
                         }
+                        // Set flat tracy.response.output.* attributes for the first non-message output item
+                        if (index == 0) {
+                            type?.let { span.setAttribute("tracy.response.output.type", it) }
+                            output.jsonObject["name"]?.jsonPrimitive?.contentOrNull?.let {
+                                span.setAttribute("tracy.response.output.name", it)
+                            }
+                            output.jsonObject["call_id"]?.jsonPrimitive?.contentOrNull?.let {
+                                span.setAttribute("tracy.response.output.call_id", it)
+                            }
+                        }
                     }
                 }
             }
