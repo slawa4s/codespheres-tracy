@@ -12,6 +12,7 @@ import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiCachedContentsHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiContentGenHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiEmbeddingsHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiImagenHandler
@@ -58,6 +59,10 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             span.setAttribute("gemini.api.type", "models")
         }
 
+        if (request.url.isCachedContentsUrl()) {
+            span.setAttribute("gemini.api.type", "cachedContents")
+        }
+
         val handler = selectHandler(request.url)
         handler.handleRequestAttributes(span, request)
     }
@@ -85,6 +90,7 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         url.isModelsUrl() -> GeminiModelsHandler()
         url.isImagenUrl() -> GeminiImagenHandler(extractor)
         url.isEmbeddingsUrl() -> GeminiEmbeddingsHandler()
+        url.isCachedContentsUrl() -> GeminiCachedContentsHandler()
         else -> GeminiContentGenHandler(extractor)
     }
 
@@ -108,6 +114,10 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         val (model, operation) = this.modelAndOperation()
         return operation == "embedContent" ||
                 (operation == "predict" && model?.contains("embed", ignoreCase = true) == true)
+    }
+
+    private fun TracyHttpUrl.isCachedContentsUrl(): Boolean {
+        return "cachedContents" in this.pathSegments
     }
 
     private companion object {
