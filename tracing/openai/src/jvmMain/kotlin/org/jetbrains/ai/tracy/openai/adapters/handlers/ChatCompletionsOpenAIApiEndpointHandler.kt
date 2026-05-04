@@ -25,6 +25,8 @@ import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_FINISH_REASONS
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.Json
@@ -33,6 +35,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -52,6 +55,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
         span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
         span.setAttribute("openai.api.type", "chat_completions")
+        body["stream"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("gen_ai.request.stream", it) }
 
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -250,6 +254,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var responseId: String? = null
+        var responseModel: String? = null
+        val finishReasons = mutableListOf<String>()
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -261,7 +268,19 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
+                if (responseId == null) {
+                    responseId = event["id"]?.jsonPrimitive?.content
+                }
+                if (responseModel == null) {
+                    responseModel = event["model"]?.jsonPrimitive?.content
+                }
+
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+
+                choice["finish_reason"]?.jsonPrimitive?.content
+                    ?.takeIf { it != "null" }
+                    ?.let { finishReasons.add(it) }
+
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
@@ -276,6 +295,11 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        if (finishReasons.isNotEmpty()) {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons)
+        }
 
         return@runCatching
     }.getOrElse { exception ->
@@ -370,7 +394,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "tools",
         "choices",
         "temperature",
-        "tool_choice"
+        "tool_choice",
+        "stream"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
