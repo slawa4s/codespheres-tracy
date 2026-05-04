@@ -71,6 +71,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 else -> it.toString()
             }
             span.setAttribute("gen_ai.request.tool_choice", content)
+            span.setAttribute("tracy.request.tool_choice", content)
         }
         body["reasoning"]?.let { reasoningEl ->
             span.setAttribute("gen_ai.request.reasoning", reasoningEl.toString())
@@ -131,6 +132,14 @@ internal class ResponsesOpenAIApiEndpointHandler(
                     span.setAttribute("gen_ai.tool.$index.description", toolDescription?.orRedactedInput())
                     span.setAttribute("gen_ai.tool.$index.parameters", toolParameters?.orRedactedInput())
                     span.setAttribute("gen_ai.tool.$index.strict", strict)
+
+                    if (index == 0) {
+                        span.setAttribute("tracy.request.tool.type", toolType)
+                        span.setAttribute("tracy.request.tool.name", toolName)
+                        tool.jsonObject["search_context_size"]?.jsonPrimitive?.contentOrNull?.let {
+                            span.setAttribute("tracy.request.tool.search_context_size", it)
+                        }
+                    }
                 }
             }
         }
