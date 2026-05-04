@@ -71,8 +71,16 @@ internal class ResponsesOpenAIApiEndpointHandler(
             }
             span.setAttribute("gen_ai.request.tool_choice", content)
         }
-        body["reasoning"]?.let {
-            span.setAttribute("gen_ai.request.reasoning", it.toString())
+        body["reasoning"]?.let { reasoningEl ->
+            span.setAttribute("gen_ai.request.reasoning", reasoningEl.toString())
+            if (reasoningEl is JsonObject) {
+                reasoningEl["effort"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.request.reasoning.effort", it)
+                }
+                reasoningEl["summary"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.request.reasoning.summary", it)
+                }
+            }
         }
         body["text"]?.let {
             span.setAttribute("gen_ai.request.text", it.toString())
