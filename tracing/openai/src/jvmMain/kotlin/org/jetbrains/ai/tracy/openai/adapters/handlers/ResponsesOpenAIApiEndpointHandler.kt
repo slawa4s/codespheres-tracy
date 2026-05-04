@@ -45,7 +45,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
         body["store"]?.jsonPrimitive?.booleanOrNull?.let {
             span.setAttribute("gen_ai.request.store", it)
-            span.setAttribute("tracy.request.store", it)
+            span.setAttribute("tracy.request.store", it.toString())
         }
         body["top_p"]?.jsonPrimitive?.doubleOrNull?.let {
             span.setAttribute(GEN_AI_REQUEST_TOP_P, it)
@@ -179,7 +179,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
             span.setAttribute("tracy.response.background", it)
         }
         body["store"]?.jsonPrimitive?.booleanOrNull?.let {
-            span.setAttribute("tracy.response.store", it)
+            span.setAttribute("tracy.response.store", it.toString())
         }
         body["created_at"]?.jsonPrimitive?.longOrNull?.let {
             span.setAttribute("tracy.response.created_at", it)
