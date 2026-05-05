@@ -280,7 +280,7 @@ class HttpClientOpenAITracingTest : BaseAITracingTest() {
         assertEquals("Bad Request Mock", trace.attributes[AttributeKey.stringKey("gen_ai.error.message")])
         assertEquals("invalid_request", trace.attributes[AttributeKey.stringKey("gen_ai.error.code")])
         assertEquals("exception", trace.attributes[AttributeKey.stringKey("gen_ai.error.type")])
-        assertEquals(400, trace.attributes[AttributeKey.longKey("http.status_code")])
+        assertEquals(400, trace.attributes[AttributeKey.longKey("http.response.status_code")])
 
         // assert that tracing doesn't consume the response body
         assertTrue(response.bodyAsText().isNotEmpty())
