@@ -10,6 +10,7 @@ import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
@@ -41,12 +42,19 @@ private enum class OpenAIApiType(val route: String) {
     IMAGES_EDITS("images/edits"),
 
     // See: https://platform.openai.com/docs/api-reference/videos
-    VIDEOS("videos");
+    VIDEOS("videos"),
+
+    // See: https://platform.openai.com/docs/api-reference/conversations
+    CONVERSATIONS("conversations");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
             val route = url.pathSegments.joinToString(separator = "/")
-            return entries.firstOrNull { route.contains(it.route) }
+            // CONVERSATIONS must be checked before the general firstOrNull scan to resolve
+            // ambiguity with paths that contain both "conversations" and another route keyword
+            // (e.g. /conversations/{id}/completions would otherwise match CHAT_COMPLETIONS first).
+            if (route.contains(CONVERSATIONS.route)) return CONVERSATIONS
+            return entries.firstOrNull { it != CONVERSATIONS && route.contains(it.route) }
         }
     }
 }
@@ -152,6 +160,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.VIDEOS -> handlers.getOrPut(OpenAIApiType.VIDEOS) {
                 VideosOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
+                ConversationsOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
