@@ -10,6 +10,7 @@ import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
@@ -28,6 +29,10 @@ import java.util.concurrent.ConcurrentHashMap
  * Detects which OpenAI API is being used based on the request / response structure
  */
 private enum class OpenAIApiType(val route: String) {
+    // See: https://platform.openai.com/docs/api-reference/conversations
+    // Must be declared before CHAT_COMPLETIONS to avoid route-prefix false-positives
+    CONVERSATIONS("conversations"),
+
     // See: https://platform.openai.com/docs/api-reference/completions
     CHAT_COMPLETIONS("completions"),
 
@@ -134,6 +139,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         val extractor = MediaContentExtractorImpl()
 
         val handler = when (apiType) {
+            OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
+                ConversationsOpenAIApiEndpointHandler(extractor)
+            }
+
             OpenAIApiType.CHAT_COMPLETIONS -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
                 ChatCompletionsOpenAIApiEndpointHandler(extractor)
             }
@@ -154,8 +163,8 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
                 VideosOpenAIApiEndpointHandler(extractor)
             }
 
-            null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
-                logger.warn { "Unknown OpenAI API detected. Defaulting to 'chat completion'." }
+            null -> {
+                logger.warn { "Unknown OpenAI API endpoint: ${endpoint.pathSegments.joinToString("/")}. Span attributes may be incomplete." }
                 ChatCompletionsOpenAIApiEndpointHandler(extractor)
             }
         }
