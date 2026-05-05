@@ -12,6 +12,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
@@ -27,21 +28,25 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Detects which OpenAI API is being used based on the request / response structure
  */
-private enum class OpenAIApiType(val route: String) {
+private enum class OpenAIApiType(val route: String, val label: String) {
+    // See: https://platform.openai.com/docs/api-reference/conversations
+    // Listed first so paths containing "conversations" are matched before "completions"
+    CONVERSATIONS("conversations", "conversations"),
+
     // See: https://platform.openai.com/docs/api-reference/completions
-    CHAT_COMPLETIONS("completions"),
+    CHAT_COMPLETIONS("completions", "chat_completions"),
 
     // See: https://platform.openai.com/docs/api-reference/responses
-    RESPONSES_API("responses"),
+    RESPONSES_API("responses", "responses"),
 
     // See: https://platform.openai.com/docs/api-reference/images/create
-    IMAGES_GENERATIONS("images/generations"),
+    IMAGES_GENERATIONS("images/generations", "images_generations"),
 
     // See: https://platform.openai.com/docs/api-reference/images/createEdit
-    IMAGES_EDITS("images/edits"),
+    IMAGES_EDITS("images/edits", "images_edits"),
 
     // See: https://platform.openai.com/docs/api-reference/videos
-    VIDEOS("videos");
+    VIDEOS("videos", "videos");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -89,13 +94,21 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private val handlers = ConcurrentHashMap<OpenAIApiType, EndpointApiHandler>()
 
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        val apiType = OpenAIApiType.detect(request.url)
         val handler = handlerFor(request.url)
         handler.handleRequestAttributes(span, request)
+        apiType?.let { span.setAttribute("openai.api.type", it.label) }
     }
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
+        val apiType = OpenAIApiType.detect(response.url)
         val handler = handlerFor(response.url)
-        OpenAIApiUtils.setCommonResponseAttributes(span, response)
+        // Skip setCommonResponseAttributes for CONVERSATIONS: the response body's `object` field
+        // contains values like "conversation", "list", or "conversation.deleted" which are not
+        // valid operation names. The conversation route handlers set gen_ai.operation.name explicitly.
+        if (apiType != OpenAIApiType.CONVERSATIONS) {
+            OpenAIApiUtils.setCommonResponseAttributes(span, response)
+        }
         handler.handleResponseAttributes(span, response)
     }
 
@@ -134,6 +147,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         val extractor = MediaContentExtractorImpl()
 
         val handler = when (apiType) {
+            OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
+                ConversationsOpenAIApiEndpointHandler()
+            }
+
             OpenAIApiType.CHAT_COMPLETIONS -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
                 ChatCompletionsOpenAIApiEndpointHandler(extractor)
             }
