@@ -454,7 +454,7 @@ class AnthropicTracingTest : BaseAnthropicTracingTest() {
         )
 
         assertEquals(errorMessage, trace.attributes[AttributeKey.stringKey("gen_ai.error.message")])
-        assertEquals(529, trace.attributes[AttributeKey.longKey("http.status_code")])
+        assertEquals(529, trace.attributes[AttributeKey.longKey("http.response.status_code")])
     }
 
     @Test
