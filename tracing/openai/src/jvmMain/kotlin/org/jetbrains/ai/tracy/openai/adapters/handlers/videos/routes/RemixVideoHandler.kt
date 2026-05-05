@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.jsonObject
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
@@ -25,6 +26,7 @@ internal class RemixVideoHandler : VideoRouteHandler {
      * Request: Path parameter video_id, body with prompt
      */
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "videos.remix")
         val videoId = extractVideoIdFromPath(request.url)
         if (videoId != null) {
             span.setAttribute("gen_ai.request.video.requested_id", videoId)

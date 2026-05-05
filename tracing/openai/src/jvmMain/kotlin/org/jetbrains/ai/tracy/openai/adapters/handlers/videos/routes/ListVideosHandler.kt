@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.*
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -20,6 +21,7 @@ internal class ListVideosHandler : VideoRouteHandler {
      * Request: Query parameters after, limit, order
      */
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "videos.list")
         val params = request.url.parameters
         params.queryParameter("after")?.let { span.setAttribute("gen_ai.request.after", it) }
         params.queryParameter("limit")?.let { span.setAttribute("gen_ai.request.limit", it) }
