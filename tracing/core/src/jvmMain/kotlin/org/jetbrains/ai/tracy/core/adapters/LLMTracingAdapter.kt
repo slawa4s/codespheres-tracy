@@ -86,7 +86,7 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
                 }
             }
 
-            span.setAttribute("http.status_code", response.code.toLong())
+            span.setAttribute("http.response.status_code", response.code.toLong())
 
             if (response.isError()) {
                 getResponseErrorBodyAttributes(span, response.body)
