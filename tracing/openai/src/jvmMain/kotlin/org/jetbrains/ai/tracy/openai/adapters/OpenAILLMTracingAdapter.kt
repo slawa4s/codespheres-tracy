@@ -95,8 +95,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
         val handler = handlerFor(response.url)
-        OpenAIApiUtils.setCommonResponseAttributes(span, response)
+        // Handler runs first so it can set a route-derived gen_ai.operation.name before the
+        // common utility has a chance to overwrite it with the raw response "object" field.
         handler.handleResponseAttributes(span, response)
+        OpenAIApiUtils.setCommonResponseAttributes(span, response)
     }
 
     override fun getSpanName(request: TracyHttpRequest) = "OpenAI-generation"

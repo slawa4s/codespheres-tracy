@@ -137,8 +137,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
      * See [Response Object, Responses API](https://platform.openai.com/docs/api-reference/responses/object)
      */
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
+
         val body = response.body.asJson()?.jsonObject ?: return
-        OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.

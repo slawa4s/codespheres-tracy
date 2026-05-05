@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -37,6 +38,7 @@ internal class GetVideoContentHandler : VideoRouteHandler {
      * Response: Binary video stream (trace metadata only)
      */
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "get_video_content")
         // binary stream response -> trace metadata only
         val contentType = response.contentType
         if (contentType != null) {

@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import kotlinx.serialization.json.jsonObject
 import mu.KotlinLogging
@@ -110,6 +111,7 @@ internal class CreateVideoHandler(private val extractor: MediaContentExtractor) 
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "create_video")
         val body = response.body.asJson()?.jsonObject ?: return
         span.traceVideoModel(body, "gen_ai.response.video")
     }

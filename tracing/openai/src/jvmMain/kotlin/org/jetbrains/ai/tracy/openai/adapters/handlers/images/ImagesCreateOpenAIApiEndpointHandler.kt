@@ -13,6 +13,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.openai.adapters.handlers.asString
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -42,6 +43,7 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "create_image")
         handleImageGenerationResponseAttributes(span, response, extractor)
     }
 
