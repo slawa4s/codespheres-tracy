@@ -78,7 +78,7 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals(prompt, trace.attributes[AttributeKey.stringKey("gen_ai.response.video.prompt")])
             assertTrue(trace.attributes[AttributeKey.stringKey("gen_ai.response.video.model")]?.startsWith(model.asString()) == true)
             assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.response.video.status")])
-            assertEquals("video", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("videos.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertNotNull(trace.attributes[AttributeKey.longKey("gen_ai.response.video.created_at")])
 
             // These might be present depending on status
@@ -131,6 +131,129 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals(StatusCode.ERROR, trace.status.statusCode)
             assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.error.type")])
             assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.error.message")])
+        }
+    }
+
+    // ============ NETWORK ATTRIBUTES AND OPERATION NAMES ============
+
+    @Test
+    fun `test network attributes are set for CREATE endpoint`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(3)
+            ).apply { instrument(this) }
+
+            server.enqueueVideoModelResponse(
+                id = "video_network_test_123",
+                prompt = "A cat",
+                model = VideoModel.SORA_2,
+            )
+
+            val params = VideoCreateParams.builder()
+                .prompt("A cat")
+                .model(VideoModel.SORA_2)
+                .build()
+
+            client.videos().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("server.address")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("server.port")])
+            assertEquals("videos.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        }
+    }
+
+    @Test
+    fun `test network attributes are set for LIST endpoint`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(3)
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"object":"list","data":[],"has_more":false}""")
+            )
+
+            client.videos().list(VideoListParams.builder().build())
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("server.address")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("server.port")])
+            assertEquals("videos.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        }
+    }
+
+    @Test
+    fun `test operation name for GET_VIDEO route is videos_retrieve`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(3)
+            ).apply { instrument(this) }
+
+            val videoId = "video_retrieve_op_name"
+            server.enqueueVideoModelResponse(id = videoId, prompt = "test", model = VideoModel.SORA_2)
+            client.videos().retrieve(videoId)
+
+            val trace = analyzeSpans().first()
+            assertEquals("videos.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+        }
+    }
+
+    @Test
+    fun `test operation name for DELETE route is videos_delete`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1)
+            ).apply { instrument(this) }
+
+            val videoId = "video_delete_op_name"
+            server.enqueue(
+                MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json")
+                    .setBody("""{"id":"$videoId","deleted":true,"object":"video.deleted"}""")
+            )
+            client.videos().delete(videoId)
+
+            val trace = analyzeSpans().first()
+            assertEquals("videos.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+        }
+    }
+
+    @Test
+    fun `test operation name for REMIX route is videos_remix`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1)
+            ).apply { instrument(this) }
+
+            val videoId = "video_original_remix_test"
+            server.enqueue(
+                MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json")
+                    .setBody("""{"id":"video_remixed","object":"video","status":"queued","created_at":1710000100,"model":"sora-2","prompt":"remix prompt","remixed_from_video_id":"$videoId"}""")
+            )
+            client.videos().remix(videoId, VideoRemixParams.builder().prompt("remix prompt").build())
+
+            val trace = analyzeSpans().first()
+            assertEquals("videos.remix", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
         }
     }
 
@@ -541,8 +664,9 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val videosCount = trace.attributes[AttributeKey.longKey("gen_ai.response.videos_count")]
 
             assertEquals(videoList.data().size.toLong(), videosCount)
-            assertNotNull(trace.attributes[AttributeKey.booleanKey("gen_ai.response.has_more")])
-            assertEquals("list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertNotNull(trace.attributes[AttributeKey.booleanKey("tracy.response.has_more")])
+            assertEquals("list", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+            assertEquals("videos.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
 
             // Verify individual videos are traced
             if (videosCount != null && videosCount > 0) {
@@ -597,8 +721,8 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = analyzeSpans().first()
 
             // verify query parameters are traced
-            assertEquals(limit.toString(), trace.attributes[AttributeKey.stringKey("gen_ai.request.limit")])
-            assertEquals(order, trace.attributes[AttributeKey.stringKey("gen_ai.request.order")])
+            assertEquals(limit.toString(), trace.attributes[AttributeKey.stringKey("tracy.request.limit")])
+            assertEquals(order, trace.attributes[AttributeKey.stringKey("tracy.request.order")])
         }
     }
 
@@ -642,7 +766,7 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val traces = analyzeSpans()
             assertTracesCount(1, traces)
             val trace = traces.first()
-            assertEquals(after, trace.attributes[AttributeKey.stringKey("gen_ai.request.after")])
+            assertEquals(after, trace.attributes[AttributeKey.stringKey("tracy.request.after")])
         }
     }
 
