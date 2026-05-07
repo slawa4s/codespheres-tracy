@@ -69,6 +69,16 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
 
     fun registerResponse(span: Span, response: TracyHttpResponse): Unit =
         runCatching {
+            span.setAttribute("http.status_code", response.code.toLong())
+            span.setAttribute("http.response.status_code", response.code.toLong())
+
+            if (response.isError()) {
+                getResponseErrorBodyAttributes(span, response.body)
+                span.setStatus(StatusCode.ERROR)
+            } else {
+                span.setStatus(StatusCode.OK)
+            }
+
             val body = response.body.asJson()?.jsonObject ?: return
             val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
             val mimeType = response.contentType?.mimeType
@@ -89,16 +99,6 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
                 }
             }
 
-            span.setAttribute("http.status_code", response.code.toLong())
-            span.setAttribute("http.response.status_code", response.code.toLong())
-
-            if (response.isError()) {
-                getResponseErrorBodyAttributes(span, response.body)
-                span.setStatus(StatusCode.ERROR)
-            } else {
-                span.setStatus(StatusCode.OK)
-            }
-
             val spanData = (span as? ReadableSpan)?.toSpanData() ?: return@runCatching
             val totalAttributesCount = spanData.totalAttributeCount
             val keptAttributesCount = spanData.attributes.size()
@@ -115,7 +115,10 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
     protected open fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
         body.asJson()?.jsonObject["error"]?.jsonObject?.let { error ->
             error["message"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.message", it.content) }
-            error["type"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.type", it.content) }
+            error["type"]?.jsonPrimitive?.let {
+                span.setAttribute("gen_ai.error.type", it.content)
+                span.setAttribute("error.type", it.content)
+            }
             error["param"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.param", it.content) }
             error["code"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.code", it.content) }
         }

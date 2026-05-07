@@ -7,6 +7,8 @@ package org.jetbrains.ai.tracy.core.adapters
 
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.api.trace.StatusCode
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.jetbrains.ai.tracy.core.TracingManager
@@ -129,5 +131,61 @@ class LLMTracingAdapterAttributesTest : BaseOpenTelemetryTracingTest() {
 
         assertEquals(429L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
         assertEquals(429L, trace.attributes[AttributeKey.longKey("http.status_code")])
+    }
+
+    @Test
+    fun `registerResponse sets http status code even when body is not a JSON object`() {
+        val url = makeUrl("api.example.com", 443)
+        val response = object : TracyHttpResponse {
+            override val contentType: TracyContentType? = null
+            override val code = 400
+            override val body = TracyHttpResponseBody.Json(JsonPrimitive("non-object body"))
+            override val url = url
+            override val requestMethod = "POST"
+            override fun isError() = true
+        }
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        adapter.registerResponse(span, response)
+        span.end()
+
+        val traces = analyzeSpans()
+        val trace = traces.firstOrNull()
+        assertNotNull(trace)
+
+        assertEquals(400L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
+        assertEquals(400L, trace.attributes[AttributeKey.longKey("http.status_code")])
+        assertEquals(StatusCode.ERROR, trace.status.statusCode)
+    }
+
+    @Test
+    fun `registerResponse sets error_type and gen_ai_error_type from error body`() {
+        val url = makeUrl("api.example.com", 443)
+        val errorBody = buildJsonObject {
+            put("error", buildJsonObject {
+                put("type", "invalid_request_error")
+                put("message", "Bad request")
+            })
+        }
+        val response = object : TracyHttpResponse {
+            override val contentType: TracyContentType? = null
+            override val code = 400
+            override val body = TracyHttpResponseBody.Json(errorBody)
+            override val url = url
+            override val requestMethod = "POST"
+            override fun isError() = true
+        }
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        adapter.registerResponse(span, response)
+        span.end()
+
+        val traces = analyzeSpans()
+        val trace = traces.firstOrNull()
+        assertNotNull(trace)
+
+        assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("error.type")])
+        assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("gen_ai.error.type")])
+        assertEquals("Bad request", trace.attributes[AttributeKey.stringKey("gen_ai.error.message")])
+        assertEquals(400L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
+        assertEquals(StatusCode.ERROR, trace.status.statusCode)
     }
 }
