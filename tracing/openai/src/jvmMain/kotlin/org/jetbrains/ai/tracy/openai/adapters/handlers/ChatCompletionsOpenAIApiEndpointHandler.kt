@@ -49,12 +49,19 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        OpenAIApiUtils.setNetworkRequestAttributes(span, request)
+        span.setAttribute("openai.api.type", "chat_completions")
+
+        val lastSegment = request.url.pathSegments.lastOrNull()
+        val operationName = when {
+            request.method == "GET" && lastSegment != "completions" -> "chat.completions.retrieve"
+            request.method == "GET" -> "chat.completions.list"
+            else -> "chat"
+        }
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
-        OpenAIApiUtils.setNetworkRequestAttributes(span, request)
-
-        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
-        span.setAttribute("openai.api.type", "chat_completions")
         body["stream"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("gen_ai.request.stream", it) }
 
         body["messages"]?.let {
