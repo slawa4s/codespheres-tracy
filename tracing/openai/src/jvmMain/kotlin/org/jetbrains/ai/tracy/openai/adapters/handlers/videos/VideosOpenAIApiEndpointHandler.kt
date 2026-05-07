@@ -6,12 +6,14 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.videos
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes.*
 
 /**
@@ -47,12 +49,17 @@ internal class VideosOpenAIApiEndpointHandler(
     }
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        OpenAIApiUtils.setNetworkRequestAttributes(span, request)
         val route = detectRoute(request.url, request.method)
+        span.setAttribute(GEN_AI_OPERATION_NAME, route.operationName)
         routeHandlers[route]?.handleRequest(span, request)
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val route = detectRoute(response.url, response.requestMethod)
+        // Override gen_ai.operation.name set by setCommonResponseAttributes from the
+        // response "object" field (which yields bare "video"/"list") with the route-derived value.
+        span.setAttribute(GEN_AI_OPERATION_NAME, route.operationName)
         routeHandlers[route]?.handleResponse(span, response)
     }
 
@@ -96,13 +103,13 @@ internal class VideosOpenAIApiEndpointHandler(
     /**
      * Internal enum to distinguish between different video API routes.
      */
-    private enum class VideoRoute {
-        CREATE,   // POST /videos
-        GET_VIDEO,      // GET /videos/{video_id}
-        DELETE,   // DELETE /videos/{video_id}
-        LIST,     // GET /videos
-        VIDEO_CONTENT,  // GET /videos/{video_id}/content
-        REMIX     // POST /videos/{video_id}/remix
+    private enum class VideoRoute(val operationName: String) {
+        CREATE("videos.create"),        // POST /videos
+        GET_VIDEO("videos.retrieve"),   // GET /videos/{video_id}
+        DELETE("videos.delete"),        // DELETE /videos/{video_id}
+        LIST("videos.list"),            // GET /videos
+        VIDEO_CONTENT("videos.content"), // GET /videos/{video_id}/content
+        REMIX("videos.remix")           // POST /videos/{video_id}/remix
     }
 
     companion object {
