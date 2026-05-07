@@ -9,6 +9,7 @@ import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
@@ -39,13 +40,24 @@ internal class BatchesOpenAIApiEndpointHandler : EndpointApiHandler {
         if (route == BatchRoute.CREATE) {
             val body = request.body.asJson()?.jsonObject ?: return
             body["input_file_id"]?.jsonPrimitive?.content?.let {
-                span.setAttribute("gen_ai.request.batch.input_file_id", it)
+                span.setAttribute("tracy.request.batch.input_file.id", it)
             }
             body["endpoint"]?.jsonPrimitive?.content?.let {
-                span.setAttribute("gen_ai.request.batch.endpoint", it)
+                span.setAttribute("tracy.request.batch.endpoint", it)
             }
             body["completion_window"]?.jsonPrimitive?.content?.let {
-                span.setAttribute("gen_ai.request.batch.completion_window", it)
+                span.setAttribute("tracy.request.batch.completion_window", it)
+            }
+            body["output_expires_after"]?.jsonObject?.let { exp ->
+                exp["anchor"]?.jsonPrimitive?.content?.let {
+                    span.setAttribute("tracy.request.batch.output_expires_after.anchor", it)
+                }
+                exp["seconds"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("tracy.request.batch.output_expires_after.seconds", it)
+                }
+            }
+            body["metadata"]?.jsonObject?.keys?.joinToString(",")?.let {
+                span.setAttribute("tracy.request.metadata.keys", it)
             }
         }
     }
@@ -62,6 +74,20 @@ internal class BatchesOpenAIApiEndpointHandler : EndpointApiHandler {
         }
         body["status"]?.jsonPrimitive?.content?.let {
             span.setAttribute("gen_ai.response.batch.status", it)
+        }
+        body["id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.batch.id", it)
+        }
+        body["status"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.batch.status", it)
+        }
+        body["created_at"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.batch.created_at", it)
+        }
+        body["request_counts"]?.jsonObject?.let { rc ->
+            rc["total"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.batch.request_counts.total", it) }
+            rc["completed"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.batch.request_counts.completed", it) }
+            rc["failed"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.batch.request_counts.failed", it) }
         }
     }
 

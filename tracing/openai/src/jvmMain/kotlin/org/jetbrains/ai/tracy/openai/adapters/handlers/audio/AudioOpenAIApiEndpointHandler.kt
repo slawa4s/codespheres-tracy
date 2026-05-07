@@ -46,11 +46,13 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
  * - `words`    → `tracy.response.transcription.words.count` (array size)
  *
  * The speech endpoint accepts `application/json` with the following fields:
+ * - `model`           → model name; maps to `gen_ai.request.model`
  * - `input`           → text to synthesize; maps to `gen_ai.request.input`
- * - `voice`           → voice name; maps to `gen_ai.request.voice`
- * - `response_format` → desired audio format; maps to `gen_ai.request.response_format`
+ * - `voice`           → voice name; maps to `tracy.request.voice`
+ * - `response_format` → desired audio format; maps to `tracy.request.response_format`
+ * - `speed`           → playback speed multiplier; maps to `tracy.request.speed`
  *
- * The speech response is binary audio; `gen_ai.response.audio.size_bytes` is read from the Content-Length header.
+ * The speech response is binary audio; `tracy.response.audio.size_bytes` is read from the Content-Length header.
  *
  * See [Audio API Reference](https://platform.openai.com/docs/api-reference/audio)
  */
@@ -105,14 +107,20 @@ internal class AudioOpenAIApiEndpointHandler : EndpointApiHandler {
         if (operationName == "audio.speech") {
             span.setAttribute("gen_ai.output.type", "speech")
             val jsonBody = request.body.asJson()?.jsonObject ?: return
+            jsonBody["model"]?.jsonPrimitive?.content?.let {
+                span.setAttribute(GEN_AI_REQUEST_MODEL, it)
+            }
             jsonBody["input"]?.jsonPrimitive?.content?.let {
                 span.setAttribute("gen_ai.request.input", it.orRedactedInput())
             }
             jsonBody["voice"]?.jsonPrimitive?.content?.let {
-                span.setAttribute("gen_ai.request.voice", it)
+                span.setAttribute("tracy.request.voice", it)
             }
             jsonBody["response_format"]?.jsonPrimitive?.content?.let {
-                span.setAttribute("gen_ai.request.response_format", it)
+                span.setAttribute("tracy.request.response_format", it)
+            }
+            jsonBody["speed"]?.jsonPrimitive?.doubleOrNull?.let {
+                span.setAttribute("tracy.request.speed", it)
             }
         }
     }
@@ -122,7 +130,7 @@ internal class AudioOpenAIApiEndpointHandler : EndpointApiHandler {
 
         if (deriveOperationName(response.url.pathSegments) == "audio.speech") {
             response.contentLength?.let {
-                span.setAttribute("gen_ai.response.audio.size_bytes", it)
+                span.setAttribute("tracy.response.audio.size_bytes", it)
             }
             return
         }

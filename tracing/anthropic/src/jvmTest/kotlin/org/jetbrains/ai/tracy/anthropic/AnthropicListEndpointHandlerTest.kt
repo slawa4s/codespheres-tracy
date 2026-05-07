@@ -67,6 +67,11 @@ class AnthropicListEndpointHandlerTest : BaseAITracingTest() {
             assertNotNull(trace, "Expected a span to be created for the batch create call")
             assertEquals(StatusCode.ERROR, trace.status.statusCode)
             assertEquals(
+                400L,
+                trace.attributes[AttributeKey.longKey("http.response.status_code")],
+                "http.response.status_code must be recorded even when the error branch returns early"
+            )
+            assertEquals(
                 "invalid_request_error",
                 trace.attributes[AttributeKey.stringKey("error.type")],
                 "error.type should be extracted from the nested error object"
@@ -112,6 +117,11 @@ class AnthropicListEndpointHandlerTest : BaseAITracingTest() {
             val trace = analyzeSpans().firstOrNull()
             assertNotNull(trace, "Expected a span to be created for the batch create call")
             assertEquals(StatusCode.ERROR, trace.status.statusCode)
+            assertEquals(
+                400L,
+                trace.attributes[AttributeKey.longKey("http.response.status_code")],
+                "http.response.status_code must be recorded even when the error branch returns early"
+            )
             assertNotNull(
                 trace.attributes[AttributeKey.stringKey("error.type")],
                 "error.type should be non-null even when error is a flat envelope"
