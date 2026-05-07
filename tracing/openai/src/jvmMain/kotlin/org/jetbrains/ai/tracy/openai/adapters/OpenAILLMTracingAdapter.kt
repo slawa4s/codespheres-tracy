@@ -27,21 +27,21 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Detects which OpenAI API is being used based on the request / response structure
  */
-private enum class OpenAIApiType(val route: String) {
+private enum class OpenAIApiType(val route: String, val apiTypeName: String) {
     // See: https://platform.openai.com/docs/api-reference/completions
-    CHAT_COMPLETIONS("completions"),
+    CHAT_COMPLETIONS("completions", "chat.completions"),
 
     // See: https://platform.openai.com/docs/api-reference/responses
-    RESPONSES_API("responses"),
+    RESPONSES_API("responses", "responses"),
 
     // See: https://platform.openai.com/docs/api-reference/images/create
-    IMAGES_GENERATIONS("images/generations"),
+    IMAGES_GENERATIONS("images/generations", "images.generations"),
 
     // See: https://platform.openai.com/docs/api-reference/images/createEdit
-    IMAGES_EDITS("images/edits"),
+    IMAGES_EDITS("images/edits", "images.edits"),
 
     // See: https://platform.openai.com/docs/api-reference/videos
-    VIDEOS("videos");
+    VIDEOS("videos", "videos");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -89,11 +89,13 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private val handlers = ConcurrentHashMap<OpenAIApiType, EndpointApiHandler>()
 
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        OpenAIApiType.detect(request.url)?.let { span.setAttribute("openai.api.type", it.apiTypeName) }
         val handler = handlerFor(request.url)
         handler.handleRequestAttributes(span, request)
     }
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
+        OpenAIApiType.detect(response.url)?.let { span.setAttribute("openai.api.type", it.apiTypeName) }
         val handler = handlerFor(response.url)
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
         handler.handleResponseAttributes(span, response)
