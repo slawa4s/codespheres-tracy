@@ -14,6 +14,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranscriptionOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranslationOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.BatchesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
@@ -48,6 +49,9 @@ private enum class OpenAIApiType(val route: String, val apiTypeName: String) {
 
     // See: https://platform.openai.com/docs/api-reference/videos
     VIDEOS("videos", "videos"),
+
+    // See: https://platform.openai.com/docs/api-reference/batch
+    BATCHES("batches", "batches"),
 
     // See: https://platform.openai.com/docs/api-reference/audio/createTranscription
     AUDIO("audio/transcriptions", "audio"),
@@ -170,6 +174,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.VIDEOS -> handlers.getOrPut(OpenAIApiType.VIDEOS) {
                 VideosOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.BATCHES -> handlers.getOrPut(OpenAIApiType.BATCHES) {
+                BatchesOpenAIApiEndpointHandler()
             }
 
             OpenAIApiType.AUDIO -> handlers.getOrPut(OpenAIApiType.AUDIO) {
