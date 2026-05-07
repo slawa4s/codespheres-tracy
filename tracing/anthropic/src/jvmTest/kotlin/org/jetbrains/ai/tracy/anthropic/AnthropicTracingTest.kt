@@ -361,6 +361,8 @@ class AnthropicTracingTest : BaseAnthropicTracingTest() {
 
         assertTrue(trace.attributes[AttributeKey.stringKey("gen_ai.response.model")]?.commonPrefixWith(model.asString()) == "claude-haiku-4-5")
 
+        assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+
         val type = trace.attributes[AttributeKey.stringKey("gen_ai.completion.0.type")]
         assertNotNull(type)
         assertTrue(type.isNotEmpty())
