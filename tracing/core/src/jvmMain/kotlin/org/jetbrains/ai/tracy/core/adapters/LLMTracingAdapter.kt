@@ -86,12 +86,22 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
 
     fun registerResponse(span: Span, response: TracyHttpResponse): Unit =
         runCatching {
+            // Always set HTTP status and error state, regardless of whether the body is parseable
+            span.setAttribute("http.status_code", response.code.toLong())
+            span.setAttribute("http.response.status_code", response.code.toLong())
+
+            if (response.isError()) {
+                getResponseErrorBodyAttributes(span, response.body)
+                span.setStatus(StatusCode.ERROR)
+            } else {
+                span.setStatus(StatusCode.OK)
+            }
+
             val contentType = response.contentType
             // install the content type of the response body
             contentType?.asString()?.let {
                 span.setAttribute("gen_ai.completion.content.type", it)
             }
-
             // set response body attributes only for non-stream content types;
             // stream events are handled by `registerResponseStreamEvent`
             val mimeType = contentType?.mimeType
@@ -140,7 +150,10 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
 
         body["error"]?.jsonObject?.let { error ->
             error["message"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.message", it.content) }
-            error["type"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.type", it.content) }
+            error["type"]?.jsonPrimitive?.let {
+                span.setAttribute("gen_ai.error.type", it.content)
+                span.setAttribute("error.type", it.content)
+            }
             error["param"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.param", it.content) }
             error["code"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.code", it.content) }
         }

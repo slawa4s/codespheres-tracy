@@ -10,6 +10,7 @@ import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 import mu.KotlinLogging
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.BatchesAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
 import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
@@ -51,7 +52,17 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
  * See: [Anthropic Messages API](https://docs.claude.com/en/api/messages)
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
+    private val batchesHandler = BatchesAnthropicApiEndpointHandler()
+
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        if (isBatchUrl(request.url)) {
+            batchesHandler.handleRequestAttributes(span, request)
+            return
+        }
+
+        // Standard Messages API: set the operation name
+        span.setAttribute("gen_ai.operation.name", "chat")
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -127,6 +138,11 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     }
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
+        if (isBatchUrl(response.url)) {
+            batchesHandler.handleResponseAttributes(span, response)
+            return
+        }
+
         val body = response.body.asJson()?.jsonObject ?: return
 
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
@@ -240,6 +256,9 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     ): Result<Unit> {
         return sseHandlingUnsupported()
     }
+
+    /** Returns `true` when the URL targets the Message Batches API (contains a `batches` path segment). */
+    private fun isBatchUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("batches")
 
     /**
      * Parses content of the `messages` field when its type is
