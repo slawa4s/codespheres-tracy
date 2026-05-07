@@ -164,11 +164,11 @@ Info:
 Info:
 1. Request type: JSON (`POST /conversations`, `POST /conversations/{id}` for the listed UPDATE route)
 1. Response type: JSON (`Conversation` object, or `ConversationDeletedResource` for delete)
-1. Covers endpoints:
-   1. `POST /conversations`
-   2. `GET /conversations/{conversation_id}`
-   3. `POST /conversations/{conversation_id}` — **not implemented** (UPDATE; the dispatcher has no route for it)
-   4. `DELETE /conversations/{conversation_id}`
+1. Covers endpoints (resource: [conversations](https://developers.openai.com/api/reference/resources/conversations)):
+   1. [`POST /conversations`](https://developers.openai.com/api/reference/resources/conversations/methods/create)
+   2. [`GET /conversations/{conversation_id}`](https://developers.openai.com/api/reference/resources/conversations/methods/retrieve)
+   3. [`POST /conversations/{conversation_id}`](https://developers.openai.com/api/reference/resources/conversations/methods/update) — **not implemented** (UPDATE; the dispatcher has no route for it)
+   4. [`DELETE /conversations/{conversation_id}`](https://developers.openai.com/api/reference/resources/conversations/methods/delete)
 
    *Bonus (not in the listed scope):* `POST/GET /conversations/{id}/items` and `GET/DELETE /conversations/{id}/items/{item_id}` — handled by the four `items.*` route handlers.
 1. **Attributes coverage: 3/7 = 42.8%** (denominator excludes items routes; UPDATE is counted as not-traced)
@@ -188,12 +188,12 @@ Info:
 Info:
 1. Request type: `multipart/form-data` (`POST /files`); query params for `GET /files`; path params for the rest
 1. Response type: JSON (`File` object) for `list/create/retrieve/delete`; **binary** for `GET /files/{id}/content`
-1. Covers endpoints:
-   1. `GET /files`
-   2. `POST /files`
-   3. `GET /files/{file_id}`
-   4. `DELETE /files/{file_id}`
-   5. `GET /files/{file_id}/content`
+1. Covers endpoints (resource: [files](https://developers.openai.com/api/reference/resources/files)):
+   1. [`GET /files`](https://developers.openai.com/api/reference/resources/files/methods/list)
+   2. [`POST /files`](https://developers.openai.com/api/reference/resources/files/methods/create)
+   3. [`GET /files/{file_id}`](https://developers.openai.com/api/reference/resources/files/methods/retrieve)
+   4. [`DELETE /files/{file_id}`](https://developers.openai.com/api/reference/resources/files/methods/delete)
+   5. [`GET /files/{file_id}/content`](https://developers.openai.com/api/reference/resources/files/methods/content)
 1. **Attributes coverage: 16/21 = 76.1%**
 
 | Original attribute | Source                                       | Mapped to attribute(s)                                                          | Specification type | Note                                            |
@@ -225,10 +225,10 @@ Info:
 Info:
 1. Request type: none (path params only)
 1. Response type: JSON (`Model` object; list envelope for `GET /models`)
-1. Covers endpoints:
-   1. `GET /models`
-   2. `GET /models/{model}`
-   3. `DELETE /models/{model}` — **not implemented** (handler's `deriveOperationName` only knows `models.list` / `models.retrieve`; DELETE falls through to `models.list` by default)
+1. Covers endpoints (resource: [models](https://developers.openai.com/api/reference/resources/models)):
+   1. [`GET /models`](https://developers.openai.com/api/reference/resources/models/methods/list)
+   2. [`GET /models/{model}`](https://developers.openai.com/api/reference/resources/models/methods/retrieve)
+   3. [`DELETE /models/{model}`](https://developers.openai.com/api/reference/resources/models/methods/delete) — **not implemented** (handler's `deriveOperationName` only knows `models.list` / `models.retrieve`; DELETE falls through to `models.list` by default)
 1. **Attributes coverage: 4/6 = 67%**
 
 | Original attribute | Source                       | Mapped to attribute(s)    | Specification type | Note                                                |
@@ -247,8 +247,8 @@ The path-derived `model` (last URL segment when present) is recorded as `gen_ai.
 Info:
 1. Request type: JSON
 1. Response type: JSON
-1. Covers endpoints:
-   1. `POST /moderations`
+1. Covers endpoints (resource: [moderations](https://developers.openai.com/api/reference/resources/moderations)):
+   1. [`POST /moderations`](https://developers.openai.com/api/reference/resources/moderations/methods/create)
 1. **Attributes coverage: 4/9 = 44.4%**
 
 | Original attribute             | Source                | Mapped to attribute(s)                        | Specification type | Note                                                                   |
@@ -283,10 +283,9 @@ Notes:
 Info:
 1. Request type: JSON
 1. Response type: JSON (non-streaming) or `text/event-stream` (streaming)
-1. Covers endpoints (URL-derived `gen_ai.operation.name`):
-   1. `POST /responses`, `GET /responses/{response_id}` → `generate_content`
-   2. `POST /responses/{response_id}/cancel` → `response.cancel`
-   3. `GET /responses/{response_id}/input_tokens` → `response.input_tokens.count`
+1. Covers endpoints (resource: [responses](https://developers.openai.com/api/reference/resources/responses); URL-derived `gen_ai.operation.name`):
+   1. [`POST /responses`](https://developers.openai.com/api/reference/resources/responses/methods/create), [`GET /responses/{response_id}`](https://developers.openai.com/api/reference/resources/responses/methods/retrieve) → `generate_content`
+   2. [`POST /responses/{response_id}/cancel`](https://developers.openai.com/api/reference/resources/responses/methods/cancel) → `response.cancel`
 
 This entry lists **only attributes whose tracing was added or fixed by this patch**. Attributes already traced before `6e028bd2` — `model`, `temperature`, `top_p`, `max_output_tokens`, `truncation`, `parallel_tool_calls`, `stream`, `response_format`, `tool_choice`, `reasoning` (whole JSON), `text`, `previous_response_id`, `instructions`, `input`, `tools`, `id`, `object` (formerly mis-mapped to `gen_ai.operation.name`), `model`, `output`, `usage.{input,output}_tokens` — are unchanged and are not repeated here.
 
