@@ -10,6 +10,7 @@ import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
@@ -39,6 +40,10 @@ private enum class OpenAIApiType(val route: String) {
 
     // See: https://platform.openai.com/docs/api-reference/images/createEdit
     IMAGES_EDITS("images/edits"),
+
+    // See: https://platform.openai.com/docs/api-reference/conversations
+    // Must precede VIDEOS so that /v1/conversations/** is not mistakenly matched by the "videos" route
+    CONVERSATIONS("conversations"),
 
     // See: https://platform.openai.com/docs/api-reference/videos
     VIDEOS("videos");
@@ -148,6 +153,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.IMAGES_EDITS -> handlers.getOrPut(OpenAIApiType.IMAGES_EDITS) {
                 ImagesCreateEditOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
+                ConversationsOpenAIApiEndpointHandler(extractor)
             }
 
             OpenAIApiType.VIDEOS -> handlers.getOrPut(OpenAIApiType.VIDEOS) {
