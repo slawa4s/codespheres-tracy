@@ -8,8 +8,10 @@ package org.jetbrains.ai.tracy.core.adapters
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.http.protocol.TracyContentType
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
@@ -151,5 +153,82 @@ class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
         assertEquals(400L, trace.attributes[AttributeKey.longKey("http.status_code")])
         assertEquals(400L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
         assertEquals(StatusCode.ERROR, trace.status.statusCode)
+    }
+
+    @Test
+    fun `registerResponse sets http status code even when body is non-JSON object`() {
+        val span = TracingManager.tracer.spanBuilder("test-non-json-body").startSpan()
+
+        // JsonNull is not a JsonObject, so asJson()?.jsonObject returns null — simulates an empty/non-JSON body
+        val response = object : TracyHttpResponse {
+            override val contentType = null
+            override val code = 400
+            override val body = TracyHttpResponseBody.Json(JsonNull)
+            override val url = adapterTestUrl
+            override val requestMethod = "POST"
+            override fun isError() = true
+        }
+
+        adapter.registerResponse(span, response)
+        span.end()
+
+        val traces = analyzeSpans()
+        val trace = traces.single { it.name == "test-non-json-body" }
+
+        assertEquals(400L, trace.attributes[AttributeKey.longKey("http.status_code")])
+        assertEquals(400L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
+        assertEquals(StatusCode.ERROR, trace.status.statusCode)
+    }
+
+    @Test
+    fun `registerResponse sets http status code for non-error response with non-JSON body`() {
+        val span = TracingManager.tracer.spanBuilder("test-200-non-json").startSpan()
+
+        val response = object : TracyHttpResponse {
+            override val contentType = null
+            override val code = 200
+            override val body = TracyHttpResponseBody.Json(JsonNull)
+            override val url = adapterTestUrl
+            override val requestMethod = "POST"
+            override fun isError() = false
+        }
+
+        adapter.registerResponse(span, response)
+        span.end()
+
+        val traces = analyzeSpans()
+        val trace = traces.single { it.name == "test-200-non-json" }
+
+        assertEquals(200L, trace.attributes[AttributeKey.longKey("http.status_code")])
+        assertEquals(200L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
+        assertEquals(StatusCode.OK, trace.status.statusCode)
+    }
+
+    @Test
+    fun `getResponseErrorBodyAttributes sets both error_type and gen_ai_error_type`() {
+        val span = TracingManager.tracer.spanBuilder("test-error-type").startSpan()
+
+        val response = object : TracyHttpResponse {
+            override val contentType = TracyContentType.Application.Json
+            override val code = 400
+            override val body = TracyHttpResponseBody.Json(buildJsonObject {
+                put("error", buildJsonObject {
+                    put("type", "invalid_request_error")
+                    put("message", "Your request was invalid.")
+                })
+            })
+            override val url = adapterTestUrl
+            override val requestMethod = "POST"
+            override fun isError() = true
+        }
+
+        adapter.registerResponse(span, response)
+        span.end()
+
+        val traces = analyzeSpans()
+        val trace = traces.single { it.name == "test-error-type" }
+
+        assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("gen_ai.error.type")])
+        assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("error.type")])
     }
 }
