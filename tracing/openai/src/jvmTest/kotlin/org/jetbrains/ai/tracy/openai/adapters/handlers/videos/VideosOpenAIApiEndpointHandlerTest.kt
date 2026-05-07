@@ -541,7 +541,8 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val videosCount = trace.attributes[AttributeKey.longKey("gen_ai.response.videos_count")]
 
             assertEquals(videoList.data().size.toLong(), videosCount)
-            assertNotNull(trace.attributes[AttributeKey.booleanKey("gen_ai.response.has_more")])
+            assertNotNull(trace.attributes[AttributeKey.booleanKey("tracy.response.has_more")])
+            assertEquals("list", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
             assertEquals("list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
 
             // Verify individual videos are traced

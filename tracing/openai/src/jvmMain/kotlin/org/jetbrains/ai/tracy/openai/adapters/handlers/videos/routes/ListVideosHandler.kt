@@ -34,7 +34,8 @@ internal class ListVideosHandler : VideoRouteHandler {
 
         body["first_id"]?.let { span.setAttribute("gen_ai.response.first_id", it.jsonPrimitive.content) }
         body["last_id"]?.let { span.setAttribute("gen_ai.response.last_id", it.jsonPrimitive.content) }
-        body["has_more"]?.let { span.setAttribute("gen_ai.response.has_more", it.jsonPrimitive.boolean) }
+        body["has_more"]?.let { span.setAttribute("tracy.response.has_more", it.jsonPrimitive.boolean) }
+        body["object"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.object", it) }
 
         val data = body["data"]
         if (data != null && data is JsonArray) {
