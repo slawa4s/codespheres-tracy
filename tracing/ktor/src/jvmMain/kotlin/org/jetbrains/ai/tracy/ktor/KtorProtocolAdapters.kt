@@ -40,6 +40,11 @@ internal class TracyHttpResponseView(
     override val body = TracyHttpResponseBody.Json(body)
     override val url = response.request.url.toProtocolUrl()
     override val requestMethod = response.request.method.value.uppercase()
+    override val headers: Map<String, String> = buildMap {
+        response.headers.forEach { name, values ->
+            if (values.isNotEmpty()) put(name.lowercase(), values.first())
+        }
+    }
 
     override fun isError() = response.status.isSuccess().not()
 }

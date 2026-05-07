@@ -12,8 +12,11 @@ import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiCachedContentsHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiContentGenHandler
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiEmbeddingsHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiImagenHandler
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiModelsHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 
@@ -43,10 +46,22 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
  */
 class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.GEMINI) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("gen_ai.provider.name", "gemini")
+        span.setAttribute("server.address", request.url.host)
+        span.setAttribute("server.port", if (request.url.scheme == "https") 443L else 80L)
+
         val (model, operation) = request.url.modelAndOperation()
 
         model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
         operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
+
+        if ("models" in request.url.pathSegments) {
+            span.setAttribute("gemini.api.type", "models")
+        }
+
+        if (request.url.isCachedContentsUrl()) {
+            span.setAttribute("gemini.api.type", "cachedContents")
+        }
 
         val handler = selectHandler(request.url)
         handler.handleRequestAttributes(span, request)
@@ -59,15 +74,23 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
     override fun getSpanName(request: TracyHttpRequest) = "Gemini-generation"
 
-    // streaming is not supported
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
+    override fun isStreamingRequest(request: TracyHttpRequest): Boolean {
+        val url = request.url
+        val lastSegment = url.pathSegments.lastOrNull() ?: return false
+        return lastSegment.endsWith(":streamGenerateContent") ||
+                url.parameters.queryParameter("alt") == "sse"
+    }
+
     override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) {
         val handler = selectHandler(url)
         handler.handleStreaming(span, events)
     }
 
     private fun selectHandler(url: TracyHttpUrl): EndpointApiHandler = when {
+        url.isCachedContentsUrl() -> GeminiCachedContentsHandler()
+        url.isModelsUrl() -> GeminiModelsHandler()
         url.isImagenUrl() -> GeminiImagenHandler(extractor)
+        url.isEmbeddingsUrl() -> GeminiEmbeddingsHandler()
         else -> GeminiContentGenHandler(extractor)
     }
 
@@ -77,9 +100,24 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             ?.let { it.firstOrNull() to it.lastOrNull() } ?: (null to null)
     }
 
+    private fun TracyHttpUrl.isCachedContentsUrl(): Boolean {
+        return "cachedContents" in this.pathSegments
+    }
+
+    private fun TracyHttpUrl.isModelsUrl(): Boolean {
+        val lastSegment = this.pathSegments.lastOrNull() ?: return false
+        return "models" in this.pathSegments && !lastSegment.contains(":")
+    }
+
     private fun TracyHttpUrl.isImagenUrl(): Boolean {
         val (model, operation) = this.modelAndOperation()
         return (model?.startsWith("imagen") == true) && (operation == "predict")
+    }
+
+    private fun TracyHttpUrl.isEmbeddingsUrl(): Boolean {
+        val (model, operation) = this.modelAndOperation()
+        return operation == "embedContent" ||
+                (operation == "predict" && model?.contains("embed", ignoreCase = true) == true)
     }
 
     private companion object {

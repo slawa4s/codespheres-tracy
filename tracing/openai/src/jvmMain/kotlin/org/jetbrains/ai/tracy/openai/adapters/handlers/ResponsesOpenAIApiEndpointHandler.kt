@@ -28,6 +28,15 @@ internal class ResponsesOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        OpenAIApiUtils.setNetworkRequestAttributes(span, request)
+        span.setAttribute("openai.api.type", "responses")
+        val operationName = when {
+            "input_tokens" in request.url.pathSegments -> "response.input_tokens.count"
+            "cancel" in request.url.pathSegments -> "response.cancel"
+            else -> "generate_content"
+        }
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
 
@@ -36,6 +45,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
         body["store"]?.jsonPrimitive?.booleanOrNull?.let {
             span.setAttribute("gen_ai.request.store", it)
+            span.setAttribute("tracy.request.store", it)
         }
         body["top_p"]?.jsonPrimitive?.doubleOrNull?.let {
             span.setAttribute(GEN_AI_REQUEST_TOP_P, it)
@@ -62,8 +72,16 @@ internal class ResponsesOpenAIApiEndpointHandler(
             }
             span.setAttribute("gen_ai.request.tool_choice", content)
         }
-        body["reasoning"]?.let {
-            span.setAttribute("gen_ai.request.reasoning", it.toString())
+        body["reasoning"]?.let { reasoningEl ->
+            span.setAttribute("gen_ai.request.reasoning", reasoningEl.toString())
+            if (reasoningEl is JsonObject) {
+                reasoningEl["effort"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.request.reasoning.effort", it)
+                }
+                reasoningEl["summary"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.request.reasoning.summary", it)
+                }
+            }
         }
         body["text"]?.let {
             span.setAttribute("gen_ai.request.text", it.toString())
@@ -139,6 +157,33 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
+
+        // Override gen_ai.operation.name: setCommonResponseAttributes incorrectly sets it from
+        // the body 'object' field. For the Responses API the correct value depends on the URL path.
+        val isInputTokensCountRequest = "input_tokens" in response.url.pathSegments
+        val operationName = when {
+            isInputTokensCountRequest -> "response.input_tokens.count"
+            "cancel" in response.url.pathSegments -> "response.cancel"
+            else -> "generate_content"
+        }
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+
+        // Extract tracy.response.* attributes from the response body (mirrors handleStreaming)
+        body["object"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("tracy.response.object", it)
+        }
+        body["status"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("tracy.response.status", it)
+        }
+        body["background"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("tracy.response.background", it)
+        }
+        body["store"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("tracy.response.store", it)
+        }
+        body["created_at"]?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute("tracy.response.created_at", it)
+        }
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
@@ -217,6 +262,13 @@ internal class ResponsesOpenAIApiEndpointHandler(
             setUsageAttributes(span, usage.jsonObject)
         }
 
+        // For the input-token-counting endpoint, input_tokens is at the top level (not under usage)
+        if (isInputTokensCountRequest) {
+            body["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
+            }
+        }
+
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
 
@@ -229,11 +281,39 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 Json.parseToJsonElement(data).jsonObject
             }.getOrNull() ?: continue
 
-            val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            when (event["type"]?.jsonPrimitive?.content) {
+                "response.output_text.done" -> {
+                    event["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
+                        span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+                    }
+                }
+
+                "response.completed" -> {
+                    val response = event["response"]?.jsonObject ?: continue
+                    response["id"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_ID, it)
+                    }
+                    response["model"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                    }
+                    response["object"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute("tracy.response.object", it)
+                    }
+                    response["status"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute("tracy.response.status", it)
+                    }
+                    response["created_at"]?.jsonPrimitive?.longOrNull?.let {
+                        span.setAttribute("tracy.response.created_at", it)
+                    }
+                    response["completed_at"]?.jsonPrimitive?.longOrNull?.let {
+                        span.setAttribute("tracy.response.completed_at", it)
+                    }
+                    response["usage"]?.jsonObject?.let { usage ->
+                        setUsageAttributes(span, usage)
+                    }
+                    // Streaming completed via SSE — the underlying HTTP response was 200
+                    span.setAttribute("http.response.status_code", 200L)
                 }
             }
         }
@@ -424,6 +504,12 @@ internal class ResponsesOpenAIApiEndpointHandler(
         "id",
         "object",
         "model",
+
+        // parsed into tracy.response.* attributes above
+        "status",
+        "background",
+        "store",
+        "created_at",
 
         "output",
         "usage",
