@@ -28,6 +28,16 @@ private object TestLLMTracingAdapter : LLMTracingAdapter(TEST_SYSTEM) {
     override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
 }
 
+private object ThrowingLLMTracingAdapter : LLMTracingAdapter(TEST_SYSTEM) {
+    override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        throw RuntimeException("body parsing failed")
+    }
+    override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) = Unit
+    override fun getSpanName(request: TracyHttpRequest) = "test-span"
+    override fun isStreamingRequest(request: TracyHttpRequest) = false
+    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+}
+
 private fun makeTestRequest(host: String = TEST_HOST, port: Int = TEST_PORT): TracyHttpRequest {
     val url = TracyHttpUrlImpl(
         scheme = "https",
@@ -147,6 +157,22 @@ class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
         val trace = traces.first()
         assertEquals(201L, trace.attributes[AttributeKey.longKey("http.status_code")])
         assertEquals(201L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
+    }
+
+    @Test
+    fun `registerRequest sets provider and server attributes even when getRequestBodyAttributes throws`() {
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        span.makeCurrent().use {
+            ThrowingLLMTracingAdapter.registerRequest(span, makeTestRequest())
+        }
+        span.end()
+
+        val traces = analyzeSpans()
+        assertNotNull(traces.firstOrNull())
+        val attrs = traces.first().attributes
+        assertEquals(TEST_SYSTEM, attrs[AttributeKey.stringKey("gen_ai.provider.name")])
+        assertEquals(TEST_HOST, attrs[AttributeKey.stringKey("server.address")])
+        assertEquals(TEST_PORT.toLong(), attrs[AttributeKey.longKey("server.port")])
     }
 
     @Test
