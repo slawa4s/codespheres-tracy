@@ -458,6 +458,58 @@ class AnthropicTracingTest : BaseAnthropicTracingTest() {
     }
 
     @Test
+    fun `test Anthropic error response sets standard error type attribute`() = runTest {
+        val client = createAnthropicClient().apply { instrument(this) }
+
+        val errorType = "invalid_request_error"
+        val errorMessage = "Request body must contain at least one request."
+
+        val emptyBatchInterceptor = Interceptor { chain ->
+            val response = chain.proceed(chain.request())
+            val errorBody = """
+                {
+                    "type": "error",
+                    "error": {
+                        "type": "$errorType",
+                        "message": "$errorMessage"
+                    }
+                }
+            """.trimIndent().toResponseBody("application/json".toMediaTypeOrNull())
+
+            response.newBuilder()
+                .body(errorBody)
+                .code(400)
+                .build()
+        }
+
+        patchOpenAICompatibleClient(
+            client = client,
+            interceptor = emptyBatchInterceptor
+        )
+
+        val params = MessageCreateParams.builder()
+            .maxTokens(1000L)
+            .addUserMessage("Hi")
+            .model(model)
+            .build()
+
+        try {
+            client.messages().create(params)
+        } catch (_: Exception) {
+            // suppress
+        }
+
+        val traces = analyzeSpans()
+        val trace = traces.firstOrNull()
+        assertNotNull(trace)
+
+        assertEquals(StatusCode.ERROR, trace.status.statusCode)
+        assertEquals(errorType, trace.attributes[AttributeKey.stringKey("gen_ai.error.type")])
+        assertEquals(errorType, trace.attributes[AttributeKey.stringKey("error.type")])
+        assertEquals(errorMessage, trace.attributes[AttributeKey.stringKey("gen_ai.error.message")])
+    }
+
+    @Test
     fun `test Anthropic additional attributes`() = runTest {
         val client = createAnthropicClient().apply { instrument(this) }
 
