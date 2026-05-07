@@ -268,12 +268,8 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             ?.get(AttributeKey.stringKey("error.type"))
         if (alreadySet != null) return
 
-        // Derive fallback error.type from the HTTP status code stored on the span.
-        val statusCode = (span as? ReadableSpan)
-            ?.toSpanData()
-            ?.attributes
-            ?.get(AttributeKey.longKey("http.status_code"))
-            ?: return
+        // Derive fallback error.type from the HTTP status code directly from the response.
+        val statusCode = response.code.toLong()
 
         val fallbackType = when {
             statusCode in 400L..499L -> "invalid_request_error"

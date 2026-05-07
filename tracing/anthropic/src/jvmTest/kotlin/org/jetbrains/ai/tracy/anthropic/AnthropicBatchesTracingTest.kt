@@ -70,7 +70,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals(1L, trace.attributes[AttributeKey.longKey("gen_ai.request.batch.size")])
             assertEquals(BATCH_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals("in_progress", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
@@ -101,7 +101,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
         }
     }
 
@@ -129,7 +129,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals(BATCH_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals("in_progress", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
         }
@@ -159,7 +159,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("cancel", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.cancel", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals(BATCH_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals("canceling", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
         }
@@ -189,7 +189,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
         }
     }
 
