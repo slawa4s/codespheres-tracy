@@ -230,8 +230,59 @@ Notes:
 - `openai.api.type` *(Custom; one of `audio` / `batches` / `conversations` / `files` / `models` / `moderations`)*
 - `http.response.status_code` *(OTel HTTP semconv)*
 
-Updated handlers:
-1. ResponsesOpenAIApiEndpointHandler – which new attributes are covered after modifications, by how much coverage increased.
+### 7. `ResponsesOpenAIApiEndpointHandler` — modifications since `6e028bd2`
+
+Info:
+1. Request type: JSON
+1. Response type: JSON (non-streaming) or `text/event-stream` (streaming)
+1. Covers endpoints (URL-derived `gen_ai.operation.name`):
+   1. `POST /responses`, `GET /responses/{response_id}` → `generate_content`
+   2. `POST /responses/{response_id}/cancel` → `response.cancel`
+   3. `GET /responses/{response_id}/input_tokens` → `response.input_tokens.count`
+
+This entry lists **only attributes whose tracing was added or fixed by this patch**. Attributes already traced before `6e028bd2` — `model`, `temperature`, `top_p`, `max_output_tokens`, `truncation`, `parallel_tool_calls`, `stream`, `response_format`, `tool_choice`, `reasoning` (whole JSON), `text`, `previous_response_id`, `instructions`, `input`, `tools`, `id`, `object` (formerly mis-mapped to `gen_ai.operation.name`), `model`, `output`, `usage.{input,output}_tokens` — are unchanged and are not repeated here.
+
+| New / fixed attribute   | Source                       | Mapped to attribute(s)                         | Specification type | Note                                                                                                                                                              |
+|-------------------------|------------------------------|------------------------------------------------|--------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `reasoning.effort`      | req                          | `tracy.request.reasoning.effort`               | Custom             | NEW. Sub-field of `reasoning` (previously only the whole `reasoning` JSON was traced).                                                                            |
+| `reasoning.summary`     | req                          | `tracy.request.reasoning.summary`              | Custom             | NEW.                                                                                                                                                              |
+| `store`                 | req                          | `gen_ai.request.store` + `tracy.request.store` | GenAI + Custom     | Mirrored under `tracy.*` in addition to the existing `gen_ai.*` mapping.                                                                                          |
+| `object`                | resp                         | `tracy.response.object`                        | Custom             | FIXED. Previously read by `setCommonResponseAttributes` into `gen_ai.operation.name` (incorrect for `cancel` / `input_tokens` routes). Now URL-derived, see below. |
+| `status`                | resp                         | `tracy.response.status`                        | Custom             | NEW. `completed` / `incomplete` / `failed`.                                                                                                                       |
+| `background`            | resp                         | `tracy.response.background`                    | Custom             | NEW.                                                                                                                                                              |
+| `store`                 | resp                         | `tracy.response.store`                         | Custom             | NEW.                                                                                                                                                              |
+| `created_at`            | resp                         | `tracy.response.created_at`                    | Custom             | NEW.                                                                                                                                                              |
+| `completed_at`          | resp:SSE only                | `tracy.response.completed_at`                  | Custom             | NEW. Only emitted from the `response.completed` SSE event.                                                                                                        |
+| `input_tokens`          | resp:`/input_tokens` route   | `gen_ai.usage.input_tokens`                    | GenAI              | NEW. The input-token-counting endpoint returns `input_tokens` at top level (not nested under `usage`).                                                            |
+
+Streaming (SSE) — events handled by the patched `handleStreaming`:
+
+| SSE event                   | Before | After  | Attributes set on the span                                                                                                                                  |
+|-----------------------------|:------:|:------:|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `response.output_text.done` | ✅     | ✅     | `gen_ai.completion.0.{content,finish_reason}` (unchanged)                                                                                                   |
+| `response.completed`        | ❌     | ✅ NEW | `gen_ai.response.{id,model}`, `tracy.response.{object,status,created_at,completed_at}`, `gen_ai.usage.{input,output}_tokens`, `http.response.status_code=200` |
+
+Operation-name dispatch (NEW; URL-derived on both request and response, overrides the value `setCommonResponseAttributes` reads from the response body's `object` field):
+
+| URL path segment contains | `gen_ai.operation.name`        |
+|---------------------------|--------------------------------|
+| `input_tokens`            | `response.input_tokens.count`  |
+| `cancel`                  | `response.cancel`              |
+| (otherwise)               | `generate_content`             |
+
+Cross-cutting attributes added by this patch — `gen_ai.provider.name="openai"`, `server.address`, `server.port`, `openai.api.type="responses"`, `http.response.status_code` — match the convention listed at the bottom of the OpenAI section.
+
+**Coverage delta** (counts only newly traced documented OpenAI fields; cross-cutting attributes excluded):
+
+|                        | Before `6e028bd2` | After (current HEAD) | Δ                                                                                              |
+|------------------------|:-----------------:|:--------------------:|-------------------------------------------------------------------------------------------------|
+| Request fields traced  | 16                | 18                   | +2 (`reasoning.effort`, `reasoning.summary`)                                                    |
+| Response fields traced | 5                 | 11                   | +6 (`status`, `background`, `store`, `created_at`, `completed_at`, top-level `input_tokens`)    |
+| SSE events handled     | 1                 | 2                    | +1 (`response.completed`)                                                                       |
+
+Notes:
+1. The `object` field was technically "traced" before the patch via `setCommonResponseAttributes`, but mapped to the wrong attribute (`gen_ai.operation.name`). The patch keeps it traced under the semantically correct `tracy.response.object` and replaces `gen_ai.operation.name` with a URL-derived value. Listed under "fixed", not "new".
+2. The denominator above is each documented Responses-API top-level field counted once. Nested fields (`usage.input_tokens`, `usage.output_tokens`, `reasoning.effort`, `reasoning.summary`) are counted as separate items only when the patch adds tracing for them specifically.
 
 
 ## Anthropic
