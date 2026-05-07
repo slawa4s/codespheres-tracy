@@ -543,12 +543,12 @@ Info:
 Info:
 1. Request type: not parsed (handler ignores request bodies)
 1. Response type: JSON
-1. Covers endpoints (per the dispatcher; only LIST is meaningfully handled):
-   1. `POST /v1beta/cachedContents` (`cachedContents.create`) — body **not** parsed
-   2. `GET /v1beta/cachedContents` (`cachedContents.list`) — handled
-   3. `GET /v1beta/{name=cachedContents/*}` (`cachedContents.get`) — body **not** parsed
-   4. `PATCH /v1beta/{cachedContent.name=cachedContents/*}` (`cachedContents.patch`) — body **not** parsed
-   5. `DELETE /v1beta/{name=cachedContents/*}` (`cachedContents.delete`) — empty response, N/A
+1. Covers endpoints (resource: [caching](https://ai.google.dev/api/caching); per the dispatcher; only LIST is meaningfully handled):
+   1. [`POST /v1beta/cachedContents`](https://ai.google.dev/api/caching#method:-cachedcontents.create) (`cachedContents.create`) — body **not** parsed
+   2. [`GET /v1beta/cachedContents`](https://ai.google.dev/api/caching#method:-cachedcontents.list) (`cachedContents.list`) — handled
+   3. [`GET /v1beta/{name=cachedContents/*}`](https://ai.google.dev/api/caching#method:-cachedcontents.get) (`cachedContents.get`) — body **not** parsed
+   4. [`PATCH /v1beta/{cachedContent.name=cachedContents/*}`](https://ai.google.dev/api/caching#method:-cachedcontents.patch) (`cachedContents.patch`) — body **not** parsed
+   5. [`DELETE /v1beta/{name=cachedContents/*}`](https://ai.google.dev/api/caching#method:-cachedcontents.delete) (`cachedContents.delete`) — empty response, N/A
 1. **Attributes coverage: 2/16 = 12.5%** (denominator: union of unique fields documented across the 5 methods, including `CachedContent` resource fields).
 
 > **Design note.** The handler is dispatched for every cachedContents URL by the parent adapter's `isCachedContentsUrl()` (any URL containing the `cachedContents` segment) but only `handleResponseAttributes` parses anything, and only the LIST shape (`{cachedContents:[…], nextPageToken}`). For `create`, `get`, `patch` the same handler runs against a single-resource `CachedContent` body and silently extracts nothing — the spans look identical except for `gen_ai.operation.name`.
@@ -577,9 +577,9 @@ Info:
 Info:
 1. Request type: JSON
 1. Response type: JSON (non-streaming) or `text/event-stream` (streaming)
-1. Covers endpoints:
-   1. `POST /v1beta/{model}:generateContent` — pre-existing non-streaming parsing
-   2. `POST /v1beta/{model}:streamGenerateContent` — **SSE streaming added in this patch** (`handleStreaming` was `Unit` before)
+1. Covers endpoints (resource: [generate-content](https://ai.google.dev/api/generate-content)):
+   1. [`POST /v1beta/{model}:generateContent`](https://ai.google.dev/api/generate-content#method:-models.generatecontent) — pre-existing non-streaming parsing
+   2. [`POST /v1beta/{model}:streamGenerateContent`](https://ai.google.dev/api/generate-content#method:-models.streamgeneratecontent) — **SSE streaming added in this patch** (`handleStreaming` was `Unit` before)
 1. Pre-existing non-streaming coverage: **request 12/19 ≈ 63%**, **response 9/14 ≈ 64%**. The streaming branch adds the rows below; the non-streaming tables are unchanged and not repeated here.
 
 #### 12.1 New SSE streaming branch (delta vs. `6e028bd2`)
@@ -620,11 +620,11 @@ Response (non-streaming):
 Info:
 1. Request type: JSON
 1. Response type: JSON
-1. Covers endpoints:
-   1. `POST /v1beta/{model}:embedContent` — handled
+1. Covers endpoints (resource: [embeddings](https://ai.google.dev/api/embeddings)):
+   1. [`POST /v1beta/{model}:embedContent`](https://ai.google.dev/api/embeddings#method:-models.embedcontent) — handled
    2. Vertex AI alias `:predict` for embed-named models — handled (operation name normalised to `embedContent`)
-   3. `POST /v1beta/{model}:batchEmbedContents` — **not handled** (mis-routed to `GeminiContentGenHandler`)
-   4. `POST /v1beta/{model}:asyncBatchEmbedContent` — **not handled** (mis-routed)
+   3. [`POST /v1beta/{model}:batchEmbedContents`](https://ai.google.dev/api/embeddings#method:-models.batchembedcontents) — **not handled** (mis-routed to `GeminiContentGenHandler`)
+   4. [`POST /v1beta/{model}:asyncBatchEmbedContent`](https://ai.google.dev/api/embeddings#method:-models.asyncbatchembedcontent) — **not handled** (mis-routed)
 1. **Attributes coverage: 3/5 = 60%** for `embedContent` body fields (denominator: `content`, `taskType`, `title`, `outputDimensionality`, `embedding.values`).
 
 > **Routing gap.** The dispatcher's `isEmbeddingsUrl` check matches only `operation == "embedContent"` or `operation == "predict"` (with embed-named models). Vertex AI / Generative Language API methods `:batchEmbedContents` and `:asyncBatchEmbedContent` therefore **fall through to `GeminiContentGenHandler`**, which then tries to parse them as content-generation responses (`candidates[]`, `usageMetadata`) and silently sets nothing useful.
@@ -648,9 +648,11 @@ The handler also unconditionally sets:
 Info:
 1. Request type: not parsed (handler is a pass-through)
 1. Response type: not parsed
-1. Covers endpoints:
-   1. `GET /v1beta/models` (`models.list`)
-   2. `GET /v1beta/models/{name}` (`models.get`)
+1. Covers endpoints (resource: [models](https://ai.google.dev/api/models)):
+   1. [`GET /v1beta/models`](https://ai.google.dev/api/models#method:-models.list) (`models.list`)
+   2. [`GET /v1beta/models/{name}`](https://ai.google.dev/api/models#method:-models.get) (`models.get`)
+
+   *Not routed here* (covered by other handlers despite the user listing them under Models): [`models.predict`](https://ai.google.dev/api/models#method:-models.predict), [`models.predictLongRunning`](https://ai.google.dev/api/models#method:-models.predictlongrunning).
 1. **Attributes coverage: 0/N = 0%** — the handler does not parse any documented body field.
 
 > **No-op handler.** All three overrides are literally `Unit`. The handler exists only to win dispatch over `GeminiContentGenHandler` for URLs that contain the `models` segment but no `:operation` suffix. Spans for these routes carry only the cross-cutting attributes that the parent `GeminiLLMTracingAdapter` sets (`gemini.api.type="models"`, plus path-derived `gen_ai.request.model` when the URL ends with a model id). None of the documented `Model` resource fields (`name`, `baseModelId`, `version`, `displayName`, `description`, `inputTokenLimit`, `outputTokenLimit`, `supportedGenerationMethods`, `temperature`, `maxTemperature`, `topP`, `topK`) reach the span. The `nextPageToken` and `models[]` array length on `models.list` are likewise not parsed.
