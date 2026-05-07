@@ -45,7 +45,7 @@ private fun makeTestRequest(host: String = TEST_HOST, port: Int = TEST_PORT): Tr
     return body.asRequestView(contentType = null, url = url, method = "POST")
 }
 
-private fun makeTestResponse(code: Int = 200): TracyHttpResponse {
+private fun makeTestResponse(code: Int = 200, bodyJson: JsonObject = JsonObject(emptyMap())): TracyHttpResponse {
     val url = TracyHttpUrlImpl(
         scheme = "https",
         host = TEST_HOST,
@@ -56,7 +56,7 @@ private fun makeTestResponse(code: Int = 200): TracyHttpResponse {
             override fun queryParameterValues(name: String) = emptyList<String?>()
         }
     )
-    val body = TracyHttpResponseBody.Json(JsonObject(emptyMap()))
+    val body = TracyHttpResponseBody.Json(bodyJson)
     return object : TracyHttpResponse {
         override val contentType = null
         override val code = code
@@ -163,5 +163,53 @@ class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
         )
         assertEquals(8080, url.port)
         assertEquals("api.openai.com", url.host)
+    }
+
+    @Test
+    fun `registerResponse sets error_type attribute on error response`() {
+        val errorBody = JsonObject(
+            mapOf(
+                "error" to JsonObject(
+                    mapOf(
+                        "type" to JsonPrimitive("invalid_request_error"),
+                        "message" to JsonPrimitive("No requests provided")
+                    )
+                )
+            )
+        )
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        span.makeCurrent().use {
+            TestLLMTracingAdapter.registerRequest(span, makeTestRequest())
+            TestLLMTracingAdapter.registerResponse(span, makeTestResponse(code = 400, bodyJson = errorBody))
+        }
+        span.end()
+
+        val traces = analyzeSpans()
+        val trace = traces.first()
+        assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("error.type")])
+        assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("gen_ai.error.type")])
+    }
+
+    @Test
+    fun `registerResponse sets gen_ai_error_message on error response`() {
+        val errorBody = JsonObject(
+            mapOf(
+                "error" to JsonObject(
+                    mapOf(
+                        "type" to JsonPrimitive("invalid_request_error"),
+                        "message" to JsonPrimitive("No requests provided")
+                    )
+                )
+            )
+        )
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        span.makeCurrent().use {
+            TestLLMTracingAdapter.registerRequest(span, makeTestRequest())
+            TestLLMTracingAdapter.registerResponse(span, makeTestResponse(code = 400, bodyJson = errorBody))
+        }
+        span.end()
+
+        val traces = analyzeSpans()
+        assertEquals("No requests provided", traces.first().attributes[AttributeKey.stringKey("gen_ai.error.message")])
     }
 }
