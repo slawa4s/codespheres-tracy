@@ -2,10 +2,12 @@
 # Summary
 
 
-| Provider | Endpoint Class | Endpoint Route          | New | Implemented by                                               | Note |
-|----------|----------------|-------------------------|-----|--------------------------------------------------------------|------|
-| OpenAI   | audio          | `/audio/transcriptions` | ✅   | `org.jetbrains.ai.tracy.ktor.AudioOpenAIApiEndpointHandler`  |      |
-|          |                | `/audio/translations`   |     |                                                              |      |
+| Provider | Endpoint Class | Endpoint Route          | New  | Implemented by                                              | Note                                                             |
+|----------|----------------|-------------------------|------|-------------------------------------------------------------|------------------------------------------------------------------|
+| OpenAI   | audio          | `/audio/transcriptions` | ✅    | `org.jetbrains.ai.tracy.ktor.AudioOpenAIApiEndpointHandler` |                                                                  |
+|          |                | `/audio/translations`   |      |                                                             |                                                                  |
+|          |                | `/audio/speech`         |      |                                                             |                                                                  |
+|          |                | `/audio/voices`         |      |                                                             | Not generated because openai-java:4.5.0 doesn't expose the route |
 
 
 # Attribute Mapping
