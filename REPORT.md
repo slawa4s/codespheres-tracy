@@ -81,10 +81,10 @@
 Info:
 1. Request type: form-data
 1. Response type: JSON
-1. Covers endpoints:
-   1. `/audio/transcriptions`
-   2. `/audio/translations`
-   3. `/audio/speech`
+1. Covers endpoints (resource: [audio](https://developers.openai.com/api/reference/resources/audio)):
+   1. [`POST /audio/transcriptions`](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)
+   2. [`POST /audio/translations`](https://developers.openai.com/api/reference/resources/audio/subresources/translations/methods/create)
+   3. [`POST /audio/speech`](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create)
 4. **Attributes coverage: 4/20 = 20%**
 
 | Original attribute         | Source                                                  | Mapped to attribute(s)                                               | Specification type | Note                                              |
