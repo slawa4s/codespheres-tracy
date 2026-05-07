@@ -13,6 +13,7 @@ import okhttp3.HttpUrl
  *
  * @property scheme The scheme of the URL (e.g., "http", "https") representing the protocol.
  * @property host The host of the URL, indicating the domain or IP address.
+ * @property port The port number of the URL (e.g., 443, 8080).
  * @property pathSegments The path segments of the URL, representing
  *                        the hierarchical structure of the resource location.
  * @property parameters The query parameters associated with the URL.
@@ -23,6 +24,7 @@ import okhttp3.HttpUrl
 interface TracyHttpUrl {
     val scheme: String
     val host: String
+    val port: Int
     val pathSegments: List<String>
     val parameters: TracyQueryParameters
 
@@ -54,6 +56,7 @@ interface TracyQueryParameters {
 data class TracyHttpUrlImpl(
     override val scheme: String,
     override val host: String,
+    override val port: Int,
     override val pathSegments: List<String>,
     override val parameters: TracyQueryParameters,
     private val url: String,
@@ -78,6 +81,7 @@ fun HttpUrl.toProtocolUrl(): TracyHttpUrl {
     return TracyHttpUrlImpl(
         scheme = httpUrl.scheme,
         host = httpUrl.host,
+        port = httpUrl.port,
         pathSegments = httpUrl.pathSegments,
         parameters = params,
         url = httpUrl.toString()
