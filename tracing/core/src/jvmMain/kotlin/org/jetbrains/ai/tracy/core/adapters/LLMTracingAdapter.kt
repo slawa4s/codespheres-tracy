@@ -74,7 +74,7 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             span.setAttribute("http.response.status_code", response.code.toLong())
 
             if (response.isError()) {
-                getResponseErrorBodyAttributes(span, response.body)
+                getResponseErrorBodyAttributes(span, response)
                 span.setStatus(StatusCode.ERROR)
             } else {
                 span.setStatus(StatusCode.OK)
@@ -113,8 +113,8 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             span.recordException(exception)
         }
 
-    protected open fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
-        body.asJson()?.jsonObject["error"]?.jsonObject?.let { error ->
+    protected open fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
+        response.body.asJson()?.jsonObject["error"]?.jsonObject?.let { error ->
             error["message"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.message", it.content) }
             error["type"]?.jsonPrimitive?.let {
                 span.setAttribute("gen_ai.error.type", it.content)
