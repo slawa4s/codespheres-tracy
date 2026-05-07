@@ -24,11 +24,11 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  * Handler for Anthropic Message Batches API.
  *
  * Maps HTTP method + URL path to `gen_ai.operation.name`:
- * - `POST /v1/messages/batches`               → `"create"`
- * - `GET  /v1/messages/batches`               → `"list"`
- * - `GET  /v1/messages/batches/{id}`          → `"retrieve"`
- * - `POST /v1/messages/batches/{id}/cancel`   → `"cancel"`
- * - `DELETE /v1/messages/batches/{id}`        → `"delete"`
+ * - `POST /v1/messages/batches`               → `"batches.create"`
+ * - `GET  /v1/messages/batches`               → `"batches.list"`
+ * - `GET  /v1/messages/batches/{id}`          → `"batches.retrieve"`
+ * - `POST /v1/messages/batches/{id}/cancel`   → `"batches.cancel"`
+ * - `DELETE /v1/messages/batches/{id}`        → `"batches.delete"`
  *
  * Maps batch response fields to `gen_ai.response.batch.*` OTel attributes.
  *
@@ -42,7 +42,7 @@ internal class BatchesAnthropicApiEndpointHandler : EndpointApiHandler {
         val operation = detectOperation(request.url, request.method)
         span.setAttribute(GEN_AI_OPERATION_NAME, operation)
 
-        if (operation == "create") {
+        if (operation == "batches.create") {
             val body = request.body.asJson()?.jsonObject
             body?.get("requests")?.let { requests ->
                 if (requests is JsonArray) {
@@ -106,11 +106,11 @@ internal class BatchesAnthropicApiEndpointHandler : EndpointApiHandler {
      * Detects which batch operation is being called based on the URL path and HTTP method.
      *
      * URL patterns:
-     * - `POST   .../batches`              → `"create"`
-     * - `GET    .../batches`              → `"list"`
-     * - `GET    .../batches/{id}`         → `"retrieve"`
-     * - `POST   .../batches/{id}/cancel`  → `"cancel"`
-     * - `DELETE .../batches/{id}`         → `"delete"`
+     * - `POST   .../batches`              → `"batches.create"`
+     * - `GET    .../batches`              → `"batches.list"`
+     * - `GET    .../batches/{id}`         → `"batches.retrieve"`
+     * - `POST   .../batches/{id}/cancel`  → `"batches.cancel"`
+     * - `DELETE .../batches/{id}`         → `"batches.delete"`
      */
     private fun detectOperation(url: TracyHttpUrl, method: String): String {
         val segments = url.pathSegments
@@ -125,14 +125,14 @@ internal class BatchesAnthropicApiEndpointHandler : EndpointApiHandler {
         val hasCancel = afterBatches.contains("cancel")
 
         return when {
-            method == "POST" && !hasBatchId && !hasCancel -> "create"
-            method == "GET" && !hasBatchId -> "list"
-            method == "GET" && hasBatchId -> "retrieve"
-            method == "POST" && hasBatchId && hasCancel -> "cancel"
-            method == "DELETE" && hasBatchId -> "delete"
+            method == "POST" && !hasBatchId && !hasCancel -> "batches.create"
+            method == "GET" && !hasBatchId -> "batches.list"
+            method == "GET" && hasBatchId -> "batches.retrieve"
+            method == "POST" && hasBatchId && hasCancel -> "batches.cancel"
+            method == "DELETE" && hasBatchId -> "batches.delete"
             else -> {
                 logger.warn { "Unknown batch operation: $method /${segments.joinToString("/")}" }
-                "create"
+                "batches.create"
             }
         }
     }

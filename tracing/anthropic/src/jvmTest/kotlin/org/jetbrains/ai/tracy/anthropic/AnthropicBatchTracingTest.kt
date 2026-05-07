@@ -114,7 +114,7 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertBatchAttributes(trace, expectedStatus = "in_progress", operationName = "create")
+            assertBatchAttributes(trace, expectedStatus = "in_progress", operationName = "batches.create")
         }
     }
 
@@ -149,7 +149,7 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertBatchAttributes(trace, expectedStatus = "in_progress", operationName = "retrieve")
+            assertBatchAttributes(trace, expectedStatus = "in_progress", operationName = "batches.retrieve")
         }
     }
 
@@ -184,7 +184,7 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertBatchAttributes(trace, expectedStatus = "canceling", operationName = "cancel")
+            assertBatchAttributes(trace, expectedStatus = "canceling", operationName = "batches.cancel")
         }
     }
 
