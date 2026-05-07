@@ -115,11 +115,11 @@ Info:
 Info:
 1. Request type: JSON (`POST /batches`); none for `GET`/`POST cancel` (only path/query params)
 1. Response type: JSON (`Batch` object — same schema across `create`, `retrieve`, `cancel`; nested under `data` for `list`)
-1. Covers endpoints:
-   1. `POST /batches`
-   2. `GET /batches/{batch_id}`
-   3. `GET /batches`
-   4. `POST /batches/{batch_id}/cancel`
+1. Covers endpoints (resource: [batches](https://developers.openai.com/api/reference/resources/batches)):
+   1. [`POST /batches`](https://developers.openai.com/api/reference/resources/batches/methods/create)
+   2. [`GET /batches/{batch_id}`](https://developers.openai.com/api/reference/resources/batches/methods/retrieve)
+   3. [`GET /batches`](https://developers.openai.com/api/reference/resources/batches/methods/list)
+   4. [`POST /batches/{batch_id}/cancel`](https://developers.openai.com/api/reference/resources/batches/methods/cancel)
 1. **Attributes coverage: 5/33 = 15.1%**
 
 | Original attribute     | Source                           | Mapped to attribute(s)                   | Specification type | Note                                                |
