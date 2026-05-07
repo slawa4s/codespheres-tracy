@@ -117,6 +117,7 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private fun TracyHttpUrl.isEmbeddingsUrl(): Boolean {
         val (model, operation) = this.modelAndOperation()
         return operation == "embedContent" ||
+                operation == "batchEmbedContents" ||
                 (operation == "predict" && model?.contains("embed", ignoreCase = true) == true)
     }
 
