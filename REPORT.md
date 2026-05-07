@@ -49,13 +49,27 @@ Info:
 | `language`                 | resp:`TranscriptionVerbose`                             | ❌                                                                    |                    |                                                   |
 | `words`                    | resp:`TranscriptionVerbose`                             | ❌                                                                    |                    |                                                   |
 
+1. batches: BatchesOpenAIApiEndpointHandler ()
+2. conversations: ConversationsOpenAIApiEndpointHandler ()
+3. files: FilesOpenAIApiEndpointHandler ()
+4. models: ModelsOpenAIApiEndpointHandler ()
+5. moderations: ModerationsOpenAIApiEndpointHandler
+
+Updated handlers:
+1. ResponsesOpenAIApiEndpointHandler – which new attributes are covered after modifications, by how much coverage increased.
 
 
+## Anthropic
+
+1. AnthropicCountTokensHandler (count message tokens)
+1. AnthropicListEndpointHandler (batches/files/models)
+1. AnthropicMessagesHandler (messages) (refactored endpoint handler -> moved logic in specific handler)
 
 
+## Gemini
 
-4. batches: BatchesOpenAIApiEndpointHandler
-3. conversations: ConversationsOpenAIApiEndpointHandler
-1. files: FilesOpenAIApiEndpointHandler
-1. models: ModelsOpenAIApiEndpointHandler
-1. moderations: ModerationsOpenAIApiEndpointHandler
+1. GeminiCachedContentsHandler (caching)
+1. GeminiContentGenHandler (implement streaming for `generateContentStreaming`)
+1. GeminiEmbeddingsHandler (embedding)
+1. GeminiModelsHandler (models)
+
