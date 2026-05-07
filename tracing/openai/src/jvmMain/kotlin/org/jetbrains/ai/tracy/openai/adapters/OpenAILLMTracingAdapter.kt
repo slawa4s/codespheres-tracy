@@ -18,6 +18,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpo
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.BatchesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.embeddings.EmbeddingsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.models.ModelsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.moderations.ModerationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
@@ -71,7 +72,10 @@ private enum class OpenAIApiType(val route: String) {
     MODERATIONS("moderations"),
 
     // See: https://platform.openai.com/docs/api-reference/batch
-    BATCHES("batches");
+    BATCHES("batches"),
+
+    // See: https://platform.openai.com/docs/api-reference/embeddings
+    EMBEDDINGS("embeddings");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -214,6 +218,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.BATCHES -> handlers.getOrPut(OpenAIApiType.BATCHES) {
                 BatchesOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.EMBEDDINGS -> handlers.getOrPut(OpenAIApiType.EMBEDDINGS) {
+                EmbeddingsOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {

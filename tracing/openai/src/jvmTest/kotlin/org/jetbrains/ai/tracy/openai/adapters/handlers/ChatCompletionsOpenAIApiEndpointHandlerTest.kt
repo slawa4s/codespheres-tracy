@@ -316,7 +316,6 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
     @Test
     fun `test OpenAI embeddings`() = runTest {
-        // handler defaults to chat/completions, but the specific embedding parameters are still propagated to the span
         val client = createOpenAIClient(llmProviderUrl, llmProviderApiKey).apply { instrument(this) }
 
         val params = EmbeddingCreateParams.builder()
@@ -330,14 +329,15 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         assertTracesCount(1, traces)
         val trace = traces.first()
 
-        val responseData = trace.attributes?.get(AttributeKey.stringKey("tracy.response.data"))
-        assertFalse(responseData.isNullOrEmpty())
+        assertEquals("embeddings", trace.attributes?.get(AttributeKey.stringKey("gen_ai.operation.name")))
+        assertEquals("embeddings", trace.attributes?.get(AttributeKey.stringKey("openai.api.type")))
 
-        val responseObject = trace.attributes?.get(AttributeKey.stringKey("tracy.response.object"))
-        assertFalse(responseObject.isNullOrEmpty())
+        val encodingFormats = trace.attributes?.get(AttributeKey.stringArrayKey("gen_ai.request.encoding_formats"))
+        assertFalse(encodingFormats.isNullOrEmpty())
 
-        val requestEncodingFormat = trace.attributes?.get(AttributeKey.stringKey("tracy.request.encoding_format"))
-        assertFalse(requestEncodingFormat.isNullOrEmpty())
+        val dimensionCount = trace.attributes?.get(AttributeKey.longKey("gen_ai.embeddings.dimension.count"))
+        assertNotNull(dimensionCount)
+        assertTrue(dimensionCount!! > 0)
     }
 
     @ParameterizedTest
