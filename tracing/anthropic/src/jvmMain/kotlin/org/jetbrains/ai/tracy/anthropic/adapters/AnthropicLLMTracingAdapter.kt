@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.anthropic.adapters
 
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.BatchesAnthropicApiEndpointHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.ModelsAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
 import org.jetbrains.ai.tracy.core.adapters.media.*
@@ -50,10 +51,15 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     private val batchesHandler = BatchesAnthropicApiEndpointHandler()
+    private val modelsHandler = ModelsAnthropicApiEndpointHandler()
 
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
         if (isBatchUrl(request.url)) {
             batchesHandler.handleRequestAttributes(span, request)
+            return
+        }
+        if (isModelsUrl(request.url)) {
+            modelsHandler.handleRequestAttributes(span, request)
             return
         }
 
@@ -137,6 +143,10 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
         if (isBatchUrl(response.url)) {
             batchesHandler.handleResponseAttributes(span, response)
+            return
+        }
+        if (isModelsUrl(response.url)) {
+            modelsHandler.handleResponseAttributes(span, response)
             return
         }
 
@@ -228,6 +238,9 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     /** Returns `true` when the URL targets the Message Batches API (contains a `batches` path segment). */
     private fun isBatchUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("batches")
+
+    /** Returns `true` when the URL targets the Models API (contains a `models` path segment). */
+    private fun isModelsUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("models")
 
     /**
      * Parses content of the `messages` field when its type is
