@@ -399,7 +399,31 @@ class AudioOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test speech request attributes are traced`() = runTest {
+    fun `test speech model is traced`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofSeconds(30)
+            ).apply { instrument(this) }
+
+            server.enqueueAudioBinaryResponse()
+
+            client.audio().speech().create(
+                SpeechCreateParams.builder()
+                    .input("Hello world")
+                    .model(SpeechModel.TTS_1)
+                    .voice(SpeechCreateParams.Voice.ALLOY)
+                    .build()
+            )
+
+            val trace = analyzeSpans().first()
+            assertEquals(SpeechModel.TTS_1.asString(), trace.attributes[AttributeKey.stringKey("gen_ai.request.model")])
+        }
+    }
+
+    @Test
+    fun `test speech request attributes use tracy namespace`() = runTest {
         withMockServer { server ->
             val client = createOpenAIClient(
                 url = server.url("/").toString(),
@@ -415,17 +439,47 @@ class AudioOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
                     .input(inputText)
                     .model(SpeechModel.TTS_1)
                     .voice(SpeechCreateParams.Voice.ALLOY)
+                    .responseFormat(SpeechCreateParams.ResponseFormat.MP3)
                     .build()
             )
 
             val trace = analyzeSpans().first()
             assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.request.input")])
-            assertEquals("alloy", trace.attributes[AttributeKey.stringKey("gen_ai.request.voice")])
+            // Must use tracy.* namespace, not gen_ai.*
+            assertEquals("alloy", trace.attributes[AttributeKey.stringKey("tracy.request.voice")])
+            assertEquals("mp3", trace.attributes[AttributeKey.stringKey("tracy.request.response_format")])
+            assertNull(trace.attributes[AttributeKey.stringKey("gen_ai.request.voice")])
+            assertNull(trace.attributes[AttributeKey.stringKey("gen_ai.request.response_format")])
         }
     }
 
     @Test
-    fun `test speech response size is traced`() = runTest {
+    fun `test speech speed is traced`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofSeconds(30)
+            ).apply { instrument(this) }
+
+            server.enqueueAudioBinaryResponse()
+
+            client.audio().speech().create(
+                SpeechCreateParams.builder()
+                    .input("Hello world")
+                    .model(SpeechModel.TTS_1)
+                    .voice(SpeechCreateParams.Voice.ALLOY)
+                    .speed(1.5)
+                    .build()
+            )
+
+            val trace = analyzeSpans().first()
+            assertEquals(1.5, trace.attributes[AttributeKey.doubleKey("tracy.request.speed")])
+        }
+    }
+
+    @Test
+    fun `test speech response size uses tracy namespace`() = runTest {
         withMockServer { server ->
             val client = createOpenAIClient(
                 url = server.url("/").toString(),
@@ -451,7 +505,9 @@ class AudioOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             )
 
             val trace = analyzeSpans().first()
-            assertEquals(2048L, trace.attributes[AttributeKey.longKey("gen_ai.response.audio.size_bytes")])
+            // Must use tracy.* namespace, not gen_ai.*
+            assertEquals(2048L, trace.attributes[AttributeKey.longKey("tracy.response.audio.size_bytes")])
+            assertNull(trace.attributes[AttributeKey.longKey("gen_ai.response.audio.size_bytes")])
         }
     }
 
