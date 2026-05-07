@@ -12,6 +12,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
@@ -39,6 +40,9 @@ private enum class OpenAIApiType(val route: String) {
 
     // See: https://platform.openai.com/docs/api-reference/images/createEdit
     IMAGES_EDITS("images/edits"),
+
+    // See: https://platform.openai.com/docs/api-reference/conversations
+    CONVERSATIONS("conversations"),
 
     // See: https://platform.openai.com/docs/api-reference/videos
     VIDEOS("videos");
@@ -89,6 +93,9 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private val handlers = ConcurrentHashMap<OpenAIApiType, EndpointApiHandler>()
 
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("gen_ai.provider.name", GenAiSystemIncubatingValues.OPENAI)
+        span.setAttribute("server.address", request.url.host)
+        span.setAttribute("server.port", if (request.url.scheme == "https") 443L else 80L)
         val handler = handlerFor(request.url)
         handler.handleRequestAttributes(span, request)
     }
@@ -152,6 +159,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.VIDEOS -> handlers.getOrPut(OpenAIApiType.VIDEOS) {
                 VideosOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
+                ConversationsOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
