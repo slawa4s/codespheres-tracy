@@ -342,7 +342,7 @@ Info:
 1. Request type: JSON
 1. Response type: JSON
 1. Covers endpoints:
-   1. `POST /v1/messages/count_tokens`
+   1. [`POST /v1/messages/count_tokens`](https://platform.claude.com/docs/en/api/messages/count_tokens)
 1. **Attributes coverage: 2/9 = 22.2%**
 
 Special case: the count-tokens response body has no `id` field, so `gen_ai.response.id` is mapped from the `x-request-id` HTTP response header instead. This is not counted toward the documented-field coverage above (it's a header, not a body field).
@@ -375,9 +375,22 @@ Info:
 1. Request type: query parameters (GET list); none for retrieve/delete/cancel; multipart for `POST /v1/files`
 1. Response type: JSON for all routes; binary for `GET /v1/files/{file_id}/content` and `GET /v1/messages/batches/{id}/results` (the latter is a JSONL stream, not parsed)
 1. Covers endpoints (13 total):
-   - **Batches (6):** `GET /v1/messages/batches`, `POST /v1/messages/batches`, `GET /v1/messages/batches/{id}`, `POST /v1/messages/batches/{id}/cancel`, `DELETE /v1/messages/batches/{id}`, `GET /v1/messages/batches/{id}/results`
-   - **Models (2):** `GET /v1/models`, `GET /v1/models/{model_id}`
-   - **Files (5):** `POST /v1/files`, `GET /v1/files`, `GET /v1/files/{id}`, `DELETE /v1/files/{id}`, `GET /v1/files/{id}/content`
+   - **Batches (6)** — resource: [messages.batches](https://platform.claude.com/docs/en/api/messages/batches):
+     [`GET /v1/messages/batches`](https://platform.claude.com/docs/en/api/messages/batches/list),
+     [`POST /v1/messages/batches`](https://platform.claude.com/docs/en/api/messages/batches/create),
+     [`GET /v1/messages/batches/{id}`](https://platform.claude.com/docs/en/api/messages/batches/retrieve),
+     [`POST /v1/messages/batches/{id}/cancel`](https://platform.claude.com/docs/en/api/messages/batches/cancel),
+     [`DELETE /v1/messages/batches/{id}`](https://platform.claude.com/docs/en/api/messages/batches/delete),
+     [`GET /v1/messages/batches/{id}/results`](https://platform.claude.com/docs/en/api/messages/batches/results)
+   - **Models (2)** — resource: [models](https://platform.claude.com/docs/en/api/models):
+     [`GET /v1/models`](https://platform.claude.com/docs/en/api/models/list),
+     [`GET /v1/models/{model_id}`](https://platform.claude.com/docs/en/api/models/retrieve)
+   - **Files (5)** — resource: [beta/files](https://platform.claude.com/docs/en/api/beta/files):
+     [`POST /v1/files`](https://platform.claude.com/docs/en/api/beta/files/upload),
+     [`GET /v1/files`](https://platform.claude.com/docs/en/api/beta/files/list),
+     [`GET /v1/files/{id}`](https://platform.claude.com/docs/en/api/beta/files/retrieve_metadata),
+     [`DELETE /v1/files/{id}`](https://platform.claude.com/docs/en/api/beta/files/delete),
+     [`GET /v1/files/{id}/content`](https://platform.claude.com/docs/en/api/beta/files/download)
 1. **Combined attributes coverage: 34/50 = 68%** (each documented field counted once across the 13 routes).
 
 #### 9.1 Batches — coverage 15/24 = 63%
@@ -451,8 +464,8 @@ Info:
 Info:
 1. Request type: JSON
 1. Response type: JSON (non-streaming) or `text/event-stream` (streaming, `?stream=true` or `stream:true` in body)
-1. Covers endpoints:
-   1. `POST /v1/messages`
+1. Covers endpoints (resource: [messages](https://platform.claude.com/docs/en/api/messages)):
+   1. [`POST /v1/messages`](https://platform.claude.com/docs/en/api/messages/create)
 1. **Attributes coverage: 20/30 = 67%** (request 11/19 = 58% · response 9/11 = 82% · SSE: 2 of ~14 documented event types handled — the two most informative, `message_start` and `message_delta`)
 
 #### 10.1 Request
