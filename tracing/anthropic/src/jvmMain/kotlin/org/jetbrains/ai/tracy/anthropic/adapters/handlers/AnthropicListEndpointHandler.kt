@@ -67,8 +67,9 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
         }
 
         if (request.method == "POST" && detectedType == "batches" && lastSegment == "batches") {
-            request.body.asJson()?.jsonObject?.get("requests")?.jsonArray?.size?.toLong()?.let {
-                span.setAttribute("gen_ai.request.batch.size", it)
+            val requestsArray = request.body.asJson()?.jsonObject?.get("requests") as? JsonArray
+            if (requestsArray != null) {
+                span.setAttribute("gen_ai.request.batch.size", requestsArray.size.toLong())
             }
         }
 
@@ -94,9 +95,13 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
         span.setAttribute("http.response.status_code", response.code.toLong())
 
         if (response.code >= 400) {
-            val body = response.body.asJson()?.jsonObject
-            val errorType = body?.get("error")?.jsonObject?.get("type")?.jsonPrimitive?.content
-                ?: body?.get("type")?.jsonPrimitive?.content
+            val errorType = try {
+                val body = response.body.asJson()?.jsonObject
+                body?.get("error")?.jsonObject?.get("type")?.jsonPrimitive?.content
+                    ?: body?.get("type")?.jsonPrimitive?.content
+            } catch (_: Exception) {
+                null
+            }
             errorType?.let { span.setAttribute("error.type", it) }
             return
         }
