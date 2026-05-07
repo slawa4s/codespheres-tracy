@@ -22,7 +22,9 @@ import com.openai.models.embeddings.EmbeddingCreateParams
 import com.openai.models.embeddings.EmbeddingModel
 import com.openai.models.responses.ResponseCreateParams
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.api.trace.StatusCode
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -623,5 +625,88 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
                 )
                 .build(),
         )
+    }
+
+    @Test
+    fun `chat completions span carries network attributes and openai api type`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = "mock-api-key",
+                timeout = Duration.ofSeconds(30),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "id": "chatcmpl-abc",
+                          "object": "chat.completion",
+                          "created": 1710000000,
+                          "model": "gpt-4o-mini",
+                          "choices": [
+                            {
+                              "index": 0,
+                              "message": { "role": "assistant", "content": "hi" },
+                              "finish_reason": "stop"
+                            }
+                          ],
+                          "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = ChatCompletionCreateParams.builder()
+                .addUserMessage("hi")
+                .model(ChatModel.GPT_4O_MINI)
+                .build()
+            client.chat().completions().create(params)
+
+            val trace = analyzeSpans().first()
+            assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("chat_completions", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertEquals(server.hostName, trace.attributes[AttributeKey.stringKey("server.address")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("server.port")])
+            assertEquals(200L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
+        }
+    }
+
+    @Test
+    fun `chat completions request stream flag is traced`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = "mock-api-key",
+                timeout = Duration.ofSeconds(30),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody(
+                        """
+                        data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"}}]}
+
+                        data: [DONE]
+
+                        """.trimIndent()
+                    )
+            )
+
+            val params = ChatCompletionCreateParams.builder()
+                .addUserMessage("hi")
+                .model(ChatModel.GPT_4O_MINI)
+                .build()
+            client.chat().completions().createStreaming(params).use { stream -> stream.stream().count() }
+
+            val trace = analyzeSpans().first()
+            assertEquals(true, trace.attributes[AttributeKey.booleanKey("gen_ai.request.stream")])
+        }
     }
 }

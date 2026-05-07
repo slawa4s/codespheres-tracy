@@ -15,8 +15,10 @@ import com.openai.models.images.ImageModel
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.StatusCode
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -355,5 +357,46 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             true,
             trace.attributes[AttributeKey.stringKey("gen_ai.request.model")]?.startsWith(model.asString())
         )
+    }
+
+    @Test
+    fun `image url and created_at are emitted under tracy response namespace`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = "mock-api-key",
+                timeout = Duration.ofSeconds(30),
+            ).apply { instrument(this) }
+
+            val createdAt = "1710000000"
+            val imageUrl = "https://cdn.example.com/img/abc.png"
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "created": $createdAt,
+                          "data": [
+                            { "url": "$imageUrl" }
+                          ]
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = ImageGenerateParams.builder()
+                .prompt("a cat")
+                .model(ImageModel.DALL_E_2)
+                .responseFormat(ImageGenerateParams.ResponseFormat.URL)
+                .build()
+            client.images().generate(params)
+
+            val trace = analyzeSpans().first()
+            assertEquals(imageUrl, trace.attributes[AttributeKey.stringKey("tracy.response.image.url")])
+            assertEquals(createdAt, trace.attributes[AttributeKey.stringKey("tracy.response.created_at")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("server.address")])
+        }
     }
 }
