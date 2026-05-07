@@ -5,6 +5,7 @@
 
 package org.jetbrains.ai.tracy.anthropic.adapters
 
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.BatchesAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
 import org.jetbrains.ai.tracy.core.adapters.media.*
@@ -48,7 +49,18 @@ import mu.KotlinLogging
  * See: [Anthropic Messages API](https://docs.claude.com/en/api/messages)
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
+    private val batchesHandler = BatchesAnthropicApiEndpointHandler()
+
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        // Route batch API requests to the dedicated handler
+        if (request.url.pathSegments.contains("batches")) {
+            batchesHandler.handleRequestAttributes(span, request)
+            return
+        }
+
+        // Standard Messages API: set the operation name
+        span.setAttribute("gen_ai.operation.name", "chat")
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -124,6 +136,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     }
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
+        // Route batch API responses to the dedicated handler
+        if (response.url.pathSegments.contains("batches")) {
+            batchesHandler.handleResponseAttributes(span, response)
+            return
+        }
+
         val body = response.body.asJson()?.jsonObject ?: return
 
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
