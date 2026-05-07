@@ -32,9 +32,37 @@
 |           |                | `/v1/files/{file_id}`                              |     |                                                                                                       | `GET` (retrieve_metadata), `DELETE`. **Bug:** dead-code branch checking `body.deleted`  |
 |           |                | `/v1/files/{file_id}/content`                      |     |                                                                                                       | `GET` (content, binary). Operation name **collides** with `files.retrieve` — gap        |
 |           | messages       | `/v1/messages`                                     | ✅   | `org.jetbrains.ai.tracy.anthropic.adapters.handlers.AnthropicMessagesHandler`                         | `POST` (create) + SSE streaming. **Refactor**: previously inlined in `AnthropicLLMTracingAdapter`; now in its own handler. Hand-written, not breeder-generated |
+| Gemini    | cachedContents | `/v1beta/cachedContents`                           | ✅   | `org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiCachedContentsHandler`                         | `GET` (list) — only LIST response is parsed. `POST` (create), `PATCH`, `DELETE` are dispatched to this handler too but their bodies are **not** parsed — gap |
+|           |                | `/v1beta/cachedContents/{name}`                    |     |                                                                                                       | `GET` (get), `PATCH`, `DELETE` — dispatched but no body parsing                            |
+|           | content_gen    | `/v1beta/{model}:generateContent`                  | (modified) | `org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiContentGenHandler`                       | `POST` (generateContent). Pre-existing non-streaming parsing                                |
+|           |                | `/v1beta/{model}:streamGenerateContent`            | ✅   |                                                                                                       | `POST` (streamGenerateContent) — **SSE streaming added in this round** (was `Unit`)         |
+|           | embeddings     | `/v1beta/{model}:embedContent`                     | ✅   | `org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiEmbeddingsHandler`                             | `POST` (embedContent). Vertex AI `:predict` alias for `embed-*` models also routes here    |
+|           |                | `/v1beta/{model}:batchEmbedContents`               |     | (mis-routed)                                                                                          | **Gap**: `isEmbeddingsUrl` only matches `:embedContent` / `:predict`; falls through to `GeminiContentGenHandler` and is mis-parsed |
+|           |                | `/v1beta/{model}:asyncBatchEmbedContent`           |     | (mis-routed)                                                                                          | **Gap**: same as above                                                                       |
+|           | models         | `/v1beta/models`                                   | ✅   | `org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiModelsHandler`                                 | `GET` (list). **No-op handler** — all overrides are `Unit`; only adapter-level cross-cutting attrs set |
+|           |                | `/v1beta/models/{name}`                            |     |                                                                                                       | `GET` (get) — same no-op. `models.predict` / `models.predictLongRunning` route elsewhere (Imagen / Embeddings / ContentGen) |
 
 
 # Attribute Mapping
+
+## Coverage summary
+
+| Provider  | Handler                                  | Covered attributes | Coverage % |
+|-----------|------------------------------------------|-------------------:|-----------:|
+| OpenAI    | `AudioOpenAIApiEndpointHandler`          |               4/20 |        20% |
+| OpenAI    | `BatchesOpenAIApiEndpointHandler`        |               5/33 |      15.1% |
+| OpenAI    | `ConversationsOpenAIApiEndpointHandler`  |                3/7 |      42.8% |
+| OpenAI    | `FilesOpenAIApiEndpointHandler`          |              16/21 |      76.1% |
+| OpenAI    | `ModelsOpenAIApiEndpointHandler`         |                4/6 |        67% |
+| OpenAI    | `ModerationsOpenAIApiEndpointHandler`    |                4/9 |      44.4% |
+| Anthropic | `AnthropicCountTokensHandler`            |                2/9 |      22.2% |
+| Anthropic | `AnthropicListEndpointHandler` — Batches |              15/24 |      62.5% |
+| Anthropic | `AnthropicListEndpointHandler` — Models  |               9/13 |      69.2% |
+| Anthropic | `AnthropicListEndpointHandler` — Files   |              10/13 |      76.9% |
+| Gemini    | `GeminiCachedContentsHandler`            |               2/16 |      12.5% |
+| Gemini    | `GeminiEmbeddingsHandler`                |                3/5 |        60% |
+
+> Scope of the summary: **newly added** handlers only. Excluded from the table are: handlers that were modified rather than newly added (§7 `ResponsesOpenAIApiEndpointHandler`, §10 `AnthropicMessagesHandler` — a refactor of a hand-written implementation, §12 `GeminiContentGenHandler`) and the no-op §14 `GeminiModelsHandler` (0% coverage by construction).
 
 
 ## OpenAI
@@ -487,8 +515,135 @@ Info:
 
 ## Gemini
 
-1. GeminiCachedContentsHandler (caching)
-1. GeminiContentGenHandler (implement streaming for `generateContentStreaming`)
-1. GeminiEmbeddingsHandler (embedding)
-1. GeminiModelsHandler (models)
+> **Spec-type rule** is the same as the Anthropic section: only attribute names listed in the OTel GenAI registry count as **GenAI**; `gen_ai.`-prefixed attributes that are not in the registry (`gen_ai.prompt.{i}.*`, `gen_ai.completion.{i}.*`, `gen_ai.tool.{i}.function.{j}.*`, `gen_ai.response.list.*`, `gen_ai.response.embedding.*`, `gen_ai.usage.total_tokens`, `gen_ai.usage.{prompt,candidates}_tokens_details.{i}.*`, `gen_ai.request.{task_type,output_dimensionality}`) are **non-conventional GenAI**. The `gemini.*` namespace is **Custom**.
+
+### 11. `GeminiCachedContentsHandler`
+
+Info:
+1. Request type: not parsed (handler ignores request bodies)
+1. Response type: JSON
+1. Covers endpoints (per the dispatcher; only LIST is meaningfully handled):
+   1. `POST /v1beta/cachedContents` (`cachedContents.create`) — body **not** parsed
+   2. `GET /v1beta/cachedContents` (`cachedContents.list`) — handled
+   3. `GET /v1beta/{name=cachedContents/*}` (`cachedContents.get`) — body **not** parsed
+   4. `PATCH /v1beta/{cachedContent.name=cachedContents/*}` (`cachedContents.patch`) — body **not** parsed
+   5. `DELETE /v1beta/{name=cachedContents/*}` (`cachedContents.delete`) — empty response, N/A
+1. **Attributes coverage: 2/16 = 12.5%** (denominator: union of unique fields documented across the 5 methods, including `CachedContent` resource fields).
+
+> **Design note.** The handler is dispatched for every cachedContents URL by the parent adapter's `isCachedContentsUrl()` (any URL containing the `cachedContents` segment) but only `handleResponseAttributes` parses anything, and only the LIST shape (`{cachedContents:[…], nextPageToken}`). For `create`, `get`, `patch` the same handler runs against a single-resource `CachedContent` body and silently extracts nothing — the spans look identical except for `gen_ai.operation.name`.
+
+| Original attribute  | Source                  | Mapped to attribute(s)          | Specification type     | Note                                                                       |
+|---------------------|-------------------------|---------------------------------|------------------------|----------------------------------------------------------------------------|
+| `pageSize`          | req:list (query)        | ❌                               |                        |                                                                            |
+| `pageToken`         | req:list (query)        | ❌                               |                        |                                                                            |
+| `contents`          | req:create              | ❌                               |                        |                                                                            |
+| `tools`             | req:create              | ❌                               |                        |                                                                            |
+| `expiration`        | req:create, req:patch   | ❌                               |                        |                                                                            |
+| `displayName`       | req:create              | ❌                               |                        |                                                                            |
+| `model`             | req:create              | ❌                               |                        |                                                                            |
+| `systemInstruction` | req:create              | ❌                               |                        |                                                                            |
+| `toolConfig`        | req:create              | ❌                               |                        |                                                                            |
+| `cachedContents`    | resp:list (array)       | `gen_ai.response.list.count`    | non-conventional GenAI | Length only                                                                |
+| `nextPageToken`     | resp:list               | `gen_ai.response.list.has_more` | non-conventional GenAI | `true` iff `nextPageToken` is non-empty (boolean inferred, not the token)  |
+| `name`              | resp:`CachedContent`    | ❌                               |                        | Resource id; would fit `gen_ai.cached_content.id` or similar               |
+| `createTime`        | resp:`CachedContent`    | ❌                               |                        |                                                                            |
+| `updateTime`        | resp:`CachedContent`    | ❌                               |                        |                                                                            |
+| `expireTime`        | resp:`CachedContent`    | ❌                               |                        |                                                                            |
+| `usageMetadata`     | resp:`CachedContent`    | ❌                               |                        | OTel `gen_ai.usage.*` partial fits would be possible                       |
+
+### 12. `GeminiContentGenHandler` — modifications since `6e028bd2`
+
+Info:
+1. Request type: JSON
+1. Response type: JSON (non-streaming) or `text/event-stream` (streaming)
+1. Covers endpoints:
+   1. `POST /v1beta/{model}:generateContent` — pre-existing non-streaming parsing
+   2. `POST /v1beta/{model}:streamGenerateContent` — **SSE streaming added in this patch** (`handleStreaming` was `Unit` before)
+1. Pre-existing non-streaming coverage: **request 12/19 ≈ 63%**, **response 9/14 ≈ 64%**. The streaming branch adds the rows below; the non-streaming tables are unchanged and not repeated here.
+
+#### 12.1 New SSE streaming branch (delta vs. `6e028bd2`)
+
+The patch replaces `override fun handleStreaming(span: Span, events: String) = Unit` with a full implementation. It splits the SSE body on `\n\n`, parses each `data:` line as a JSON chunk, accumulates `candidates[0].content.parts[].text` across chunks, and on the **last** chunk extracts metadata.
+
+| New attribute (streaming only)     | Source                                          | Mapped to attribute(s)              | Specification type     | Note                                                       |
+|------------------------------------|-------------------------------------------------|-------------------------------------|------------------------|------------------------------------------------------------|
+| accumulated text                   | SSE chunks: `candidates[0].content.parts[].text`| `gen_ai.completion.0.content`       | non-conventional GenAI | Concatenated from all chunks                               |
+| `responseId` (last chunk)          | SSE last chunk                                  | `gen_ai.response.id`                | GenAI                  |                                                            |
+| `modelVersion` (last chunk)        | SSE last chunk                                  | `gen_ai.response.model`             | GenAI                  |                                                            |
+| `usageMetadata.promptTokenCount`   | SSE last chunk                                  | `gen_ai.usage.input_tokens`         | GenAI                  |                                                            |
+| `usageMetadata.candidatesTokenCount` | SSE last chunk                                | `gen_ai.usage.output_tokens`        | GenAI                  |                                                            |
+| `candidates[0].finishReason`       | SSE last chunk                                  | `gen_ai.completion.0.finish_reason` | non-conventional GenAI | Registry has `gen_ai.response.finish_reasons` (array)      |
+| (parse exception)                  | runCatching                                     | span ERROR status + `recordException`| —                      | Streaming-only error handling                              |
+
+Streaming gaps (relative to the same-shape non-streaming response): `usageMetadata.totalTokenCount`, `usageMetadata.cachedContentTokenCount`, `usageMetadata.thoughtsTokenCount`, `usageMetadata.toolUsePromptTokenCount`, `promptTokensDetails`, `candidatesTokensDetails`, `cacheTokensDetails`, `promptFeedback`, per-candidate roles / tool calls (the streaming branch only handles candidate 0's text, no tool-call accumulation).
+
+#### 12.2 Non-streaming attributes (unchanged) — quick reference for completeness
+
+Request:
+- `contents[i].{role,parts}` → `gen_ai.prompt.{i}.{role,content}` (non-conventional GenAI; registry has `gen_ai.input.messages`)
+- `tools[i].functionDeclarations[j].{name,description,parameters,parametersJsonSchema,type}` → `gen_ai.tool.{i}.function.{j}.{name,description,parameters,type}` (non-conventional GenAI; registry has flat `gen_ai.tool.definitions`)
+- `generationConfig.{candidateCount,maxOutputTokens,temperature,topP,topK}` → `gen_ai.request.{choice.count,max_tokens,temperature,top_p,top_k}` (**all GenAI**)
+- Inline media `inlineData.{data,mimeType}` → `tracy.input.media.*` via `MediaContentExtractor` (Custom)
+- ❌: `systemInstruction`, `toolConfig`, `safetySettings`, `cachedContent`, `serviceTier`, `store`, `generationConfig.{stopSequences,responseMimeType,responseSchema}`
+
+Response (non-streaming):
+- `responseId` → `gen_ai.response.id` (GenAI)
+- `modelVersion` → `gen_ai.response.model` (GenAI)
+- `candidates[i].{content.role,content.parts text/functionCall,finishReason}` → `gen_ai.completion.{i}.{role,content,finish_reason,tool.{j}.{name,arguments}}` (non-conventional GenAI)
+- `usageMetadata.{promptTokenCount,candidatesTokenCount,totalTokenCount}` → `gen_ai.usage.{input_tokens,output_tokens,total_tokens}` (first two GenAI; `total_tokens` non-conventional — registry has no `gen_ai.usage.total_tokens`)
+- `usageMetadata.{promptTokensDetails,candidatesTokensDetails}[i].{modality,tokenCount}` → snake-cased `gen_ai.usage.{prompt,candidates}_tokens_details.{i}.{modality,token_count}` (non-conventional GenAI)
+- ❌: `promptFeedback`, `modelStatus`, `usageMetadata.{cachedContentTokenCount,toolUsePromptTokenCount,thoughtsTokenCount,cacheTokensDetails}`
+
+### 13. `GeminiEmbeddingsHandler`
+
+Info:
+1. Request type: JSON
+1. Response type: JSON
+1. Covers endpoints:
+   1. `POST /v1beta/{model}:embedContent` — handled
+   2. Vertex AI alias `:predict` for embed-named models — handled (operation name normalised to `embedContent`)
+   3. `POST /v1beta/{model}:batchEmbedContents` — **not handled** (mis-routed to `GeminiContentGenHandler`)
+   4. `POST /v1beta/{model}:asyncBatchEmbedContent` — **not handled** (mis-routed)
+1. **Attributes coverage: 3/5 = 60%** for `embedContent` body fields (denominator: `content`, `taskType`, `title`, `outputDimensionality`, `embedding.values`).
+
+> **Routing gap.** The dispatcher's `isEmbeddingsUrl` check matches only `operation == "embedContent"` or `operation == "predict"` (with embed-named models). Vertex AI / Generative Language API methods `:batchEmbedContents` and `:asyncBatchEmbedContent` therefore **fall through to `GeminiContentGenHandler`**, which then tries to parse them as content-generation responses (`candidates[]`, `usageMetadata`) and silently sets nothing useful.
+
+| Original attribute      | Source           | Mapped to attribute(s)                   | Specification type      | Note                                                                |
+|-------------------------|------------------|------------------------------------------|-------------------------|---------------------------------------------------------------------|
+| `content`               | req              | ❌                                        |                         | The actual text being embedded — not traced                         |
+| `taskType`              | req              | `gen_ai.request.task_type`               | non-conventional GenAI  |                                                                     |
+| `title`                 | req              | ❌                                        |                         |                                                                     |
+| `outputDimensionality`  | req              | `gen_ai.request.output_dimensionality`   | non-conventional GenAI  |                                                                     |
+| `embedding.values`      | resp             | `gen_ai.response.embedding.dimension`    | non-conventional GenAI  | Length only — actual vector not traced. Registry has `gen_ai.embeddings.dimension.count` (a near match but different name) |
+| `usageMetadata`         | resp             | ❌                                        |                         |                                                                     |
+
+The handler also unconditionally sets:
+- `gen_ai.operation.name = "embedContent"` *(GenAI; overrides URL-derived `predict` for the Vertex AI alias)*
+- `gen_ai.output.type = "embedding"` *(GenAI)*
+- `gemini.api.type = "models"` *(Custom; redundant with the parent adapter's setter)*
+
+### 14. `GeminiModelsHandler`
+
+Info:
+1. Request type: not parsed (handler is a pass-through)
+1. Response type: not parsed
+1. Covers endpoints:
+   1. `GET /v1beta/models` (`models.list`)
+   2. `GET /v1beta/models/{name}` (`models.get`)
+1. **Attributes coverage: 0/N = 0%** — the handler does not parse any documented body field.
+
+> **No-op handler.** All three overrides are literally `Unit`. The handler exists only to win dispatch over `GeminiContentGenHandler` for URLs that contain the `models` segment but no `:operation` suffix. Spans for these routes carry only the cross-cutting attributes that the parent `GeminiLLMTracingAdapter` sets (`gemini.api.type="models"`, plus path-derived `gen_ai.request.model` when the URL ends with a model id). None of the documented `Model` resource fields (`name`, `baseModelId`, `version`, `displayName`, `description`, `inputTokenLimit`, `outputTokenLimit`, `supportedGenerationMethods`, `temperature`, `maxTemperature`, `topP`, `topK`) reach the span. The `nextPageToken` and `models[]` array length on `models.list` are likewise not parsed.
+
+> The user-listed methods `models.predict` and `models.predictLongRunning` are **not** routed to this handler. They are URLs of shape `…/models/{model}:predict` (or `:predictLongRunning`) — the trailing `:operation` excludes them from `isModelsUrl()`. Depending on the model name they go to `GeminiImagenHandler` (imagen-*), `GeminiEmbeddingsHandler` (embed-*), or fall through to `GeminiContentGenHandler`.
+
+---
+
+**Cross-cutting attributes** — every Gemini handler emits the following on **every** span (set by `GeminiLLMTracingAdapter.getRequestBodyAttributes`); they do not correspond to documented Gemini request/response **fields** and are not counted toward per-handler coverage percentages:
+
+- `gen_ai.provider.name = "gemini"` *(GenAI)*
+- `server.address`, `server.port` *(OTel HTTP semconv)*
+- `gen_ai.operation.name` *(GenAI; URL-derived from the `:operation` suffix, or `embedContent` after `GeminiEmbeddingsHandler`'s normalisation)*
+- `gen_ai.request.model` *(GenAI; URL-derived — the part of the last path segment before `:`)*
+- `gemini.api.type` *(Custom; one of `models` / `cachedContents`)*
+- `http.response.status_code` *(OTel HTTP semconv)*
 
