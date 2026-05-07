@@ -12,7 +12,6 @@ import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadT
 import org.jetbrains.ai.tracy.core.adapters.media.*
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponseBody
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.ContentKind
@@ -246,8 +245,8 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
      * - 4xx → `"invalid_request_error"`
      * - 5xx → `"internal_error"`
      */
-    override fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
-        super.getResponseErrorBodyAttributes(span, body)
+    override fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
+        super.getResponseErrorBodyAttributes(span, response)
 
         // If the base class already extracted error.type from the body, nothing more to do.
         val alreadySet = (span as? ReadableSpan)
@@ -256,12 +255,8 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             ?.get(AttributeKey.stringKey("error.type"))
         if (alreadySet != null) return
 
-        // Derive fallback error.type from the HTTP status code stored on the span.
-        val statusCode = (span as? ReadableSpan)
-            ?.toSpanData()
-            ?.attributes
-            ?.get(AttributeKey.longKey("http.status_code"))
-            ?: return
+        // Derive fallback error.type from the HTTP status code directly from the response.
+        val statusCode = response.code.toLong()
 
         val fallbackType = when {
             statusCode in 400L..499L -> "invalid_request_error"
