@@ -57,6 +57,13 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
         getRequestBodyAttributes(span, request)
         span.setAttribute("gen_ai.api_base", "${request.url.scheme}://${request.url.host}")
         span.setAttribute(GEN_AI_SYSTEM, genAISystem)
+        span.setAttribute("gen_ai.provider.name", genAISystem)
+        span.setAttribute("server.address", request.url.host)
+        val serverPort = if (request.url.port > 0) request.url.port.toLong() else when (request.url.scheme) {
+            "https" -> 443L
+            else -> 80L
+        }
+        span.setAttribute("server.port", serverPort)
 
         return@runCatching
     }.getOrElse { exception ->
@@ -87,6 +94,7 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             }
 
             span.setAttribute("http.status_code", response.code.toLong())
+            span.setAttribute("http.response.status_code", response.code.toLong())
 
             if (response.isError()) {
                 getResponseErrorBodyAttributes(span, response.body)
