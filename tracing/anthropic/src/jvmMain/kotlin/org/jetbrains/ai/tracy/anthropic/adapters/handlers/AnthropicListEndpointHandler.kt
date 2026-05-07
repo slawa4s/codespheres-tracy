@@ -94,10 +94,10 @@ internal class AnthropicListEndpointHandler : EndpointApiHandler {
         span.setAttribute("http.response.status_code", response.code.toLong())
 
         if (response.code >= 400) {
-            response.body.asJson()?.jsonObject
-                ?.get("error")?.jsonObject
-                ?.get("type")?.jsonPrimitive?.content
-                ?.let { span.setAttribute("error.type", it) }
+            val body = response.body.asJson()?.jsonObject
+            val errorType = body?.get("error")?.jsonObject?.get("type")?.jsonPrimitive?.content
+                ?: body?.get("type")?.jsonPrimitive?.content
+            errorType?.let { span.setAttribute("error.type", it) }
             return
         }
 
