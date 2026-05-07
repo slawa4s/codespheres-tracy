@@ -45,6 +45,15 @@
 
 # Attribute Mapping
 
+## Average coverage
+
+| Scope     | Average coverage % |
+|-----------|-------------------:|
+| OpenAI    |             41.08% |
+| Anthropic |             69.53% |
+| Gemini    |             36.25% |
+| **Total** |         **47.39%** |
+
 ## Coverage summary
 
 | Provider  | Handler                                  | Covered attributes | Coverage % |
