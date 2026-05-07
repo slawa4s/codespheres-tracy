@@ -89,6 +89,9 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private val handlers = ConcurrentHashMap<OpenAIApiType, EndpointApiHandler>()
 
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("gen_ai.provider.name", GenAiSystemIncubatingValues.OPENAI)
+        span.setAttribute("server.address", request.url.host)
+        span.setAttribute("server.port", if (request.url.scheme == "https") 443L else 80L)
         val handler = handlerFor(request.url)
         handler.handleRequestAttributes(span, request)
     }
