@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.anthropic
 
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.api.trace.StatusCode
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -226,6 +227,97 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
 
             assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
+        }
+    }
+
+    // ---- error fallback: non-standard body (e.g. invalid empty requests) ---------
+
+    @Test
+    fun `test batch create with empty requests returns error span with error type fallback`() = runTest {
+        withMockServer { server ->
+            // Simulates the Anthropic API returning a 400 with a non-standard error body
+            // (e.g. {"detail": "..."}) that lacks the standard {"error": {"type": "..."}} envelope.
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"detail": "At least one request is required in a message batch"}""")
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .addHeader("x-api-key", "test-key")
+                    .post("""{"requests": []}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(StatusCode.ERROR, trace.status.statusCode)
+            assertEquals(400L, trace.attributes[AttributeKey.longKey("http.status_code")])
+            // The fallback must populate error.type even though the body has no standard error envelope.
+            assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("error.type")])
+        }
+    }
+
+    @Test
+    fun `test non-standard 5xx error body sets error type fallback to internal_error`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(500)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"message": "Internal server error"}""")
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .addHeader("x-api-key", "test-key")
+                    .post("""{"requests": []}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(StatusCode.ERROR, trace.status.statusCode)
+            assertEquals(500L, trace.attributes[AttributeKey.longKey("http.status_code")])
+            assertEquals("internal_error", trace.attributes[AttributeKey.stringKey("error.type")])
+        }
+    }
+
+    @Test
+    fun `test standard Anthropic error body takes precedence over fallback`() = runTest {
+        withMockServer { server ->
+            // Standard Anthropic error envelope - error.type should come from the body, not the fallback
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"type":"error","error":{"type":"invalid_request_error","message":"model not found"}}""")
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .addHeader("x-api-key", "test-key")
+                    .post("""{"requests": []}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(StatusCode.ERROR, trace.status.statusCode)
+            // error.type from body takes precedence; value should match the body, not the fallback
+            assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("error.type")])
+            assertEquals("model not found", trace.attributes[AttributeKey.stringKey("gen_ai.error.message")])
         }
     }
 

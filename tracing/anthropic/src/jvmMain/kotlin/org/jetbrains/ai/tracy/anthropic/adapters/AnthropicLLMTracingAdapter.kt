@@ -11,13 +11,16 @@ import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadT
 import org.jetbrains.ai.tracy.core.adapters.media.*
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
+import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponseBody
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.ContentKind
 import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
+import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 import mu.KotlinLogging
@@ -218,6 +221,44 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
+    }
+
+    /**
+     * Overrides error-body attribute extraction to guarantee that `error.type` is always populated
+     * for HTTP error responses, even when the response body does not conform to the standard
+     * Anthropic error envelope (`{"error": {"type": "...", "message": "..."}}`).
+     *
+     * Examples where the standard envelope is absent:
+     * - Batch requests with an empty `requests` array return `{"detail": "..."}`.
+     * - Proxy / gateway errors may return a plain HTML or non-JSON body.
+     *
+     * Fallback mapping:
+     * - 4xx → `"invalid_request_error"`
+     * - 5xx → `"internal_error"`
+     */
+    override fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
+        super.getResponseErrorBodyAttributes(span, body)
+
+        // If the base class already extracted error.type from the body, nothing more to do.
+        val alreadySet = (span as? ReadableSpan)
+            ?.toSpanData()
+            ?.attributes
+            ?.get(AttributeKey.stringKey("error.type"))
+        if (alreadySet != null) return
+
+        // Derive fallback error.type from the HTTP status code stored on the span.
+        val statusCode = (span as? ReadableSpan)
+            ?.toSpanData()
+            ?.attributes
+            ?.get(AttributeKey.longKey("http.status_code"))
+            ?: return
+
+        val fallbackType = when {
+            statusCode in 400L..499L -> "invalid_request_error"
+            statusCode in 500L..599L -> "internal_error"
+            else -> return
+        }
+        span.setAttribute("error.type", fallbackType)
     }
 
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
