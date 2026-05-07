@@ -73,6 +73,17 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
 
     fun registerResponse(span: Span, response: TracyHttpResponse): Unit =
         runCatching {
+            // Always record HTTP status code unconditionally, before the body guard
+            span.setAttribute("http.status_code", response.code.toLong())
+            span.setAttribute("http.response.status_code", response.code.toLong())
+
+            // Always record error attributes for error responses, before the body guard,
+            // so they are captured even when the body is absent or non-JSON
+            if (response.isError()) {
+                getResponseErrorBodyAttributes(span, response)
+                span.setStatus(StatusCode.ERROR)
+            }
+
             val body = response.body.asJson()?.jsonObject ?: return
             val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
             val mimeType = response.contentType?.mimeType
@@ -93,13 +104,7 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
                 }
             }
 
-            span.setAttribute("http.status_code", response.code.toLong())
-            span.setAttribute("http.response.status_code", response.code.toLong())
-
-            if (response.isError()) {
-                getResponseErrorBodyAttributes(span, response.body)
-                span.setStatus(StatusCode.ERROR)
-            } else {
+            if (!response.isError()) {
                 span.setStatus(StatusCode.OK)
             }
 
@@ -116,8 +121,12 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             span.recordException(exception)
         }
 
-    protected open fun getResponseErrorBodyAttributes(span: Span, body: TracyHttpResponseBody) {
-        body.asJson()?.jsonObject["error"]?.jsonObject?.let { error ->
+    protected open fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
+        val errorFromBody = response.body.asJson()?.jsonObject?.get("error")?.jsonObject
+        // error.type: prefer the value from the JSON body, fall back to HTTP status code per OTel convention
+        val errorType = errorFromBody?.get("type")?.jsonPrimitive?.content ?: response.code.toString()
+        span.setAttribute("error.type", errorType)
+        errorFromBody?.let { error ->
             error["message"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.message", it.content) }
             error["type"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.type", it.content) }
             error["param"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.error.param", it.content) }

@@ -7,7 +7,9 @@ package org.jetbrains.ai.tracy.core.adapters
 
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.api.trace.StatusCode
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.jetbrains.ai.tracy.core.TracingManager
@@ -65,6 +67,43 @@ private fun createResponse(code: Int): TracyHttpResponse = object : TracyHttpRes
         override val scheme = "https"
         override val host = "api.example.com"
         override val pathSegments = listOf("v1", "chat", "completions")
+        override val parameters = emptyParams
+    }
+    override val requestMethod = "POST"
+    override fun isError() = code >= 400
+}
+
+/** Simulates an error response with no JSON error body (e.g., plain-text or empty body, represented as empty JSON object). */
+private fun createErrorResponseEmptyBody(code: Int): TracyHttpResponse = object : TracyHttpResponse {
+    override val code = code
+    override val contentType = null
+    override val body = TracyHttpResponseBody.Json(JsonObject(emptyMap()))
+    override val url = object : TracyHttpUrl {
+        override val scheme = "https"
+        override val host = "api.example.com"
+        override val pathSegments = listOf("v1", "messages")
+        override val parameters = emptyParams
+    }
+    override val requestMethod = "POST"
+    override fun isError() = code >= 400
+}
+
+/** Simulates an error response whose JSON body includes an `error` object with a `type` field. */
+private fun createErrorResponseWithErrorType(code: Int, errorType: String): TracyHttpResponse = object : TracyHttpResponse {
+    override val code = code
+    override val contentType = TracyContentType.Application.Json
+    override val body = TracyHttpResponseBody.Json(
+        buildJsonObject {
+            put("error", buildJsonObject {
+                put("type", errorType)
+                put("message", "An error occurred")
+            })
+        } as JsonElement
+    )
+    override val url = object : TracyHttpUrl {
+        override val scheme = "https"
+        override val host = "api.example.com"
+        override val pathSegments = listOf("v1", "messages")
         override val parameters = emptyParams
     }
     override val requestMethod = "POST"
@@ -185,5 +224,103 @@ internal class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
 
         assertEquals(201L, attrs[AttributeKey.longKey("http.status_code")], "legacy http.status_code should still be present")
         assertEquals(201L, attrs[AttributeKey.longKey("http.response.status_code")], "http.response.status_code should be present")
+    }
+
+    // ============ http.response.status_code for error responses ============
+
+    @Test
+    fun `registerResponse sets http response status code for error response`() {
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        adapter.registerResponse(span, createResponse(429))
+        span.end()
+
+        val spans = analyzeSpans()
+        assertEquals(1, spans.size)
+        val attrs = spans.first().attributes
+
+        assertEquals(429L, attrs[AttributeKey.longKey("http.response.status_code")],
+            "http.response.status_code must be set even for error responses")
+    }
+
+    @Test
+    fun `registerResponse sets http response status code even when body is absent`() {
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        adapter.registerResponse(span, createErrorResponseEmptyBody(503))
+        span.end()
+
+        val spans = analyzeSpans()
+        assertEquals(1, spans.size)
+        val attrs = spans.first().attributes
+
+        assertNotNull(attrs[AttributeKey.longKey("http.response.status_code")],
+            "http.response.status_code must be set even when body has no content")
+        assertEquals(503L, attrs[AttributeKey.longKey("http.response.status_code")])
+    }
+
+    // ============ error.type ============
+
+    @Test
+    fun `registerResponse sets error type from body when present`() {
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        adapter.registerResponse(span, createErrorResponseWithErrorType(400, "invalid_request_error"))
+        span.end()
+
+        val spans = analyzeSpans()
+        assertEquals(1, spans.size)
+        val attrs = spans.first().attributes
+
+        assertEquals("invalid_request_error", attrs[AttributeKey.stringKey("error.type")],
+            "error.type should be taken from error.type field in the response body")
+    }
+
+    @Test
+    fun `registerResponse falls back to HTTP status code string for error type when body has no error type`() {
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        adapter.registerResponse(span, createErrorResponseEmptyBody(429))
+        span.end()
+
+        val spans = analyzeSpans()
+        assertEquals(1, spans.size)
+        val attrs = spans.first().attributes
+
+        assertEquals("429", attrs[AttributeKey.stringKey("error.type")],
+            "error.type should fall back to the HTTP status code string when body has no error type")
+    }
+
+    @Test
+    fun `registerResponse sets error type to HTTP status code string for non-JSON error body`() {
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        adapter.registerResponse(span, createErrorResponseEmptyBody(503))
+        span.end()
+
+        val spans = analyzeSpans()
+        assertEquals(1, spans.size)
+        assertEquals("503", spans.first().attributes[AttributeKey.stringKey("error.type")])
+    }
+
+    // ============ span status for error responses ============
+
+    @Test
+    fun `registerResponse sets span status to ERROR for error responses`() {
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        adapter.registerResponse(span, createErrorResponseEmptyBody(500))
+        span.end()
+
+        val spans = analyzeSpans()
+        assertEquals(1, spans.size)
+        assertEquals(StatusCode.ERROR, spans.first().status.statusCode,
+            "span status must be ERROR for HTTP error responses")
+    }
+
+    @Test
+    fun `registerResponse sets span status to OK for success responses`() {
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+        adapter.registerResponse(span, createResponse(200))
+        span.end()
+
+        val spans = analyzeSpans()
+        assertEquals(1, spans.size)
+        assertEquals(StatusCode.OK, spans.first().status.statusCode,
+            "span status must be OK for HTTP success responses")
     }
 }
