@@ -64,6 +64,35 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
         }
     }
 
+    @Test
+    fun `test models list sets pagination attributes`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(MODELS_LIST_RESPONSE)
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/models"))
+                    .addHeader("x-api-key", "test-key")
+                    .get()
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(1L, trace.attributes[AttributeKey.longKey("gen_ai.response.list.count")])
+            assertEquals("false", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.has_more")])
+            assertEquals(MODEL_VERSIONED_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.list.first_id")])
+            assertEquals(MODEL_VERSIONED_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.list.last_id")])
+        }
+    }
+
     // ---- models retrieve -------------------------------------------------------
 
     @Test
