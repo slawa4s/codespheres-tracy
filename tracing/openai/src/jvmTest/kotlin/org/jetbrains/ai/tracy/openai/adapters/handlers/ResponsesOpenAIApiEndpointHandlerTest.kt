@@ -18,6 +18,7 @@ import com.openai.models.ChatModel
 import com.openai.models.responses.*
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -637,6 +638,119 @@ class ResponsesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         verifyMediaContentUploadAttributes(trace, expected = media.map {
             it.toMediaContentAttributeValues(field = "input")
         })
+    }
+
+    @Test
+    fun `test streaming response_completed event populates response metadata attributes`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofSeconds(30),
+            ).apply { instrument(this) }
+
+            val sseBody = listOf(
+                "data: {\"type\":\"response.output_text.done\",\"item_id\":\"msg_xxx\",\"output_index\":0,\"content_index\":0,\"text\":\"Hello!\"}",
+                "",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_abc123\",\"object\":\"response\",\"model\":\"gpt-4o-mini-2024-07-18\",\"status\":\"completed\",\"created_at\":1234567890,\"completed_at\":1234567900,\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}",
+                "",
+                "data: [DONE]",
+                "",
+            ).joinToString("\n")
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody(sseBody)
+            )
+
+            runCatching {
+                client.responses().createStreaming(
+                    ResponseCreateParams.builder()
+                        .input("Hi")
+                        .model(ChatModel.GPT_4O_MINI)
+                        .build()
+                ).use { stream ->
+                    stream.stream().forEach { _ -> }
+                }
+            }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals("resp_abc123", trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
+            assertEquals("gpt-4o-mini-2024-07-18", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
+            assertEquals("response", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+            assertEquals("completed", trace.attributes[AttributeKey.stringKey("tracy.response.status")])
+            assertEquals(1234567890L, trace.attributes[AttributeKey.longKey("tracy.response.created_at")])
+            assertEquals(1234567900L, trace.attributes[AttributeKey.longKey("tracy.response.completed_at")])
+            assertEquals(10L, trace.attributes[AttributeKey.longKey("gen_ai.usage.input_tokens")])
+            assertEquals(5L, trace.attributes[AttributeKey.longKey("gen_ai.usage.output_tokens")])
+            assertEquals("Hello!", trace.attributes[AttributeKey.stringKey("gen_ai.completion.0.content")])
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        }
+    }
+
+    @Test
+    fun `test non-streaming response sets gen_ai_operation_name to generate_content and response metadata`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofSeconds(30),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "id": "resp_abc123",
+                          "object": "response",
+                          "model": "gpt-4o-mini-2024-07-18",
+                          "status": "completed",
+                          "created_at": 1234567890,
+                          "completed_at": 1234567900,
+                          "output": [
+                            {
+                              "type": "message",
+                              "role": "assistant",
+                              "content": [{"type": "output_text", "text": "Hello!"}]
+                            }
+                          ],
+                          "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            client.responses().create(
+                ResponseCreateParams.builder()
+                    .model(ChatModel.GPT_4O_MINI)
+                    .input("Hi")
+                    .build()
+            )
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("resp_abc123", trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
+            assertEquals("gpt-4o-mini-2024-07-18", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
+            assertEquals("response", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+            assertEquals("completed", trace.attributes[AttributeKey.stringKey("tracy.response.status")])
+            assertEquals(1234567890L, trace.attributes[AttributeKey.longKey("tracy.response.created_at")])
+            assertEquals(1234567900L, trace.attributes[AttributeKey.longKey("tracy.response.completed_at")])
+        }
+    }
+
+    companion object {
+        private const val MOCK_API_KEY = "mock-api-key"
     }
 
     private fun inputWith(vararg content: ResponseInputContent) = ResponseCreateParams.Input

@@ -32,6 +32,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.previous_response_id", it)
@@ -141,6 +142,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response = body)
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
         parseResponseAttributes(span, response = body)
     }
 
@@ -173,6 +175,19 @@ internal class ResponsesOpenAIApiEndpointHandler(
     }
 
     private fun parseResponseAttributes(span: Span, response: JsonObject) {
+        response["object"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("tracy.response.object", it)
+        }
+        response["status"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("tracy.response.status", it)
+        }
+        response["created_at"]?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute("tracy.response.created_at", it)
+        }
+        response["completed_at"]?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute("tracy.response.completed_at", it)
+        }
+
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
         response["output"]?.let { outputs ->
@@ -432,6 +447,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
 
         "output",
         "usage",
+        "status",
+        "created_at",
+        "completed_at",
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes

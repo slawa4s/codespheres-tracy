@@ -19,6 +19,7 @@ import com.openai.models.images.ImageModel
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import mu.KotlinLogging
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -126,7 +127,7 @@ class ImagesCreateEditOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             trace.attributes[AttributeKey.stringKey("gen_ai.request.mask.filename")]
         )
 
-        assertEquals("1", trace.attributes[AttributeKey.stringKey("gen_ai.request.n")])
+        assertEquals("1", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
 
         val expectedImage = MediaContentAttributeValues.Url(
             field = "output",
@@ -314,11 +315,11 @@ class ImagesCreateEditOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
         assertEquals(
             size.asString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.size")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.size")]
         )
         assertEquals(
             partialImagesCount.toString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.partial_images")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.partial_images")]
         )
         assertFalse(trace.attributes[AttributeKey.stringKey("gen_ai.completion.0.content")].isNullOrEmpty())
 
@@ -428,6 +429,44 @@ class ImagesCreateEditOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             .build()
     }
 
+    @Test
+    fun `test operation name, output type, and image size_bytes are traced`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(imageEditJsonResponse())
+
+            val imageFile = "cat-n-dog-2.png"
+            val params = ImageEditParams.builder()
+                .prompt("Add a rainbow")
+                .model(ImageModel.DALL_E_2)
+                .image(image(imageFile, "image/png"))
+                .build()
+
+            client.images().edit(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+
+            val sizeBytes = trace.attributes[AttributeKey.longKey("tracy.request.image.0.size_bytes")]
+            assertNotNull(sizeBytes, "Image size_bytes should be traced")
+            assertTrue(sizeBytes!! > 0, "Image size_bytes should be positive")
+        }
+    }
+
+    private fun imageEditJsonResponse(): MockResponse {
+        return MockResponse()
+            .setResponseCode(200)
+            .setHeader("Content-Type", "application/json")
+            .setBody("""{"created":1589478378,"data":[{"url":"https://example.com/image.png"}]}""")
+    }
+
     private fun validateBasicImageTracing(prompt: String, model: ImageModel) {
         val traces = analyzeSpans()
         assertTracesCount(1, traces)
@@ -438,5 +477,11 @@ class ImagesCreateEditOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             true,
             trace.attributes[AttributeKey.stringKey("gen_ai.request.model")]?.startsWith(model.asString())
         )
+        assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+    }
+
+    companion object {
+        private const val MOCK_API_KEY = "mock-api-key"
     }
 }
