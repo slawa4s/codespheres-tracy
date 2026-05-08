@@ -23,6 +23,9 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_FINISH_REASONS
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.Json
@@ -201,6 +204,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var responseId: String? = null
+        var responseModel: String? = null
+        val finishReasons = mutableListOf<String>()
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -212,7 +218,11 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
+                if (responseId == null) responseId = event["id"]?.jsonPrimitive?.content
+                if (responseModel == null) responseModel = event["model"]?.jsonPrimitive?.content
+
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+                choice["finish_reason"]?.jsonPrimitive?.content?.let { finishReasons.add(it) }
                 val delta = choice["delta"]?.jsonObject ?: continue
 
                 if (role == null) {
@@ -227,6 +237,10 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        if (finishReasons.isNotEmpty()) span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons)
 
         return@runCatching
     }.getOrElse { exception ->

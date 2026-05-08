@@ -23,6 +23,9 @@ import com.openai.models.responses.FunctionTool
 import com.openai.models.responses.Response
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_FINISH_REASONS
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.TestInstance
 import java.time.Duration
@@ -219,6 +222,10 @@ abstract class BaseOpenAITracingTest : BaseAITracingTest() {
 
         assertFalse(trace.attributes[AttributeKey.stringKey("gen_ai.completion.0.content")].isNullOrEmpty())
         assertEquals(output, trace.attributes[AttributeKey.stringKey("gen_ai.completion.0.content")])
+
+        assertFalse(trace.attributes[GEN_AI_RESPONSE_ID].isNullOrEmpty(), "Missing gen_ai.response.id attribute")
+        assertFalse(trace.attributes[GEN_AI_RESPONSE_MODEL].isNullOrEmpty(), "Missing gen_ai.response.model attribute")
+        assertFalse(trace.attributes[GEN_AI_RESPONSE_FINISH_REASONS].isNullOrEmpty(), "Missing gen_ai.response.finish_reasons attribute")
     }
 
     protected val ChatCompletionMessageToolCall.id: String
