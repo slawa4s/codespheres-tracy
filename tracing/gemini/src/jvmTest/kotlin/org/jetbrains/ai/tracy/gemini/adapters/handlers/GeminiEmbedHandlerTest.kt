@@ -411,6 +411,7 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
         val trace = traces.first()
         // imagen:predict must stay as "predict"
         assertEquals("predict", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-        assertNull(trace.attributes[AttributeKey.stringKey("gemini.api.type")])
+        // GeminiImagenHandler sets gemini.api.type = "models"
+        assertEquals("models", trace.attributes[AttributeKey.stringKey("gemini.api.type")])
     }
 }
