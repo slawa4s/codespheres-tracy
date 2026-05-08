@@ -140,6 +140,8 @@ internal class ResponsesOpenAIApiEndpointHandler(
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
+
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
         body["output"]?.let { outputs ->

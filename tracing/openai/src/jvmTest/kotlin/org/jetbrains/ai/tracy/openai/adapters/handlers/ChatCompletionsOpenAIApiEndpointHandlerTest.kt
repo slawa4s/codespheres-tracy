@@ -23,6 +23,7 @@ import com.openai.models.embeddings.EmbeddingModel
 import com.openai.models.responses.ResponseCreateParams
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -570,6 +571,51 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
                 .build()
         )
         validateBasicTracing(model4)
+    }
+
+    @Test
+    fun `test gen_ai_operation_name is set to chat for chat completions`() = runTest {
+        withMockServer { server ->
+            val mockBody = """
+                {
+                  "id": "chatcmpl-test123",
+                  "object": "chat.completion",
+                  "created": 1234567890,
+                  "model": "gpt-4o-mini",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "message": { "role": "assistant", "content": "Hello!" },
+                      "finish_reason": "stop"
+                    }
+                  ],
+                  "usage": { "prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10 }
+                }
+            """.trimIndent()
+            server.enqueue(
+                MockResponse()
+                    .setBody(mockBody)
+                    .addHeader("Content-Type", "application/json")
+            )
+
+            val client = createOpenAIClient(url = server.url("/v1").toString(), apiKey = "mock-api-key")
+            instrument(client)
+
+            val params = ChatCompletionCreateParams.builder()
+                .addUserMessage("Hello")
+                .model(ChatModel.GPT_4O_MINI)
+                .build()
+
+            runCatching { client.chat().completions().create(params) }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            assertEquals(
+                "chat",
+                traces.first().attributes[AttributeKey.stringKey("gen_ai.operation.name")],
+                "gen_ai.operation.name must be 'chat' for chat completions"
+            )
+        }
     }
 
     private fun partText(prompt: String) = ChatCompletionContentPart.ofText(

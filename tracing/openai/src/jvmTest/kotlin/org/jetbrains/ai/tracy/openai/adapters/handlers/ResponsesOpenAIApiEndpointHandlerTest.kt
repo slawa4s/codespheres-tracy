@@ -18,6 +18,7 @@ import com.openai.models.ChatModel
 import com.openai.models.responses.*
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -637,6 +638,56 @@ class ResponsesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         verifyMediaContentUploadAttributes(trace, expected = media.map {
             it.toMediaContentAttributeValues(field = "input")
         })
+    }
+
+    @Test
+    fun `test gen_ai_operation_name is set to chat for responses API`() = runTest {
+        withMockServer { server ->
+            val mockBody = """
+                {
+                  "id": "resp-test123",
+                  "object": "response",
+                  "created_at": 1234567890,
+                  "model": "gpt-4o-mini",
+                  "output": [
+                    {
+                      "type": "message",
+                      "id": "msg-test123",
+                      "role": "assistant",
+                      "status": "completed",
+                      "content": [
+                        { "type": "output_text", "text": "Hello!", "annotations": [] }
+                      ]
+                    }
+                  ],
+                  "usage": { "input_tokens": 5, "output_tokens": 5, "total_tokens": 10 },
+                  "status": "completed"
+                }
+            """.trimIndent()
+            server.enqueue(
+                MockResponse()
+                    .setBody(mockBody)
+                    .addHeader("Content-Type", "application/json")
+            )
+
+            val client = createOpenAIClient(url = server.url("/v1").toString(), apiKey = "mock-api-key")
+            instrument(client)
+
+            val params = ResponseCreateParams.builder()
+                .input("Hello")
+                .model(ChatModel.GPT_4O_MINI)
+                .build()
+
+            runCatching { client.responses().create(params) }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            assertEquals(
+                "chat",
+                traces.first().attributes[AttributeKey.stringKey("gen_ai.operation.name")],
+                "gen_ai.operation.name must be 'chat' for the Responses API"
+            )
+        }
     }
 
     private fun inputWith(vararg content: ResponseInputContent) = ResponseCreateParams.Input
