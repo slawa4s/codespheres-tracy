@@ -183,9 +183,10 @@ fun instrument(client: AnthropicClient) {
 private fun instrumentBatchesService(client: AnthropicClient) {
     try {
         // Extract server address and port from the client's configured base URL.
+        // SDK versions >= 2.x store the base URL in the Backend (not in ClientOptions.baseUrl),
+        // so we try both sources and fall back to the Anthropic production URL when neither has it.
         val clientOptions = getBatchFieldInHierarchy(client, "clientOptions")
-        val baseUrl = clientOptions.javaClass.getMethod("baseUrl").invoke(clientOptions) as? String
-            ?: return
+        val baseUrl = resolveBaseUrl(clientOptions) ?: return
         val uri = URI.create(baseUrl)
         val serverAddress = uri.host ?: return
         val serverPort = when {
@@ -206,13 +207,18 @@ private fun instrumentBatchesService(client: AnthropicClient) {
         // Create the proxy that wraps the original BatchService.
         val batchProxy = createBatchServiceProxy(originalBatchService, serverAddress, serverPort)
 
-        // Swap the cached value inside the existing Lazy rather than replacing the Lazy itself.
-        val batchesDelegateField = getBatchDeclaredField(messagesService, "batches\$delegate")
-        val lazyDelegate = batchesDelegateField.get(messagesService)
-        // Ensure the Lazy has been initialised so `_value` holds a real object (not UNINITIALIZED_VALUE).
-        (lazyDelegate as Lazy<*>).value
-        val valueField = getBatchDeclaredField(lazyDelegate, "_value")
-        valueField.set(lazyDelegate, batchProxy)
+        // Try to install the proxy via the Kotlin lazy-delegate field first; if that fails
+        // (e.g., the SDK version uses a plain `val` instead of `by lazy`), fall back to a
+        // type-based scan of all declared fields.
+        if (!tryInjectViaDelegateField(messagesService, batchProxy) &&
+            !tryInjectViaDirectField(messagesService, batchProxy)) {
+            logger.warn {
+                "Failed to wrap AnthropicClient batch service for pre-HTTP error tracing — " +
+                "batch creation errors that occur before the HTTP call will not be traced. " +
+                "Neither the lazy-delegate field 'batches\$delegate' nor any direct " +
+                "BatchService-typed field was found in ${messagesService.javaClass.name}."
+            }
+        }
     } catch (e: Exception) {
         logger.warn(e) {
             "Failed to wrap AnthropicClient batch service for pre-HTTP error tracing — " +
@@ -288,6 +294,102 @@ private fun createPreHttpBatchErrorSpan(
         span.recordException(error)
     } finally {
         span.end()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Base URL resolution
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolves the base URL from [clientOptions] using a multi-step fallback strategy:
+ *
+ * 1. Tries `clientOptions.baseUrl()` directly (works in older SDK versions that store the URL
+ *    in `ClientOptions` itself).
+ * 2. If that returns `null`, traverses `clientOptions → [originalHttpClient | httpClient] → backend`
+ *    via reflection and calls `backend.baseUrl()` (works in SDK versions that store the URL
+ *    inside the HTTP-transport backend object instead).
+ *
+ * Returns `null` only if both paths fail, which is treated as "unable to determine server
+ * coordinates" and causes [instrumentBatchesService] to skip proxy installation.
+ */
+private fun resolveBaseUrl(clientOptions: Any): String? {
+    // Fast path: the URL is stored directly on ClientOptions (older SDK versions).
+    try {
+        val direct = clientOptions.javaClass.getMethod("baseUrl").invoke(clientOptions) as? String
+        if (!direct.isNullOrEmpty()) return direct
+    } catch (_: Exception) { /* fall through */ }
+
+    // Slow path: the URL lives inside the Backend stored in the HTTP-transport client
+    // (SDK versions >= 2.x where baseUrl is set via .backend(...) instead of .baseUrl(...)).
+    try {
+        val httpClient = try {
+            getBatchFieldInHierarchy(clientOptions, "originalHttpClient")
+        } catch (_: NoSuchFieldException) {
+            getBatchFieldInHierarchy(clientOptions, "httpClient")
+        }
+        val backend = getBatchFieldInHierarchy(httpClient, "backend")
+        val backendUrl = backend.javaClass.getMethod("baseUrl").invoke(backend) as? String
+        if (!backendUrl.isNullOrEmpty()) return backendUrl
+    } catch (_: Exception) { /* fall through */ }
+
+    return null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Batch service injection helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Attempts to install [batchProxy] by swapping the cached value inside the Kotlin
+ * lazy-delegate field `batches$delegate` of [messagesService].
+ *
+ * This covers the common case where the Anthropic SDK declares the `batches` property
+ * as `private val batches: BatchService by lazy { … }`, which the Kotlin compiler
+ * compiles to a field named `batches$delegate` of type `SynchronizedLazyImpl`.
+ *
+ * @return `true` if the proxy was successfully installed; `false` on any exception
+ *         (e.g., `NoSuchFieldException` when the SDK version uses a different layout).
+ */
+internal fun tryInjectViaDelegateField(messagesService: Any, batchProxy: BatchService): Boolean {
+    return try {
+        val batchesDelegateField = getBatchDeclaredField(messagesService, "batches\$delegate")
+        val lazyDelegate = batchesDelegateField.get(messagesService)
+        // Ensure the Lazy has been initialised so `_value` holds a real object (not UNINITIALIZED_VALUE).
+        (lazyDelegate as Lazy<*>).value
+        val valueField = getBatchDeclaredField(lazyDelegate, "_value")
+        valueField.set(lazyDelegate, batchProxy)
+        true
+    } catch (_: Exception) {
+        false
+    }
+}
+
+/**
+ * Attempts to install [batchProxy] by finding any declared field in the class hierarchy of
+ * [messagesService] whose type is assignable to [BatchService] and setting it directly.
+ *
+ * This covers SDK versions that store the batch service in a plain `val` (not a `by lazy`
+ * delegate), where the backing field is typed as [BatchService] (or a concrete subtype).
+ *
+ * @return `true` if a suitable field was found and set to [batchProxy]; `false` otherwise.
+ */
+internal fun tryInjectViaDirectField(messagesService: Any, batchProxy: BatchService): Boolean {
+    return try {
+        var cls: Class<*>? = messagesService.javaClass
+        while (cls != null) {
+            for (field in cls.declaredFields) {
+                if (BatchService::class.java.isAssignableFrom(field.type)) {
+                    field.isAccessible = true
+                    field.set(messagesService, batchProxy)
+                    return true
+                }
+            }
+            cls = cls.superclass
+        }
+        false
+    } catch (_: Exception) {
+        false
     }
 }
 
