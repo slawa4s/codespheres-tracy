@@ -283,12 +283,17 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     override fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
         super.getResponseErrorBodyAttributes(span, response)
 
-        // Prefer the API type stored during request processing. Fall back to URL re-detection only
-        // when getRequestBodyAttributes was never called (e.g. client-side validation failure before
-        // the request was sent) or when the ThreadLocal was already cleared.
-        // After OkHttp follows a redirect, response.url reflects the final URL and may no longer
-        // contain the original path segment (e.g. "batches"), so re-parsing alone is not reliable.
-        val apiType = requestApiTypeThreadLocal.get() ?: when {
+        // Prefer the API type already written to the span during request processing (thread-safe,
+        // survives async OkHttp dispatch). Fall back to the ThreadLocal stored during request
+        // processing, then to URL re-detection. After OkHttp follows a redirect, response.url
+        // reflects the final URL and may no longer contain the original path segment (e.g.
+        // "batches"), so re-parsing alone is not reliable; the span attribute is the most robust
+        // source because it was set synchronously in handleRequestAttributes.
+        val spanApiType = (span as? ReadableSpan)
+            ?.toSpanData()
+            ?.attributes
+            ?.get(AttributeKey.stringKey("anthropic.api.type"))
+        val apiType = spanApiType ?: requestApiTypeThreadLocal.get() ?: when {
             isBatchUrl(response.url) -> "batches"
             isFilesUrl(response.url) -> "files"
             isModelsUrl(response.url) -> "models"
