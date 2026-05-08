@@ -248,10 +248,11 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     override fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
         super.getResponseErrorBodyAttributes(span, response)
 
-        // Ensure anthropic.api.type is set on error-only spans for batch URLs,
-        // even when getRequestBodyAttributes was never called (e.g. client-side validation error).
+        // Ensure anthropic.api.type and gen_ai.operation.name are set on error-only spans for batch
+        // URLs, even when getRequestBodyAttributes was never called (e.g. client-side validation error).
         if (isBatchUrl(response.url)) {
             span.setAttribute("anthropic.api.type", "batches")
+            span.setAttribute(GEN_AI_OPERATION_NAME, batchesHandler.detectOperation(response.url, response.requestMethod))
         }
 
         // If the base class already extracted error.type from the body, nothing more to do.

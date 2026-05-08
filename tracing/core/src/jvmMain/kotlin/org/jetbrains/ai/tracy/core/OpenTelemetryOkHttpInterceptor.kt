@@ -262,7 +262,12 @@ class OpenTelemetryOkHttpInterceptor(
                             JsonObject(emptyMap())
                         }
                         else -> {
-                            JsonObject(emptyMap())
+                            val size = response.body?.contentLength() ?: -1L
+                            if (size >= 0) {
+                                JsonObject(mapOf("_tracy_response_size_bytes" to JsonPrimitive(size)))
+                            } else {
+                                JsonObject(emptyMap())
+                            }
                         }
                     }
 
