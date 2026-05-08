@@ -15,9 +15,12 @@ import org.jetbrains.ai.tracy.test.utils.toDataUrl
 import org.jetbrains.ai.tracy.test.utils.toMediaContentAttributeValues
 import com.openai.core.JsonValue
 import com.openai.models.ChatModel
+import com.openai.models.Reasoning
+import com.openai.models.ReasoningEffort
 import com.openai.models.responses.*
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -684,5 +687,101 @@ class ResponsesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         }.build()
 
         return ResponseInputContent.ofInputFile(file)
+    }
+
+    @Test
+    fun `responses span carries network attributes generate_content op name and tracy response fields`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = "mock-api-key",
+                timeout = Duration.ofSeconds(30),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "id": "resp_abc",
+                          "object": "response",
+                          "status": "completed",
+                          "background": false,
+                          "store": false,
+                          "created_at": 1710000000,
+                          "model": "gpt-4o-mini",
+                          "output": [],
+                          "usage": { "input_tokens": 1, "output_tokens": 1, "total_tokens": 2 }
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = ResponseCreateParams.builder()
+                .input("hi")
+                .model(ChatModel.GPT_4O_MINI)
+                .build()
+            client.responses().create(params)
+
+            val trace = analyzeSpans().first()
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("responses", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("server.address")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("server.port")])
+            assertEquals(200L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
+            assertEquals("response", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+            assertEquals("completed", trace.attributes[AttributeKey.stringKey("tracy.response.status")])
+            assertEquals(false, trace.attributes[AttributeKey.booleanKey("tracy.response.background")])
+            assertEquals(false, trace.attributes[AttributeKey.booleanKey("tracy.response.store")])
+            assertEquals(1710000000L, trace.attributes[AttributeKey.longKey("tracy.response.created_at")])
+        }
+    }
+
+    @Test
+    fun `responses request reasoning sub-fields are traced`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = "mock-api-key",
+                timeout = Duration.ofSeconds(30),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "id": "resp_abc",
+                          "object": "response",
+                          "status": "completed",
+                          "model": "o3-mini",
+                          "output": [],
+                          "usage": { "input_tokens": 1, "output_tokens": 1, "total_tokens": 2 }
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = ResponseCreateParams.builder()
+                .input("hi")
+                .model("o3-mini")
+                .reasoning(
+                    Reasoning.builder()
+                        .effort(ReasoningEffort.HIGH)
+                        .summary(Reasoning.Summary.AUTO)
+                        .build()
+                )
+                .build()
+            client.responses().create(params)
+
+            val trace = analyzeSpans().first()
+            assertEquals("high", trace.attributes[AttributeKey.stringKey("tracy.request.reasoning.effort")])
+            assertEquals("auto", trace.attributes[AttributeKey.stringKey("tracy.request.reasoning.summary")])
+        }
     }
 }
