@@ -120,6 +120,10 @@ class GeminiContentGenHandler(
             config.jsonObject["topK"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_K, it) }
         }
 
+        body["cachedContent"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.request.cached_content", it)
+        }
+
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.REQUEST)
     }
 
@@ -184,6 +188,22 @@ class GeminiContentGenHandler(
             }
         }
 
+        // Handle embedContent / batchEmbedContents responses
+        body["embedding"]?.jsonObject?.let { embedding ->
+            embedding["values"]?.jsonArray?.let { values ->
+                span.setAttribute("gen_ai.response.embedding.dimension", values.size.toLong())
+                span.setAttribute("gen_ai.response.embedding.count", 1L)
+            }
+        }
+        body["embeddings"]?.let { embeddings ->
+            if (embeddings is JsonArray) {
+                span.setAttribute("gen_ai.response.embedding.count", embeddings.size.toLong())
+                embeddings.firstOrNull()?.jsonObject?.get("values")?.jsonArray?.let { values ->
+                    span.setAttribute("gen_ai.response.embedding.dimension", values.size.toLong())
+                }
+            }
+        }
+
         body["usageMetadata"]?.let { usage ->
             usage.jsonObject["promptTokenCount"]?.jsonPrimitive?.intOrNull?.let {
                 span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
@@ -193,6 +213,9 @@ class GeminiContentGenHandler(
             }
             usage.jsonObject["totalTokenCount"]?.jsonPrimitive?.intOrNull?.let {
                 span.setAttribute("gen_ai.usage.total_tokens", it.toLong())
+            }
+            usage.jsonObject["cachedContentTokenCount"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.usage.cached_content_token_count", it.toLong())
             }
 
             /**
@@ -330,14 +353,17 @@ class GeminiContentGenHandler(
     private val mappedRequestAttributes: List<String> = listOf(
         "contents",
         "tools",
-        "generationConfig"
+        "generationConfig",
+        "cachedContent"
     )
 
     private val mappedResponseAttributes: List<String> = listOf(
         "responseId",
         "modelVersion",
         "candidates",
-        "usageMetadata"
+        "usageMetadata",
+        "embedding",
+        "embeddings"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes

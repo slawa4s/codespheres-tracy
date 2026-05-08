@@ -9,8 +9,10 @@ import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
 import org.jetbrains.ai.tracy.core.adapters.media.*
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
+import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequestBody
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.core.http.protocol.asFormData
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.ContentKind
 import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
@@ -21,12 +23,25 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 import mu.KotlinLogging
 
+/** Detected Anthropic API type and operation for a given HTTP call. */
+private data class AnthropicEndpointInfo(
+    /** Value to emit as `anthropic.api.type`. */
+    val apiType: String,
+    /** Value to emit as `gen_ai.operation.name`. */
+    val operation: String,
+    /** Value to emit as `gen_ai.output.type`, or null to omit the attribute. */
+    val outputType: String?,
+)
+
 /**
  * Tracing adapter for Anthropic Claude API.
  *
- * Parses Anthropic Messages API requests and responses to extract telemetry data including
- * model parameters, messages, tool definitions, tool calls, usage statistics, and media content.
- * Supports both text and multimodal inputs (images, documents).
+ * Parses Anthropic API requests and responses to extract telemetry data for:
+ * - **Messages** (`/v1/messages`): model parameters, messages, tool definitions, tool calls, usage, and media content.
+ * - **Count Tokens** (`/v1/messages/count_tokens`): token count from the response.
+ * - **Batches** (`/v1/messages/batches`): batch metadata and request counts.
+ * - **Files** (`/v1/files`): file metadata (id, filename, mime type, size, downloadable).
+ * - **Models** (`/v1/models`): model list metadata and per-model capability attributes.
  *
  * ## Example Usage
  * ```kotlin
@@ -42,13 +57,104 @@ import mu.KotlinLogging
  *         }
  *     """)
  * }
- * // Automatically traces request/response with tool calls and media content
  * ```
  *
- * See: [Anthropic Messages API](https://docs.claude.com/en/api/messages)
+ * See: [Anthropic API](https://docs.anthropic.com/en/api/)
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        val info = detectEndpoint(request.url, request.method)
+        span.setAttribute("anthropic.api.type", info.apiType)
+        span.setAttribute(GEN_AI_OPERATION_NAME, info.operation)
+
+        when (info.apiType) {
+            "messages", "count_tokens" -> handleMessagesRequestAttributes(span, request)
+            "batches" -> handleBatchesRequestAttributes(span, request)
+            "files" -> handleFilesRequestAttributes(span, request)
+            "models" -> handleModelsRequestAttributes(span, request)
+        }
+    }
+
+    override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
+        val info = detectEndpoint(response.url, response.requestMethod)
+        info.outputType?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it) }
+
+        val body = response.body.asJson()?.jsonObject ?: return
+
+        when (info.apiType) {
+            "messages" -> handleMessagesResponseAttributes(span, body)
+            "count_tokens" -> handleCountTokensResponseAttributes(span, body)
+            "batches" -> handleBatchesResponseAttributes(span, body)
+            "files" -> handleFilesResponseAttributes(span, body, info.operation)
+            "models" -> handleModelsResponseAttributes(span, body, info.operation)
+        }
+    }
+
+    override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
+
+    // streaming is not supported
+    override fun isStreamingRequest(request: TracyHttpRequest) = false
+    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+
+    // ── Endpoint detection ────────────────────────────────────────────────────
+
+    private fun detectEndpoint(url: TracyHttpUrl, method: String): AnthropicEndpointInfo {
+        val segments = url.pathSegments.filter { it.isNotEmpty() }
+
+        return when {
+            segments.contains("count_tokens") -> AnthropicEndpointInfo(
+                apiType = "count_tokens",
+                operation = "count_tokens",
+                outputType = null,
+            )
+
+            segments.contains("batches") -> {
+                val batchIdx = segments.indexOf("batches")
+                val hasBatchId = segments.size > batchIdx + 1
+                val operation = when {
+                    hasBatchId && segments.last() == "results" -> "batches.results"
+                    hasBatchId && method == "DELETE" -> "batches.delete"
+                    hasBatchId && method == "POST" -> "batches.cancel"
+                    hasBatchId -> "batches.retrieve"
+                    method == "GET" -> "batches.list"
+                    else -> "batches.create"
+                }
+                AnthropicEndpointInfo(apiType = "batches", operation = operation, outputType = "message_batch")
+            }
+
+            segments.contains("files") -> {
+                val fileIdx = segments.indexOf("files")
+                val hasFileId = segments.size > fileIdx + 1
+                val operation = when {
+                    hasFileId && segments.last() == "content" -> "files.content"
+                    hasFileId && method == "DELETE" -> "files.delete"
+                    hasFileId -> "files.retrieve"
+                    method == "GET" -> "files.list"
+                    else -> "files.create"
+                }
+                val outputType = when (operation) {
+                    "files.delete" -> "file_deleted"
+                    "files.list" -> null
+                    else -> "file"
+                }
+                AnthropicEndpointInfo(apiType = "files", operation = operation, outputType = outputType)
+            }
+
+            segments.contains("models") -> {
+                val modelIdx = segments.indexOf("models")
+                val hasModelId = segments.size > modelIdx + 1
+                val operation = if (hasModelId) "models.retrieve" else "models.list"
+                val outputType = if (hasModelId) "model" else null
+                AnthropicEndpointInfo(apiType = "models", operation = operation, outputType = outputType)
+            }
+
+            else -> AnthropicEndpointInfo(apiType = "messages", operation = "chat", outputType = "message")
+        }
+    }
+
+    // ── Request attribute handlers ────────────────────────────────────────────
+
+    private fun handleMessagesRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -89,7 +195,6 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
                 for ((index, message) in it.jsonArray.withIndex()) {
                     span.setAttribute("gen_ai.prompt.$index.role", message.jsonObject["role"]?.jsonPrimitive?.content)
                     val content = message.jsonObject["content"]?.toString()
-                    // treat all request messages (including assistant history) as input per policy
                     span.setAttribute("gen_ai.prompt.$index.content", content?.orRedactedInput())
                 }
             }
@@ -120,12 +225,39 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             }
         }
 
-        span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.REQUEST)
+        span.populateUnmappedAttributes(body, mappedMessagesRequestAttributes, PayloadType.REQUEST)
     }
 
-    override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
-        val body = response.body.asJson()?.jsonObject ?: return
+    private fun handleBatchesRequestAttributes(span: Span, request: TracyHttpRequest) {
+        val body = request.body.asJson()?.jsonObject ?: return
+        body["requests"]?.let { requests ->
+            if (requests is JsonArray) {
+                span.setAttribute("gen_ai.request.batch.size", requests.size.toLong())
+            }
+        }
+    }
 
+    private fun handleFilesRequestAttributes(span: Span, request: TracyHttpRequest) {
+        val formData = request.body.asFormData() ?: return
+        val filePart = formData.parts.firstOrNull { it.name == "file" } ?: return
+        filePart.filename?.let { span.setAttribute("gen_ai.request.file.filename", it) }
+        filePart.contentType?.mimeType?.let { span.setAttribute("gen_ai.request.file.mime_type", it) }
+        span.setAttribute("gen_ai.request.file.size_bytes", filePart.content.size.toLong())
+    }
+
+    private fun handleModelsRequestAttributes(span: Span, request: TracyHttpRequest) {
+        // model ID may be in the URL path for retrieve; extract if present
+        val segments = request.url.pathSegments.filter { it.isNotEmpty() }
+        val modelIdx = segments.indexOf("models")
+        if (modelIdx >= 0 && segments.size > modelIdx + 1) {
+            val modelId = segments[modelIdx + 1]
+            span.setAttribute(GEN_AI_REQUEST_MODEL, modelId)
+        }
+    }
+
+    // ── Response attribute handlers ───────────────────────────────────────────
+
+    private fun handleMessagesResponseAttributes(span: Span, body: JsonObject) {
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
         body["role"]?.let { span.setAttribute("gen_ai.response.role", it.jsonPrimitive.content) }
@@ -139,7 +271,6 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
                 when (type) {
                     "text" -> {
-                        // normal text message
                         span.setAttribute(
                             "gen_ai.completion.$index.content",
                             message.jsonObject["text"]?.jsonPrimitive?.content?.orRedactedOutput()
@@ -147,19 +278,15 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
                     }
 
                     "tool_use" -> {
-                        // tool call request by LLM
                         val toolCall = message
-                        // gen_ai.tool.call.id
                         span.setAttribute(
                             "gen_ai.completion.$index.tool.call.id",
                             toolCall.jsonObject["id"]?.jsonPrimitive?.content
                         )
-                        // gen_ai.tool.type
                         span.setAttribute(
                             "gen_ai.completion.$index.tool.call.type",
                             toolCall.jsonObject["type"]?.jsonPrimitive?.content
                         )
-                        // gen_ai.tool.name
                         span.setAttribute(
                             "gen_ai.completion.$index.tool.name",
                             toolCall.jsonObject["name"]?.jsonPrimitive?.content?.orRedactedOutput()
@@ -182,7 +309,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, listOf(it.jsonPrimitive.content))
         }
 
-        // collecting usage stats (e.g., input/output tokens)
+        // collecting usage stats
         body["usage"]?.jsonObject?.let { usage ->
             usage["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
                 span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
@@ -201,22 +328,161 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             }
         }
 
-        span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
+        span.populateUnmappedAttributes(body, mappedMessagesResponseAttributes, PayloadType.RESPONSE)
     }
 
-    override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
+    private fun handleCountTokensResponseAttributes(span: Span, body: JsonObject) {
+        body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
+        body["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
+        }
+    }
 
-    // streaming is not supported
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
-    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+    private fun handleBatchesResponseAttributes(span: Span, body: JsonObject) {
+        body["id"]?.let { span.setAttribute("gen_ai.response.batch.id", it.jsonPrimitive.content) }
+        body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
+        body["processing_status"]?.let {
+            span.setAttribute("gen_ai.response.batch.processing_status", it.jsonPrimitive.content)
+        }
+        body["created_at"]?.let {
+            span.setAttribute("gen_ai.response.batch.created_at", it.jsonPrimitive.content)
+        }
+        body["expires_at"]?.let {
+            span.setAttribute("gen_ai.response.batch.expires_at", it.jsonPrimitive.content)
+        }
+        body["request_counts"]?.jsonObject?.let { counts ->
+            counts["processing"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.processing", it.toLong())
+            }
+            counts["succeeded"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it.toLong())
+            }
+            counts["errored"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.errored", it.toLong())
+            }
+            counts["canceled"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.canceled", it.toLong())
+            }
+            counts["expired"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.request_counts.expired", it.toLong())
+            }
+        }
+        // list endpoint: data array with list metadata
+        body["data"]?.let { data ->
+            if (data is JsonArray) {
+                span.setAttribute("gen_ai.response.list.count", data.size.toLong())
+            }
+        }
+        body["has_more"]?.let {
+            span.setAttribute("gen_ai.response.list.has_more", it.jsonPrimitive.booleanOrNull ?: false)
+        }
+        body["first_id"]?.let {
+            span.setAttribute("gen_ai.response.list.first_id", it.jsonPrimitive.contentOrNull ?: "")
+        }
+        body["last_id"]?.let {
+            span.setAttribute("gen_ai.response.list.last_id", it.jsonPrimitive.contentOrNull ?: "")
+        }
+    }
+
+    private fun handleFilesResponseAttributes(span: Span, body: JsonObject, operation: String) {
+        when (operation) {
+            "files.delete" -> {
+                // delete response: {"id": "...", "deleted": true}
+                body["id"]?.let { span.setAttribute("gen_ai.response.file.id", it.jsonPrimitive.content) }
+            }
+            "files.list" -> {
+                body["data"]?.let { data ->
+                    if (data is JsonArray) {
+                        span.setAttribute("gen_ai.response.list.count", data.size.toLong())
+                    }
+                }
+                body["has_more"]?.let {
+                    span.setAttribute("gen_ai.response.list.has_more", it.jsonPrimitive.booleanOrNull ?: false)
+                }
+                body["first_id"]?.let {
+                    span.setAttribute("gen_ai.response.list.first_id", it.jsonPrimitive.contentOrNull ?: "")
+                }
+                body["last_id"]?.let {
+                    span.setAttribute("gen_ai.response.list.last_id", it.jsonPrimitive.contentOrNull ?: "")
+                }
+            }
+            else -> {
+                // create or retrieve: file object
+                body["id"]?.let { span.setAttribute("gen_ai.response.file.id", it.jsonPrimitive.content) }
+                body["filename"]?.let {
+                    span.setAttribute("gen_ai.response.file.filename", it.jsonPrimitive.content)
+                }
+                body["mime_type"]?.let {
+                    span.setAttribute("gen_ai.response.file.mime_type", it.jsonPrimitive.content)
+                }
+                body["size"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.file.size_bytes", it.toLong())
+                }
+                body["created_at"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.file.created_at", it.toLong())
+                }
+                body["downloadable"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.file.downloadable", it)
+                }
+            }
+        }
+    }
+
+    private fun handleModelsResponseAttributes(span: Span, body: JsonObject, operation: String) {
+        when (operation) {
+            "models.list" -> {
+                body["data"]?.let { data ->
+                    if (data is JsonArray) {
+                        span.setAttribute("gen_ai.response.list.count", data.size.toLong())
+                    }
+                }
+                body["has_more"]?.let {
+                    span.setAttribute("gen_ai.response.list.has_more", it.jsonPrimitive.booleanOrNull ?: false)
+                }
+                body["first_id"]?.let {
+                    span.setAttribute("gen_ai.response.list.first_id", it.jsonPrimitive.contentOrNull ?: "")
+                }
+                body["last_id"]?.let {
+                    span.setAttribute("gen_ai.response.list.last_id", it.jsonPrimitive.contentOrNull ?: "")
+                }
+            }
+            "models.retrieve" -> {
+                body["id"]?.let {
+                    span.setAttribute(GEN_AI_RESPONSE_MODEL, it.jsonPrimitive.content)
+                    span.setAttribute("gen_ai.response.model.id", it.jsonPrimitive.content)
+                }
+                body["display_name"]?.let {
+                    span.setAttribute("gen_ai.response.model.display_name", it.jsonPrimitive.content)
+                }
+                body["created_at"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.created_at", it.toLong())
+                }
+                body["max_input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.max_input_tokens", it.toLong())
+                }
+                body["max_output_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.max_output_tokens", it.toLong())
+                }
+                body["capabilities"]?.jsonObject?.let { caps ->
+                    caps["batch"]?.jsonPrimitive?.booleanOrNull?.let {
+                        span.setAttribute("gen_ai.response.model.capabilities.batch", it)
+                    }
+                    caps["citations"]?.jsonPrimitive?.booleanOrNull?.let {
+                        span.setAttribute("gen_ai.response.model.capabilities.citations", it)
+                    }
+                    caps["vision"]?.jsonPrimitive?.booleanOrNull?.let {
+                        span.setAttribute("gen_ai.response.model.capabilities.vision", it)
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Media content helpers (for messages endpoint) ─────────────────────────
 
     /**
      * Parses content of the `messages` field when its type is
      * either `ImageBlockParam` or `DocumentBlockParam`.
-     *
-     * The supported `source` fields are:
-     *   1. Images (`ImageBlockParam`): `Base64ImageSource`, `URLImageSource`
-     *   2. Documents (`DocumentBlockParam`): `Base64PDFSource`, `URLPDFSource`, `ContentBlockSource` with `ImageBlockParam`
      *
      * See [Messages API Docs](https://platform.claude.com/docs/en/api/messages/create)
      */
@@ -231,7 +497,6 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             val supportedMessageTypes = listOf("image", "document")
 
             for (message in messages) {
-                // message: { content: [] }
                 if (message !is JsonObject || message["content"] !is JsonArray) {
                     continue
                 }
@@ -243,11 +508,6 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
                         continue
                     }
 
-                    // source is either of:
-                    //  1. source: { data, media_type, type: "base64" }
-                    //  2. source: { url, type: "url" }
-                    //  3. source: { content: [{ type: "image", source: {...} }, ...] }
-                    // see: https://platform.claude.com/docs/en/api/messages/create
                     val source = part.jsonObject["source"]?.jsonObject ?: continue
                     val contentParts = parseSource(messageType, source).map {
                         MediaContentPart(it)
@@ -260,30 +520,14 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         return MediaContent(parts)
     }
 
-    /**
-     * Parses the `source` field of message types:
-     *   1. `ImageBlockParam`: both `Base64ImageSource` and `URLImageSource`.
-     *   2. `DocumentBlockParam`: `Base64PDFSource`, `URLPDFSource`, and `ContentBlockSource`.
-     *
-     * See [Messages API Docs](https://platform.claude.com/docs/en/api/messages/create)
-     */
     private fun parseSource(messageType: String, source: JsonObject): List<Resource> {
         val sourceType = source["type"]?.jsonPrimitive?.content ?: return emptyList()
-        val resources = when (sourceType) {
-            "url" -> {
-                val url = parseUrl(messageType, source) ?: return emptyList()
-                listOf(url)
-            }
-
-            "base64" -> {
-                val base64 = parseBase64(messageType, source) ?: return emptyList()
-                listOf(base64)
-            }
-
+        return when (sourceType) {
+            "url" -> listOfNotNull(parseUrl(messageType, source))
+            "base64" -> listOfNotNull(parseBase64(messageType, source))
             "content" -> parseContent(messageType, source)
             else -> emptyList()
         }
-        return resources
     }
 
     private fun parseUrl(messageType: String, source: JsonObject): Resource.Url? {
@@ -292,7 +536,6 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             logger.warn { "Message with type '$messageType' has no URL source" }
             return null
         }
-        // add URL resource
         return Resource.Url(url)
     }
 
@@ -305,7 +548,6 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             return null
         }
 
-        // add base64 resource
         return Resource.Base64(data, mediaType)
     }
 
@@ -317,28 +559,21 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             return emptyList()
         }
 
-        // content is an array of `ContentBlockSourceContent`.
-        // See: https://platform.claude.com/docs/en/api/messages#content_block_source_content
-        val resources: List<Resource> = buildList {
+        return buildList {
             for (param in content.jsonArray) {
                 val type = param.jsonObject["type"]?.jsonPrimitive?.content ?: continue
-                // ImageBlockParam
                 if (type == "image") {
-                    // the image is either Base64ImageSource or URLImageSource
                     val imageSource = param.jsonObject["source"]?.jsonObject ?: continue
-                    val resource = parseSource(messageType, imageSource)
-                    addAll(resource)
+                    addAll(parseSource(messageType, imageSource))
                 }
             }
         }
-
-        return resources
     }
 
     private val extractor: MediaContentExtractor = MediaContentExtractorImpl()
 
     // https://docs.claude.com/en/api/messages
-    private val mappedRequestAttributes: List<String> = listOf(
+    private val mappedMessagesRequestAttributes: List<String> = listOf(
         "temperature",
         "model",
         "max_tokens",
@@ -351,7 +586,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "tools"
     )
 
-    private val mappedResponseAttributes: List<String> = listOf(
+    private val mappedMessagesResponseAttributes: List<String> = listOf(
         "id",
         "type",
         "role",
@@ -360,8 +595,6 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "stop_reason",
         "usage"
     )
-
-    private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
 
     private val logger = KotlinLogging.logger {}
 }
