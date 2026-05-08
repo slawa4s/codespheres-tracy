@@ -112,7 +112,7 @@ internal class BatchesAnthropicApiEndpointHandler : EndpointApiHandler {
      * - `POST   .../batches/{id}/cancel`  → `"batches.cancel"`
      * - `DELETE .../batches/{id}`         → `"batches.delete"`
      */
-    private fun detectOperation(url: TracyHttpUrl, method: String): String {
+    internal fun detectOperation(url: TracyHttpUrl, method: String): String {
         val segments = url.pathSegments
         val batchesIndex = segments.indexOf("batches")
         if (batchesIndex == -1) {
