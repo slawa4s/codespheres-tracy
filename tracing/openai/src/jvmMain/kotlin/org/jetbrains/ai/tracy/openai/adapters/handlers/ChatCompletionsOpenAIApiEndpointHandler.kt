@@ -9,8 +9,7 @@ import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.sdk.trace.ReadableSpan
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.populateUnmappedAttributes
@@ -33,6 +32,18 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+
+        (body["max_completion_tokens"] ?: body["max_tokens"])?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it.toLong())
+        }
+
+        body["tool_choice"]?.let {
+            val content = when (it) {
+                is JsonPrimitive -> it.content
+                else -> it.toString()
+            }
+            span.setAttribute("tracy.request.tool_choice", content)
+        }
 
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -123,14 +134,15 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
 
+        val finishReasons = mutableListOf<String>()
+
         body["choices"]?.let { choices ->
             for ((index, choice) in choices.jsonArray.withIndex()) {
                 val index = choice.jsonObject["index"]?.jsonPrimitive?.intOrNull ?: index
 
-                span.setAttribute(
-                    "gen_ai.completion.$index.finish_reason",
-                    choice.jsonObject["finish_reason"]?.jsonPrimitive?.content
-                )
+                val finishReason = choice.jsonObject["finish_reason"]?.jsonPrimitive?.content
+                span.setAttribute("gen_ai.completion.$index.finish_reason", finishReason)
+                finishReason?.let { finishReasons.add(it) }
 
                 choice.jsonObject["message"]?.jsonObject?.let { message ->
                     val role = message.jsonObject["role"]?.jsonPrimitive?.content
@@ -179,6 +191,16 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             }
         }
 
+        if (finishReasons.isNotEmpty()) {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons)
+        }
+
+        body["service_tier"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("openai.response.service_tier", it)
+        }
+        body["system_fingerprint"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("openai.response.system_fingerprint", it)
+        }
         body["usage"]?.let { usage ->
             setUsageAttributes(span, usage.jsonObject)
         }
@@ -327,13 +349,18 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "model",
         "tools",
         "choices",
-        "temperature"
+        "temperature",
+        "max_completion_tokens",
+        "max_tokens",
+        "tool_choice"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
     private val mappedResponseAttributes: List<String> = listOf(
         "choices",
-        "usage"
+        "usage",
+        "service_tier",
+        "system_fingerprint"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes

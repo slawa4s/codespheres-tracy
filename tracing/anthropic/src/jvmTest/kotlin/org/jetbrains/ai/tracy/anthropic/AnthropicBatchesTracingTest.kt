@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 /**
  * Unit tests for Anthropic Batches API tracing using MockWebServer.
@@ -266,6 +267,12 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertEquals("anthropic", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
             // gen_ai.operation.name must be set on error spans using only the URL + HTTP method.
             assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            // gen_ai.output.type must NOT be set on error spans — the early guard in
+            // BatchesAnthropicApiEndpointHandler.handleResponseAttributes prevents it.
+            assertNull(
+                trace.attributes[AttributeKey.stringKey("gen_ai.output.type")],
+                "gen_ai.output.type must not be set on batch error spans"
+            )
         }
     }
 
@@ -324,6 +331,50 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             // error.type from body takes precedence; value should match the body, not the fallback
             assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("error.type")])
             assertEquals("model not found", trace.attributes[AttributeKey.stringKey("gen_ai.error.message")])
+        }
+    }
+
+    // ---- span-attribute fallback: api type read from span when ThreadLocal unavailable -----------
+
+    /**
+     * Verifies that `getResponseErrorBodyAttributes` reads `anthropic.api.type` from the span
+     * (written by `handleRequestAttributes`) rather than relying solely on the ThreadLocal.
+     *
+     * This is tested indirectly: the span attribute is written first by `handleRequestAttributes`,
+     * then `getResponseErrorBodyAttributes` can read it back. The redirect scenario in the next
+     * test validates the URL-fallback path; this test validates the overall attribute presence
+     * after the span-attribute lookup path is exercised.
+     */
+    @Test
+    fun `test batch error span has anthropic api type set from span attribute fallback`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"detail": "error"}""")
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .addHeader("x-api-key", "test-key")
+                    .post("""{"requests": []}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            // anthropic.api.type is set by handleRequestAttributes (before the request is sent)
+            // and is still present on the span when getResponseErrorBodyAttributes runs.
+            assertEquals(
+                "batches",
+                trace.attributes[AttributeKey.stringKey("anthropic.api.type")],
+                "anthropic.api.type must be present from span attribute fallback"
+            )
+            assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
         }
     }
 

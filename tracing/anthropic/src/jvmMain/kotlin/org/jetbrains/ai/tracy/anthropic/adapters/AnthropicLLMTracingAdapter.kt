@@ -12,6 +12,7 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.BatchesAnthropicApiEndpointHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.CountTokensAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.FilesAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.ModelsAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
@@ -56,6 +57,7 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     private val batchesHandler = BatchesAnthropicApiEndpointHandler()
+    private val countTokensHandler = CountTokensAnthropicApiEndpointHandler()
     private val filesHandler = FilesAnthropicApiEndpointHandler()
     private val modelsHandler = ModelsAnthropicApiEndpointHandler()
 
@@ -74,6 +76,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         // Detect and persist the API type so error-response handling doesn't need to re-parse the
         // URL (response.url may differ from request.url after OkHttp redirects).
         val apiType = when {
+            isCountTokensUrl(request.url) -> "count_tokens"
             isBatchUrl(request.url) -> "batches"
             isFilesUrl(request.url) -> "files"
             isModelsUrl(request.url) -> "models"
@@ -81,6 +84,10 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
         requestApiTypeThreadLocal.set(apiType)
 
+        if (isCountTokensUrl(request.url)) {
+            countTokensHandler.handleRequestAttributes(span, request)
+            return
+        }
         if (isBatchUrl(request.url)) {
             batchesHandler.handleRequestAttributes(span, request)
             return
@@ -175,6 +182,10 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
         requestApiTypeThreadLocal.remove()
 
+        if (isCountTokensUrl(response.url)) {
+            countTokensHandler.handleResponseAttributes(span, response)
+            return
+        }
         if (isBatchUrl(response.url)) {
             batchesHandler.handleResponseAttributes(span, response)
             return
@@ -295,12 +306,18 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     override fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
         super.getResponseErrorBodyAttributes(span, response)
 
-        // Prefer the API type stored during request processing. Fall back to URL re-detection only
-        // when getRequestBodyAttributes was never called (e.g. client-side validation failure before
-        // the request was sent) or when the ThreadLocal was already cleared.
-        // After OkHttp follows a redirect, response.url reflects the final URL and may no longer
-        // contain the original path segment (e.g. "batches"), so re-parsing alone is not reliable.
-        val apiType = requestApiTypeThreadLocal.get() ?: when {
+        // Prefer the API type already written to the span during request processing (thread-safe,
+        // survives async OkHttp dispatch). Fall back to the ThreadLocal stored during request
+        // processing, then to URL re-detection. After OkHttp follows a redirect, response.url
+        // reflects the final URL and may no longer contain the original path segment (e.g.
+        // "batches"), so re-parsing alone is not reliable; the span attribute is the most robust
+        // source because it was set synchronously in handleRequestAttributes.
+        val spanApiType = (span as? ReadableSpan)
+            ?.toSpanData()
+            ?.attributes
+            ?.get(AttributeKey.stringKey("anthropic.api.type"))
+        val apiType = spanApiType ?: requestApiTypeThreadLocal.get() ?: when {
+            isCountTokensUrl(response.url) -> "count_tokens"
             isBatchUrl(response.url) -> "batches"
             isFilesUrl(response.url) -> "files"
             isModelsUrl(response.url) -> "models"
@@ -357,6 +374,9 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         // TODO: support streaming for anthropic `messages`
         return sseHandlingUnsupported()
     }
+
+    /** Returns `true` when the URL targets the Count Tokens API (contains a `count_tokens` path segment). */
+    private fun isCountTokensUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("count_tokens")
 
     /** Returns `true` when the URL targets the Message Batches API (contains a `batches` path segment). */
     private fun isBatchUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("batches")
