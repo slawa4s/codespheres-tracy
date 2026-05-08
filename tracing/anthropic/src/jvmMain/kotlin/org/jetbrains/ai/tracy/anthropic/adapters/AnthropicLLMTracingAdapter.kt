@@ -317,7 +317,17 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             span.setAttribute("anthropic.api.type", apiType)
             span.setAttribute("gen_ai.provider.name", GenAiSystemIncubatingValues.ANTHROPIC)
             if (apiType == "batches") {
-                span.setAttribute(GEN_AI_OPERATION_NAME, batchesHandler.detectOperation(response.url, response.requestMethod))
+                // Preserve the operation name already written to the span during request processing.
+                // Calling detectOperation() on the response URL is unreliable: after a redirect the
+                // URL may no longer contain the "batches" segment, and a redirect-rewritten HTTP
+                // method (e.g. POST→GET after a 302) would produce the wrong operation name.
+                val existingOpName = (span as? ReadableSpan)
+                    ?.toSpanData()
+                    ?.attributes
+                    ?.get(AttributeKey.stringKey("gen_ai.operation.name"))
+                if (existingOpName.isNullOrBlank()) {
+                    span.setAttribute(GEN_AI_OPERATION_NAME, batchesHandler.detectOperation(response.url, response.requestMethod))
+                }
             }
         }
 

@@ -430,6 +430,66 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
         }
     }
 
+    /**
+     * Verifies that `gen_ai.operation.name` set during request processing is NOT overwritten by
+     * a redirect whose final URL and method would cause `detectOperation()` to return a different
+     * (incorrect) value.
+     *
+     * Scenario:
+     *  - Client POSTs to `/v1/messages/batches` → `handleRequestAttributes` sets
+     *    `gen_ai.operation.name = "batches.create"`.
+     *  - Server responds with 302 redirecting to `/v1/messages/batches/<id>`.
+     *  - OkHttp follows the redirect as GET (POST→GET after 302).
+     *  - Server responds with 400 at the redirect target.
+     *  - Without the fix, `detectOperation(url="/v1/messages/batches/<id>", method="GET")` would
+     *    return `"batches.retrieve"`, overwriting the correct value.
+     *  - With the fix, the span attribute set at request time is preserved.
+     */
+    @Test
+    fun `test batch create operation name is preserved after redirect that changes URL and method`() = runTest {
+        withMockServer { server ->
+            val batchId = "msgbatch_redirect_test"
+            // First response: 302 redirect from /v1/messages/batches to /v1/messages/batches/{id}
+            // OkHttp will re-issue the request as GET (POST→GET on 302 by default)
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(302)
+                    .setHeader("Location", server.url("/v1/messages/batches/$batchId").toString())
+            )
+            // Second response: 400 at the redirect target (URL = /v1/messages/batches/{id}, method = GET)
+            // detectOperation() on this URL+method would return "batches.retrieve" without the fix.
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"detail": "error at redirect target"}""")
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .addHeader("x-api-key", "test-key")
+                    .post("""{"requests": []}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(StatusCode.ERROR, trace.status.statusCode)
+            // gen_ai.operation.name must be preserved from request time, not overwritten
+            // by detectOperation() on the redirect target URL (which would give "batches.retrieve").
+            assertEquals(
+                "batches.create",
+                trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")],
+                "gen_ai.operation.name must not be overwritten by detectOperation() after redirect"
+            )
+            assertEquals("batches", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
+            assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("error.type")])
+        }
+    }
+
     companion object {
         private const val BATCH_ID = "msgbatch_01HkcTjaV5uDC8jWR4ZsDV8d"
 
