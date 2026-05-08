@@ -24,6 +24,7 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MAX_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_FINISH_REASONS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
@@ -52,6 +53,18 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
         span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
         body["stream"]?.jsonPrimitive?.content?.toBooleanStrictOrNull()?.let { if (it) span.setAttribute("gen_ai.request.stream", true) }
+
+        (body["max_completion_tokens"] ?: body["max_tokens"])?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it.toLong())
+        }
+
+        body["tool_choice"]?.let {
+            val content = when (it) {
+                is JsonPrimitive -> it.content
+                else -> it.toString()
+            }
+            span.setAttribute("tracy.request.tool_choice", content)
+        }
 
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -93,6 +106,12 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                         span.setAttribute("gen_ai.tool.$index.strict", strict)
                     }
                 }
+
+                // flat alias: first tool's name and full tools definitions array
+                tools.jsonArray.firstOrNull()?.jsonObject?.get("function")?.jsonObject?.get("name")?.jsonPrimitive?.content?.let {
+                    span.setAttribute("gen_ai.tool.name", it.orRedactedInput())
+                }
+                span.setAttribute("gen_ai.tool.definitions", tools.toString().orRedactedInput())
             }
         }
 
@@ -337,7 +356,10 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "model",
         "tools",
         "choices",
-        "temperature"
+        "temperature",
+        "max_completion_tokens",
+        "max_tokens",
+        "tool_choice"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
