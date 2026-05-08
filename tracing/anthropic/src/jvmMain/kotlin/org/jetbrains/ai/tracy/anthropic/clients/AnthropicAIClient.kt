@@ -10,6 +10,9 @@ import org.jetbrains.ai.tracy.core.interceptors.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.interceptors.patchOpenAICompatibleClient
 import com.anthropic.client.AnthropicClient
+import mu.KotlinLogging
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Instruments an Anthropic Claude client with OpenTelemetry tracing capabilities **inplace**.
@@ -124,8 +127,16 @@ import com.anthropic.client.AnthropicClient
  * @see TracingManager.traceSensitiveContent
  */
 fun instrument(client: AnthropicClient) {
-    patchOpenAICompatibleClient(
-        client = client,
-        interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
-    )
+    try {
+        patchOpenAICompatibleClient(
+            client = client,
+            interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+        )
+    } catch (e: Exception) {
+        logger.warn(e) {
+            "Failed to instrument AnthropicClient via reflection — no tracing spans will be emitted. " +
+            "This typically indicates an incompatible Anthropic SDK version. " +
+            "Cause: ${e.javaClass.simpleName}: ${e.message}"
+        }
+    }
 }

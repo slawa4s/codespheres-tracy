@@ -67,7 +67,8 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             return
         }
 
-        // Standard Messages API: set the operation name
+        // Standard Messages API: set the API type and operation name
+        span.setAttribute("anthropic.api.type", "messages")
         span.setAttribute("gen_ai.operation.name", "chat")
 
         val body = request.body.asJson()?.jsonObject ?: return
@@ -306,6 +307,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         event: SseEvent,
         index: Long
     ): Result<Unit> {
+        // TODO: support streaming for anthropic `messages`
         return sseHandlingUnsupported()
     }
 

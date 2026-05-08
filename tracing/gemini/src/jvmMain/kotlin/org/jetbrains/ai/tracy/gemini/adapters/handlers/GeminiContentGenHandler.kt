@@ -34,6 +34,7 @@ class GeminiContentGenHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("gemini.api.type", "models")
         // See: https://ai.google.dev/api/caching#Content
         val body = request.body.asJson()?.jsonObject ?: return
 
@@ -224,6 +225,7 @@ class GeminiContentGenHandler(
         event: SseEvent,
         index: Long
     ): Result<Unit> {
+        // TODO: support streaming
         return sseHandlingUnsupported()
     }
 
