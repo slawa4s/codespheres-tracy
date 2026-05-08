@@ -117,12 +117,18 @@ class FilesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             assertEquals("files.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.file.id")])
+            assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.response.file.id")])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals(filename, trace.attributes[AttributeKey.stringKey("tracy.file.filename")])
+            assertEquals(filename, trace.attributes[AttributeKey.stringKey("tracy.response.file.filename")])
             assertEquals(purpose, trace.attributes[AttributeKey.stringKey("tracy.file.purpose")])
+            assertEquals(purpose, trace.attributes[AttributeKey.stringKey("tracy.response.file.purpose")])
             assertEquals(bytes, trace.attributes[AttributeKey.longKey("tracy.file.bytes")])
+            assertEquals(bytes, trace.attributes[AttributeKey.longKey("tracy.response.file.size_bytes")])
             assertEquals("uploaded", trace.attributes[AttributeKey.stringKey("tracy.file.status")])
+            assertEquals("uploaded", trace.attributes[AttributeKey.stringKey("tracy.response.file.status")])
             assertNotNull(trace.attributes[AttributeKey.longKey("tracy.file.created_at")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.response.file.created_at")])
         }
     }
 
@@ -156,6 +162,20 @@ class FilesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val sizeBytes = trace.attributes[AttributeKey.longKey("tracy.request.file.size_bytes")]
             assertNotNull(sizeBytes, "File size_bytes should be traced from request form data")
             assertTrue(sizeBytes!! > 0L, "File size_bytes should be positive")
+            // Both request purpose attribute names should be set
+            assertNotNull(
+                trace.attributes[AttributeKey.stringKey("tracy.request.file.purpose")],
+                "tracy.request.file.purpose should be set"
+            )
+            assertNotNull(
+                trace.attributes[AttributeKey.stringKey("tracy.request.purpose")],
+                "tracy.request.purpose should be set"
+            )
+            assertEquals(
+                trace.attributes[AttributeKey.stringKey("tracy.request.file.purpose")],
+                trace.attributes[AttributeKey.stringKey("tracy.request.purpose")],
+                "Both request purpose attributes should have the same value"
+            )
         }
     }
 
@@ -221,7 +241,9 @@ class FilesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals("files.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals("files", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.file.id")])
+            assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.response.file.id")])
             assertNotNull(trace.attributes[AttributeKey.longKey("tracy.file.created_at")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.response.file.created_at")])
         }
     }
 
@@ -271,7 +293,9 @@ class FilesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals("files.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals("files", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.file.id")])
+            assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.response.file.id")])
             assertEquals(true, trace.attributes[AttributeKey.booleanKey("tracy.file.deleted")])
+            assertEquals(true, trace.attributes[AttributeKey.booleanKey("tracy.response.deleted")])
         }
     }
 

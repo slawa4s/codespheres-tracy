@@ -82,7 +82,9 @@ internal class FilesOpenAIApiEndpointHandler : EndpointApiHandler {
                             }
                         }
                         "purpose" -> {
-                            span.setAttribute("tracy.request.file.purpose", part.content.toString(charset))
+                            val purposeValue = part.content.toString(charset)
+                            span.setAttribute("tracy.request.file.purpose", purposeValue)
+                            span.setAttribute("tracy.request.purpose", purposeValue)
                         }
                     }
                 }
@@ -123,9 +125,15 @@ internal class FilesOpenAIApiEndpointHandler : EndpointApiHandler {
 
             FileRoute.DELETE -> {
                 // Response: FileDeleted { id, deleted, object: "file.deleted" }
-                body["id"]?.let { span.setAttribute("tracy.file.id", it.jsonPrimitive.content) }
+                body["id"]?.let {
+                    val id = it.jsonPrimitive.content
+                    span.setAttribute("tracy.file.id", id)
+                    span.setAttribute("tracy.response.file.id", id)
+                }
                 body["deleted"]?.let {
-                    span.setAttribute("tracy.file.deleted", it.jsonPrimitive.boolean)
+                    val deleted = it.jsonPrimitive.boolean
+                    span.setAttribute("tracy.file.deleted", deleted)
+                    span.setAttribute("tracy.response.deleted", deleted)
                 }
             }
 
@@ -139,15 +147,32 @@ internal class FilesOpenAIApiEndpointHandler : EndpointApiHandler {
                 body["id"]?.let {
                     val id = it.jsonPrimitive.content
                     span.setAttribute("tracy.file.id", id)
+                    span.setAttribute("tracy.response.file.id", id)
                     span.setAttribute(GEN_AI_RESPONSE_ID, id)
                 }
-                body["filename"]?.let { span.setAttribute("tracy.file.filename", it.jsonPrimitive.content) }
-                body["purpose"]?.let { span.setAttribute("tracy.file.purpose", it.jsonPrimitive.content) }
-                body["bytes"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.file.bytes", it) }
+                body["filename"]?.let {
+                    val filename = it.jsonPrimitive.content
+                    span.setAttribute("tracy.file.filename", filename)
+                    span.setAttribute("tracy.response.file.filename", filename)
+                }
+                body["purpose"]?.let {
+                    val purpose = it.jsonPrimitive.content
+                    span.setAttribute("tracy.file.purpose", purpose)
+                    span.setAttribute("tracy.response.file.purpose", purpose)
+                }
+                body["bytes"]?.jsonPrimitive?.longOrNull?.let {
+                    span.setAttribute("tracy.file.bytes", it)
+                    span.setAttribute("tracy.response.file.size_bytes", it)
+                }
                 body["created_at"]?.jsonPrimitive?.longOrNull?.let {
                     span.setAttribute("tracy.file.created_at", it)
+                    span.setAttribute("tracy.response.file.created_at", it)
                 }
-                body["status"]?.let { span.setAttribute("tracy.file.status", it.jsonPrimitive.content) }
+                body["status"]?.let {
+                    val status = it.jsonPrimitive.content
+                    span.setAttribute("tracy.file.status", status)
+                    span.setAttribute("tracy.response.file.status", status)
+                }
             }
         }
     }
