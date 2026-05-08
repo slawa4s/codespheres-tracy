@@ -5,11 +5,15 @@
 
 package org.jetbrains.ai.tracy.anthropic.clients
 
+import com.anthropic.client.AnthropicClient
+import com.anthropic.services.blocking.messages.BatchService
+import mu.KotlinLogging
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
 import org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.patchOpenAICompatibleClient
-import com.anthropic.client.AnthropicClient
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Instruments an Anthropic Claude client with OpenTelemetry tracing capabilities **inplace**.
@@ -128,4 +132,91 @@ fun instrument(client: AnthropicClient) {
         client = client,
         interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
     )
+    wrapBatchService(client)
+}
+
+/**
+ * Uses reflection to locate the [com.anthropic.services.blocking.messages.BatchService] held
+ * inside the client's messages-service lazy delegate and replaces it with an
+ * [AnthropicBatchesServiceWrapper].
+ *
+ * This is needed because the Anthropic SDK validates the `requests` array before issuing any HTTP
+ * call (e.g. an empty list is rejected client-side), so Tracy's OkHttp-level interceptor never
+ * fires in those cases.  By wrapping at the method level we ensure a span is always emitted.
+ *
+ * The replacement is idempotent: if the delegate already holds an [AnthropicBatchesServiceWrapper]
+ * (from a previous `instrument()` call) the function returns immediately.
+ */
+private fun wrapBatchService(client: AnthropicClient) {
+    try {
+        // Resolve the base URL from ClientOptions so the wrapper can record server.address/port.
+        val clientOptions = getReflectiveField(client, "clientOptions")
+        val baseUrl = getReflectiveFieldOrNull(clientOptions, "baseUrl") as? String ?: "https://api.anthropic.com"
+
+        // Force-initialise the lazy messages-service delegate and obtain the concrete instance.
+        val messagesDelegate = getReflectiveField(client, "messages\$delegate") as Lazy<*>
+        val messagesService = messagesDelegate.value ?: return
+
+        // Force-initialise the lazy batches-service delegate and obtain the concrete instance.
+        val batchesDelegate = getReflectiveField(messagesService, "batches\$delegate") as Lazy<*>
+        val batchService = batchesDelegate.value as? BatchService ?: return
+
+        // Idempotency: skip if already wrapped.
+        if (batchService is AnthropicBatchesServiceWrapper) return
+
+        val wrapper = AnthropicBatchesServiceWrapper(batchService, baseUrl)
+        val wrappedDelegate = object : Lazy<BatchService> {
+            override val value: BatchService = wrapper
+            override fun isInitialized(): Boolean = true
+        }
+        setReflectiveField(messagesService, "batches\$delegate", wrappedDelegate)
+    } catch (e: Exception) {
+        logger.warn(e) {
+            "Tracy: failed to wrap BatchService; client-side validation errors will not be traced. " +
+                "Client type: ${(client as Any)::class.qualifiedName}"
+        }
+    }
+}
+
+private fun getReflectiveField(instance: Any, fieldName: String): Any {
+    var cls: Class<*>? = instance.javaClass
+    while (cls != null) {
+        try {
+            val field = cls.getDeclaredField(fieldName)
+            field.isAccessible = true
+            return field.get(instance) ?: throw IllegalStateException("Field '$fieldName' is null in ${instance.javaClass.name}")
+        } catch (_: NoSuchFieldException) {
+            cls = cls.superclass
+        }
+    }
+    throw NoSuchFieldException("Field '$fieldName' not found in ${instance.javaClass.name}")
+}
+
+private fun getReflectiveFieldOrNull(instance: Any, fieldName: String): Any? {
+    var cls: Class<*>? = instance.javaClass
+    while (cls != null) {
+        try {
+            val field = cls.getDeclaredField(fieldName)
+            field.isAccessible = true
+            return field.get(instance)
+        } catch (_: NoSuchFieldException) {
+            cls = cls.superclass
+        }
+    }
+    return null
+}
+
+private fun setReflectiveField(instance: Any, fieldName: String, value: Any?) {
+    var cls: Class<*>? = instance.javaClass
+    while (cls != null) {
+        try {
+            val field = cls.getDeclaredField(fieldName)
+            field.isAccessible = true
+            field.set(instance, value)
+            return
+        } catch (_: NoSuchFieldException) {
+            cls = cls.superclass
+        }
+    }
+    throw NoSuchFieldException("Field '$fieldName' not found in ${instance.javaClass.name}")
 }
