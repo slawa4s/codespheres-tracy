@@ -10,6 +10,7 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPER
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
@@ -85,6 +86,15 @@ internal class ModelsAnthropicApiEndpointHandler : EndpointApiHandler {
 
         val body = response.body.asJson()?.jsonObject ?: return
 
+        if (modelAlias == null) {
+            // List operation: extract pagination attributes from the response envelope
+            body["data"]?.let { if (it is JsonArray) span.setAttribute("gen_ai.response.list.count", it.size.toLong()) }
+            body["has_more"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.list.has_more", it) }
+            body["first_id"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.list.first_id", it) }
+            body["last_id"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.list.last_id", it) }
+            return
+        }
+
         // Versioned model id (e.g., "claude-haiku-4-5-20251001") → gen_ai.response.id + gen_ai.response.model.id
         body["id"]?.jsonPrimitive?.content?.let { id ->
             span.setAttribute(GEN_AI_RESPONSE_ID, id)
@@ -93,9 +103,7 @@ internal class ModelsAnthropicApiEndpointHandler : EndpointApiHandler {
 
         // Set gen_ai.response.model to the URL alias so it aligns with gen_ai.request.model
         // (the caller's alias, not the versioned id returned by the API)
-        if (modelAlias != null) {
-            span.setAttribute(GEN_AI_RESPONSE_MODEL, modelAlias)
-        }
+        span.setAttribute(GEN_AI_RESPONSE_MODEL, modelAlias)
 
         // display_name → gen_ai.response.model.display_name
         body["display_name"]?.jsonPrimitive?.content?.let {
