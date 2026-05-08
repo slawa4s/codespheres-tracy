@@ -391,7 +391,7 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
         val trace = traces.first()
         // generateContent URL must produce "generateContent" operation, not "embedContent"
         assertEquals("generateContent", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-        assertNull(trace.attributes[AttributeKey.stringKey("gemini.api.type")])
+        assertEquals("models", trace.attributes[AttributeKey.stringKey("gemini.api.type")])
     }
 
     @Test
