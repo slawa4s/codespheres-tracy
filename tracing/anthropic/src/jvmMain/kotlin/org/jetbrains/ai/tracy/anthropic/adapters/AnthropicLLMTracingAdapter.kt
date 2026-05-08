@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.anthropic.adapters
 
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.BatchesAnthropicApiEndpointHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.FilesAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.ModelsAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
@@ -55,6 +56,7 @@ import mu.KotlinLogging
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     private val batchesHandler = BatchesAnthropicApiEndpointHandler()
     private val modelsHandler = ModelsAnthropicApiEndpointHandler()
+    private val filesHandler = FilesAnthropicApiEndpointHandler()
 
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
         if (isBatchUrl(request.url)) {
@@ -63,6 +65,10 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
         if (isModelsUrl(request.url)) {
             modelsHandler.handleRequestAttributes(span, request)
+            return
+        }
+        if (isFilesUrl(request.url)) {
+            filesHandler.handleRequestAttributes(span, request)
             return
         }
 
@@ -151,6 +157,10 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
         if (isModelsUrl(response.url)) {
             modelsHandler.handleResponseAttributes(span, response)
+            return
+        }
+        if (isFilesUrl(response.url)) {
+            filesHandler.handleResponseAttributes(span, response)
             return
         }
 
@@ -360,6 +370,9 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     /** Returns `true` when the URL targets the Models API (contains a `models` path segment). */
     private fun isModelsUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("models")
+
+    /** Returns `true` when the URL targets the Files API (contains a `files` path segment). */
+    private fun isFilesUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("files")
 
     /**
      * Parses content of the `messages` field when its type is
