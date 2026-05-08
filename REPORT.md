@@ -1,6 +1,17 @@
 
 # Summary
 
+**Verdict:** AI managed to generate working handlers' boilerplates for across all providers (yet, Gemini is the weakest in terms of coverage and code quality due to non-traditional endpoint routing via route suffixes, not REST). However, the sets of covered attributes for the newly supported endpoints are very modest and there is a lack of tests for the created handlers. **Overall, this solution is about 65–70% of a real modification that would constitute full support of new handlers for all providers.**
+
+**Weak points:**
+1. Lack of tests for the generated handlers: fixable via prompt → fix: explicitly request AI to generate tests.
+2. Many request/response fields remain uncovered for all newly supported endpoints → 
+   fix: assuming the AI agent is search web during evaluation, pass links to the API reference for all providers.
+3. Some implemented handlers contain code smells; e.g., `AnthropicListEndpointHandler` handles three non-related routes at once → maintainability issue (better to split them into three handlers with shared functionality).
+
+
+**All the weak points can be addressed via prompts alone.**
+
 
 | Provider | Endpoint Class | Endpoint Route                                     | New | Implemented by                                                                                        | Note                                                                                   |
 |----------|----------------|----------------------------------------------------|-----|-------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
