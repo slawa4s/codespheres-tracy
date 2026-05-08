@@ -10,6 +10,7 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPER
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
@@ -84,6 +85,22 @@ internal class ModelsAnthropicApiEndpointHandler : EndpointApiHandler {
         requestModelAlias.remove()
 
         val body = response.body.asJson()?.jsonObject ?: return
+
+        // Detect list response by presence of a "data" array (models.list endpoint)
+        val dataArray = body["data"]
+        if (dataArray is JsonArray) {
+            span.setAttribute("gen_ai.response.list.count", dataArray.size.toLong())
+            body["has_more"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.list.has_more", it)
+            }
+            body["first_id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.list.first_id", it)
+            }
+            body["last_id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.list.last_id", it)
+            }
+            return
+        }
 
         // Versioned model id (e.g., "claude-haiku-4-5-20251001") → gen_ai.response.id + gen_ai.response.model.id
         body["id"]?.jsonPrimitive?.content?.let { id ->

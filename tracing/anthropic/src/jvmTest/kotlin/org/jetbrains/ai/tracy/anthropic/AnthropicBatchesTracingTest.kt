@@ -103,6 +103,10 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             val trace = traces.first()
 
             assertEquals("batches.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals(2L, trace.attributes[AttributeKey.longKey("gen_ai.response.list.count")])
+            assertEquals("false", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.has_more")])
+            assertEquals("msgbatch_01", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.first_id")])
+            assertEquals("msgbatch_02", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.last_id")])
         }
     }
 
