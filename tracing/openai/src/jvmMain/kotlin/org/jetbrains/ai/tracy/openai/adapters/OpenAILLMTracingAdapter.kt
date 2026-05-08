@@ -20,6 +20,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioSpeechOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranscriptionOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranslationOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.BatchesOpenAIApiEndpointHandler
@@ -52,6 +53,9 @@ private enum class OpenAIApiType(val route: String, val apiTypeName: String) {
 
     // See: https://platform.openai.com/docs/api-reference/videos
     VIDEOS("videos", "videos"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createSpeech
+    AUDIO_SPEECH("audio/speech", "audio"),
 
     // See: https://platform.openai.com/docs/api-reference/audio/createTranscription
     AUDIO("audio/transcriptions", "audio"),
@@ -170,6 +174,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.VIDEOS -> handlers.getOrPut(OpenAIApiType.VIDEOS) {
                 VideosOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.AUDIO_SPEECH -> handlers.getOrPut(OpenAIApiType.AUDIO_SPEECH) {
+                AudioSpeechOpenAIApiEndpointHandler()
             }
 
             OpenAIApiType.AUDIO -> handlers.getOrPut(OpenAIApiType.AUDIO) {

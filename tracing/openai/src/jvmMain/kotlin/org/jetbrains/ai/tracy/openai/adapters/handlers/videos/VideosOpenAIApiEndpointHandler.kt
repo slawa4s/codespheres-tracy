@@ -49,6 +49,7 @@ internal class VideosOpenAIApiEndpointHandler(
     }
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("openai.api.type", "videos")
         val route = detectRoute(request.url, request.method)
         routeHandlers[route]?.handleRequest(span, request)
     }
