@@ -20,6 +20,7 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
@@ -65,7 +66,8 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             return
         }
 
-        // Standard Messages API: set the operation name
+        // Standard Messages API: set the API type and operation name
+        span.setAttribute("anthropic.api.type", "messages")
         span.setAttribute("gen_ai.operation.name", "chat")
 
         val body = request.body.asJson()?.jsonObject ?: return
@@ -275,9 +277,82 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
 
-    // streaming is not supported
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
-    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+    override fun isStreamingRequest(request: TracyHttpRequest): Boolean {
+        val body = request.body.asJson()?.jsonObject ?: return false
+        return body["stream"]?.jsonPrimitive?.booleanOrNull == true
+    }
+
+    /**
+     * Parses Anthropic Server-Sent Events to populate span attributes for streaming responses.
+     *
+     * Handles three event types from the [Anthropic SSE streaming format](https://docs.anthropic.com/en/api/messages-streaming):
+     * - `message_start`: provides response id, model, role, and input token usage
+     * - `content_block_delta`: accumulates streamed text content
+     * - `message_delta`: provides stop reason and output token usage
+     */
+    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String): Unit = runCatching {
+        var responseId: String? = null
+        var responseModel: String? = null
+        var responseRole: String? = null
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
+        val finishReasons = mutableListOf<String>()
+        val contentBuilder = StringBuilder()
+
+        for (line in events.lineSequence()) {
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+
+            val event = runCatching {
+                Json.parseToJsonElement(data).jsonObject
+            }.getOrNull() ?: continue
+
+            when (event["type"]?.jsonPrimitive?.content) {
+                "message_start" -> {
+                    val message = event["message"]?.jsonObject ?: continue
+                    if (responseId == null) responseId = message["id"]?.jsonPrimitive?.content
+                    if (responseModel == null) responseModel = message["model"]?.jsonPrimitive?.content
+                    if (responseRole == null) responseRole = message["role"]?.jsonPrimitive?.content
+                    message["usage"]?.jsonObject?.let { usage ->
+                        inputTokens = usage["input_tokens"]?.jsonPrimitive?.intOrNull
+                    }
+                }
+                "content_block_delta" -> {
+                    val delta = event["delta"]?.jsonObject ?: continue
+                    if (delta["type"]?.jsonPrimitive?.content == "text_delta") {
+                        delta["text"]?.jsonPrimitive?.content?.let { contentBuilder.append(it) }
+                    }
+                }
+                "message_delta" -> {
+                    event["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.content?.let {
+                        finishReasons.add(it)
+                    }
+                    event["usage"]?.jsonObject?.let { usage ->
+                        outputTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull
+                    }
+                }
+            }
+        }
+
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "message")
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        responseRole?.let { span.setAttribute("gen_ai.response.role", it) }
+        inputTokens?.let { span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it) }
+        outputTokens?.let { span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it) }
+        val content = contentBuilder.toString()
+        if (content.isNotEmpty()) {
+            span.setAttribute("gen_ai.completion.0.content", content.orRedactedOutput())
+        }
+        if (finishReasons.isNotEmpty()) {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons)
+        }
+        span.setAttribute("anthropic.api.type", "messages")
+        return@runCatching
+    }.getOrElse { exception ->
+        span.setStatus(StatusCode.ERROR)
+        span.recordException(exception)
+    }
 
     /** Returns `true` when the URL targets the Message Batches API (contains a `batches` path segment). */
     private fun isBatchUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("batches")
