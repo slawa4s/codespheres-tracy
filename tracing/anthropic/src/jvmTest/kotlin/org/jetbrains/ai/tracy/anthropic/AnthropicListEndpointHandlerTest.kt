@@ -17,7 +17,6 @@ import org.junit.jupiter.api.Test
 import java.time.Duration
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
 
 /**
  * Unit tests for [AnthropicListEndpointHandler.handleResponseAttributes] error-type extraction.
@@ -276,12 +275,15 @@ class AnthropicListEndpointHandlerTest : BaseAITracingTest() {
     }
 
     /**
-     * Verifies that [instrument] installs a wrapper span *in addition to* the OkHttp interceptor
-     * span for a normal batch create call that reaches the HTTP layer, so that there are (at
-     * least) two spans recorded per call.  This confirms the two-layer instrumentation is in place.
+     * Verifies that a batch create call that reaches the HTTP layer produces exactly one span —
+     * the OkHttp interceptor span — with no additional wrapper span.
+     *
+     * After the refactor, [AnthropicBatchesServiceWrapper] is transparent for HTTP-level calls:
+     * it re-throws [com.anthropic.errors.AnthropicServiceException] without opening a span, so
+     * the OkHttp interceptor span is the sole recorded span.
      */
     @Test
-    fun `instrument produces wrapper span alongside OkHttp span for batch create`() = runTest {
+    fun `batch create that reaches HTTP layer produces exactly one OkHttp span without wrapper span`() = runTest {
         withMockServer { server ->
             val client = AnthropicOkHttpClient.builder()
                 .baseUrl(server.url("/").toString())
@@ -304,10 +306,62 @@ class AnthropicListEndpointHandlerTest : BaseAITracingTest() {
             } catch (_: Exception) { /* expected */ }
 
             val traces = analyzeSpans()
-            // Verify that both the wrapper span and the OkHttp interceptor span were recorded.
-            // The wrapper span has gen_ai.operation.name="batches.create"; the OkHttp interceptor
-            // span may use any operation name — checking total count is more reliable.
-            assertTrue(traces.size >= 2, "Expected at least 2 spans (wrapper + OkHttp interceptor), got ${traces.size}")
+            assertEquals(1, traces.size, "Expected exactly one span (OkHttp interceptor); wrapper must not add a second span for HTTP-level calls, got ${traces.size}")
+            assertEquals(
+                "batches.create",
+                traces.first().attributes[AttributeKey.stringKey("gen_ai.operation.name")],
+                "OkHttp span must carry gen_ai.operation.name=batches.create"
+            )
+            assertEquals(
+                400L,
+                traces.first().attributes[AttributeKey.longKey("http.response.status_code")],
+                "OkHttp span must carry http.response.status_code"
+            )
+        }
+    }
+
+    /**
+     * Verifies that [AnthropicBatchesServiceWrapper] emits a span for a pre-HTTP client-side
+     * exception (one that is thrown by the SDK before any network call, so the OkHttp interceptor
+     * never fires).
+     *
+     * An empty `requests` list may be validated client-side by the Anthropic SDK; a mock response
+     * is enqueued as a safety net in case the SDK version under test sends the request over HTTP
+     * instead.  Either path must produce a span with the required attributes.
+     */
+    @Test
+    fun `wrapper emits span with required attributes for pre-HTTP client-side exception`() = runTest {
+        withMockServer { server ->
+            val client = AnthropicOkHttpClient.builder()
+                .baseUrl(server.url("/").toString())
+                .apiKey(MOCK_API_KEY)
+                .timeout(Duration.ofSeconds(10))
+                .build()
+            instrument(client)
+
+            // Safety-net response in case the SDK forwards the empty-list request over HTTP.
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"type":"error","error":{"type":"invalid_request_error","message":"requests must not be empty"}}""")
+            )
+
+            val params = BatchCreateParams.builder().requests(emptyList()).build()
+            try {
+                client.messages().batches().create(params)
+            } catch (_: Exception) { /* expected */ }
+
+            val traces = analyzeSpans()
+            val batchSpan = traces.firstOrNull {
+                it.attributes[AttributeKey.stringKey("gen_ai.operation.name")] == "batches.create"
+            }
+            assertNotNull(batchSpan, "Expected a span with gen_ai.operation.name=batches.create")
+            assertEquals(StatusCode.ERROR, batchSpan.status.statusCode)
+            assertEquals("anthropic", batchSpan.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertEquals("batches", batchSpan.attributes[AttributeKey.stringKey("anthropic.api.type")])
+            assertNotNull(batchSpan.attributes[AttributeKey.stringKey("server.address")], "server.address must be set")
+            assertNotNull(batchSpan.attributes[AttributeKey.longKey("server.port")], "server.port must be set")
         }
     }
 

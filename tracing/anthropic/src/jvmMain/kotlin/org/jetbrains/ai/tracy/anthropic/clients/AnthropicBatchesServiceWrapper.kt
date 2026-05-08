@@ -15,23 +15,24 @@ import org.jetbrains.ai.tracy.core.TracingManager
 import java.net.URI
 
 /**
- * Wraps [BatchService] to ensure that an OTel span is opened around every [create] call,
- * including calls that fail with a client-side validation error before any HTTP request is issued.
+ * Wraps [BatchService] to ensure that an OTel span is emitted for [create] calls that fail with
+ * a client-side validation error *before* any HTTP request is issued.
  *
- * The Anthropic SDK validates the `requests` array before reaching the OkHttp layer; when the
- * array is empty the SDK throws immediately and Tracy's OkHttp interceptor never fires, so no span
- * would otherwise be recorded.  This wrapper guarantees a span is emitted for every [create]
- * invocation.
+ * The Anthropic SDK may validate the `requests` array before reaching the OkHttp layer; when
+ * validation fails the SDK throws immediately and Tracy's OkHttp interceptor never fires, so no
+ * span would otherwise be recorded.  This wrapper fills that gap by emitting a span only in the
+ * `catch (e: Exception)` branch, *excluding* [AnthropicServiceException] (which is thrown after
+ * an HTTP round-trip and is therefore already covered by the OkHttp interceptor span).
  *
- * Attributes recorded on every span:
+ * For successful calls and HTTP-level errors ([AnthropicServiceException]), the wrapper is
+ * transparent: no span is opened, and the OkHttp interceptor span is the sole recorded span.
+ *
+ * Attributes recorded on the pre-HTTP error span:
  * - `gen_ai.provider.name` = `"anthropic"`
  * - `anthropic.api.type` = `"batches"`
  * - `gen_ai.operation.name` = `"batches.create"`
  * - `server.address` / `server.port` derived from the client's configured base URL
- *
- * Additional attributes recorded on error:
  * - `error.type` – simple class name of the caught exception
- * - `http.response.status_code` – HTTP status code (only when an [AnthropicServiceException] is thrown)
  *
  * All other [BatchService] methods are forwarded unchanged to the [delegate].
  */
@@ -48,31 +49,27 @@ internal class AnthropicBatchesServiceWrapper(
             return delegate.create(params, requestOptions)
         }
 
-        val (host, port) = resolveHostAndPort(baseUrl)
-
-        val span = TracingManager.tracer
-            .spanBuilder("Anthropic-generation")
-            .startSpan()
-
-        span.setAttribute("gen_ai.provider.name", "anthropic")
-        span.setAttribute("anthropic.api.type", "batches")
-        span.setAttribute("gen_ai.operation.name", "batches.create")
-        span.setAttribute("server.address", host)
-        span.setAttribute("server.port", port)
-
         return try {
             delegate.create(params, requestOptions)
-        } catch (e: AnthropicServiceException) {
-            span.setStatus(StatusCode.ERROR)
-            span.setAttribute("error.type", e.javaClass.simpleName)
-            span.setAttribute("http.response.status_code", e.statusCode().toLong())
-            throw e
         } catch (e: Exception) {
+            // AnthropicServiceException is thrown after an HTTP round-trip; the OkHttp interceptor
+            // has already recorded a span for it, so skip creating a second one.
+            if (e is AnthropicServiceException) throw e
+
+            // Pre-HTTP client-side exception: the OkHttp interceptor never fired, so emit a span.
+            val (host, port) = resolveHostAndPort(baseUrl)
+            val span = TracingManager.tracer
+                .spanBuilder("Anthropic-generation")
+                .startSpan()
+            span.setAttribute("gen_ai.provider.name", "anthropic")
+            span.setAttribute("anthropic.api.type", "batches")
+            span.setAttribute("gen_ai.operation.name", "batches.create")
+            span.setAttribute("server.address", host)
+            span.setAttribute("server.port", port)
             span.setStatus(StatusCode.ERROR)
             span.setAttribute("error.type", e.javaClass.simpleName)
-            throw e
-        } finally {
             span.end()
+            throw e
         }
     }
 
