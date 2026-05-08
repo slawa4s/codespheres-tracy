@@ -266,6 +266,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         // URLs, even when getRequestBodyAttributes was never called (e.g. client-side validation error).
         if (isBatchUrl(response.url)) {
             span.setAttribute("anthropic.api.type", "batches")
+            span.setAttribute("gen_ai.provider.name", GenAiSystemIncubatingValues.ANTHROPIC)
             span.setAttribute(GEN_AI_OPERATION_NAME, batchesHandler.detectOperation(response.url, response.requestMethod))
         }
 

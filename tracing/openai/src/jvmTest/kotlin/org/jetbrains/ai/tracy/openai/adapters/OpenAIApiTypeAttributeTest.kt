@@ -321,6 +321,46 @@ class OpenAIApiTypeAttributeTest : BaseOpenAITracingTest() {
         }
     }
 
+    @Test
+    fun `test openai api type is set on error response for chat completions endpoint`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofSeconds(30),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "error": {
+                            "message": "Invalid request",
+                            "type": "invalid_request_error",
+                            "code": "invalid_api_key"
+                          }
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            runCatching {
+                client.chat().completions().create(
+                    ChatCompletionCreateParams.builder()
+                        .model(ChatModel.GPT_4O_MINI)
+                        .addUserMessage("Hi")
+                        .build()
+                )
+            }
+
+            val trace = analyzeSpans().first()
+            assertEquals("chat_completions", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+        }
+    }
+
     companion object {
         private const val MOCK_API_KEY = "mock-api-key"
     }

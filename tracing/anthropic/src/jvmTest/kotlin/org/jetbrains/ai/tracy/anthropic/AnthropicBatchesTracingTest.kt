@@ -262,6 +262,8 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("error.type")])
             // anthropic.api.type must survive on error-only spans for batch URLs.
             assertEquals("batches", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
+            // gen_ai.provider.name must be set on error spans as a safety net for the batch error path.
+            assertEquals("anthropic", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
             // gen_ai.operation.name must be set on error spans using only the URL + HTTP method.
             assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
         }
