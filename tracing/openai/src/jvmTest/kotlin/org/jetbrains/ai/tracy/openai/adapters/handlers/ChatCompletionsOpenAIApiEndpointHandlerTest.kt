@@ -23,6 +23,7 @@ import com.openai.models.embeddings.EmbeddingModel
 import com.openai.models.responses.ResponseCreateParams
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -315,7 +316,6 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
     @Test
     fun `test OpenAI embeddings`() = runTest {
-        // handler defaults to chat/completions, but the specific embedding parameters are still propagated to the span
         val client = createOpenAIClient(llmProviderUrl, llmProviderApiKey).apply { instrument(this) }
 
         val params = EmbeddingCreateParams.builder()
@@ -329,14 +329,15 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         assertTracesCount(1, traces)
         val trace = traces.first()
 
-        val responseData = trace.attributes?.get(AttributeKey.stringKey("tracy.response.data"))
-        assertFalse(responseData.isNullOrEmpty())
+        assertEquals("embeddings", trace.attributes?.get(AttributeKey.stringKey("gen_ai.operation.name")))
+        assertEquals("embeddings", trace.attributes?.get(AttributeKey.stringKey("openai.api.type")))
 
-        val responseObject = trace.attributes?.get(AttributeKey.stringKey("tracy.response.object"))
-        assertFalse(responseObject.isNullOrEmpty())
+        val encodingFormats = trace.attributes?.get(AttributeKey.stringArrayKey("gen_ai.request.encoding_formats"))
+        assertFalse(encodingFormats.isNullOrEmpty())
 
-        val requestEncodingFormat = trace.attributes?.get(AttributeKey.stringKey("tracy.request.encoding_format"))
-        assertFalse(requestEncodingFormat.isNullOrEmpty())
+        val dimensionCount = trace.attributes?.get(AttributeKey.longKey("gen_ai.embeddings.dimension.count"))
+        assertNotNull(dimensionCount)
+        assertTrue(dimensionCount!! > 0)
     }
 
     @ParameterizedTest
@@ -623,5 +624,138 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
                 )
                 .build(),
         )
+    }
+
+    // ============ NETWORK ATTRIBUTES AND OPERATION NAMES ============
+
+    @Test
+    fun `test network and api type attributes are set for POST chat completions`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+            ).apply { instrument(this) }
+
+            server.enqueue(MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(MOCK_CHAT_COMPLETION_RESPONSE))
+
+            client.chat().completions().create(
+                ChatCompletionCreateParams.builder()
+                    .addUserMessage("Hello")
+                    .model(ChatModel.GPT_4O_MINI)
+                    .build()
+            )
+
+            val trace = analyzeSpans().first()
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("server.address")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("server.port")])
+            assertEquals("chat_completions", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+            // gen_ai.operation.name is set to "chat" by request handler but then
+            // overridden to "chat.completion" by setCommonResponseAttributes (response body "object" field)
+            assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        }
+    }
+
+    /**
+     * Verifies that for a GET /v1/chat/completions/{id} request (retrieve), the network attributes
+     * and operation name are set even though the GET request has no body and previously caused
+     * handleRequestAttributes to return early.
+     *
+     * Uses an error response so that setCommonResponseAttributes does not override the operation
+     * name that was set by handleRequestAttributes.
+     */
+    @Test
+    fun `test operation name is chat_completions_retrieve for GET with completion id`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+            ).apply { instrument(this) }
+
+            val completionId = "chatcmpl-abc123"
+            // Use a 404 error response: no root "object" field, so setCommonResponseAttributes
+            // will not override the operation name set in handleRequestAttributes.
+            server.enqueue(MockResponse()
+                .setResponseCode(404)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":{"message":"No such completion: $completionId","type":"not_found_error","code":"not_found"}}"""))
+
+            try {
+                client.chat().completions().retrieve(
+                    ChatCompletionRetrieveParams.builder().completionId(completionId).build()
+                )
+            } catch (_: Exception) {
+                // Expected: 404 triggers an SDK exception
+            }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("server.address")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("server.port")])
+            assertEquals("chat_completions", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+            assertEquals("chat.completions.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        }
+    }
+
+    /**
+     * Verifies that for a GET /v1/chat/completions request (list), the network attributes
+     * and operation name are set correctly.
+     *
+     * Uses an error response so that setCommonResponseAttributes does not override the operation
+     * name that was set by handleRequestAttributes.
+     */
+    @Test
+    fun `test operation name is chat_completions_list for GET completions list`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+            ).apply { instrument(this) }
+
+            // Use a 404 error response: no root "object" field, so setCommonResponseAttributes
+            // will not override the operation name set in handleRequestAttributes.
+            server.enqueue(MockResponse()
+                .setResponseCode(404)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":{"message":"Not found","type":"not_found_error","code":"not_found"}}"""))
+
+            try {
+                client.chat().completions().list(ChatCompletionListParams.none())
+            } catch (_: Exception) {
+                // Expected: 404 triggers an SDK exception
+            }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("server.address")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("server.port")])
+            assertEquals("chat_completions", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+            assertEquals("chat.completions.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        }
+    }
+
+    companion object {
+        private const val MOCK_API_KEY = "mock-api-key"
+        private val MOCK_CHAT_COMPLETION_RESPONSE = """
+            {
+              "id": "chatcmpl-abc123",
+              "object": "chat.completion",
+              "created": 1677652288,
+              "model": "gpt-4o-mini",
+              "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hello!"},
+                "finish_reason": "stop"
+              }],
+              "usage": {"prompt_tokens": 9, "completion_tokens": 12, "total_tokens": 21}
+            }
+        """.trimIndent()
     }
 }

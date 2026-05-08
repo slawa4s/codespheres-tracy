@@ -37,6 +37,28 @@ internal object OpenAIApiUtils {
         body["object"]?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it.jsonPrimitive.content) }
         body["model"]?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it.jsonPrimitive.content) }
     }
+
+    /**
+     * Sets network-level request attributes: provider name, server address and port.
+     *
+     * These attributes are the OpenTelemetry stable semconv equivalents of the
+     * `gen_ai.system` / `gen_ai.api_base` pair emitted by the base [org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter].
+     */
+    fun setNetworkRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("gen_ai.provider.name", "openai")
+        span.setAttribute("server.address", request.url.host)
+        val port = if (request.url.scheme == "https") 443L else 80L
+        span.setAttribute("server.port", port)
+    }
+
+    /**
+     * Sets the HTTP response status code using the stable semconv attribute name
+     * (`http.response.status_code`), complementing the legacy `http.status_code`
+     * attribute set by the base [org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter].
+     */
+    fun setHttpStatusCode(span: Span, response: TracyHttpResponse) {
+        span.setAttribute("http.response.status_code", response.code.toLong())
+    }
 }
 
 internal val JsonElement.asString: String

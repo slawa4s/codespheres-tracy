@@ -16,8 +16,10 @@ import org.jetbrains.ai.tracy.core.http.protocol.asFormData
 import org.jetbrains.ai.tracy.core.policy.ContentKind
 import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
+import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import mu.KotlinLogging
@@ -32,6 +34,9 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        OpenAIApiUtils.setNetworkRequestAttributes(span, request)
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
+        span.setAttribute("gen_ai.output.type", "image")
         val body = request.body.asFormData() ?: return
 
         val mediaContentParts = mutableListOf<MediaContentPart>()
@@ -82,26 +87,29 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                     )
                 }
                 // either a single image or an array of images
-                "image", "image[]" -> if (contentTracingAllowed(ContentKind.INPUT)) {
-                    // trace images only when input content tracing is allowed.
-                    // base64-encoded image content
-                    span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
-                    span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
-                    if (part.filename != null) {
-                        span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                "image", "image[]" -> {
+                    span.setAttribute("tracy.request.image.size_bytes", part.content.size.toLong())
+                    if (contentTracingAllowed(ContentKind.INPUT)) {
+                        // trace images only when input content tracing is allowed.
+                        // base64-encoded image content
+                        span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
+                        span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
+                        if (part.filename != null) {
+                            span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                        }
+                        // save image for further upload
+                        mediaContentParts.add(
+                            MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
+                        )
+                        ++imagesCount
                     }
-                    // save image for further upload
-                    mediaContentParts.add(
-                        MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
-                    )
-                    ++imagesCount
                 }
 
                 null -> logger.warn { "Form data part with missing name ignored. Content type: '$contentType'" }
                 else -> {
                     // since we don't know how sensitive other fields may be,
                     // we disguise their content if input tracing is disallowed.
-                    span.setAttribute("gen_ai.request.${part.name}", content.orRedactedInput())
+                    span.setAttribute("tracy.request.${part.name}", content.orRedactedInput())
                 }
             }
         }

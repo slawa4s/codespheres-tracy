@@ -45,11 +45,21 @@ internal fun handleImageGenerationResponseAttributes(
             val mediaContent = parseMediaContent(data, mediaType)
             extractor.setUploadableContentAttributes(span, field = "output", mediaContent)
         }
+
+        // extract URL from first image if present
+        data.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content?.let { url ->
+            span.setAttribute("tracy.response.image.url", url)
+        }
     }
 
     body["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
 
-    val manuallyParsedKeys = listOf("data", "usage")
+    // extract created timestamp explicitly under the tracy.response.* namespace
+    body["created"]?.jsonPrimitive?.content?.let { created ->
+        span.setAttribute("tracy.response.created_at", created)
+    }
+
+    val manuallyParsedKeys = listOf("data", "usage", "created")
     for ((key, value) in body.entries) {
         if (key in manuallyParsedKeys) {
             continue
@@ -80,8 +90,12 @@ internal fun handleStreamedImage(
 
             data["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
 
+            data["created_at"]?.jsonPrimitive?.content?.let { createdAt ->
+                span.setAttribute("tracy.response.created_at", createdAt)
+            }
+
             // insert other attributes
-            val manuallyParsedKeys = listOf("b64_json", "usage")
+            val manuallyParsedKeys = listOf("b64_json", "usage", "created_at")
             for ((key, value) in data.entries) {
                 if (key !in manuallyParsedKeys) {
                     span.setAttribute("gen_ai.response.$key", value.asString)
