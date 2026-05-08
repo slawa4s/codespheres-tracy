@@ -8,11 +8,15 @@ package org.jetbrains.ai.tracy.core.adapters
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
+import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.populateUnmappedAttributes
 import org.jetbrains.ai.tracy.core.http.protocol.TracyContentType
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequestBody
@@ -229,6 +233,62 @@ class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
         assertEquals("api.example.com", spanData.attributes[AttributeKey.stringKey("server.address")])
         assertEquals(443L, spanData.attributes[AttributeKey.longKey("server.port")])
         assertEquals("https://api.example.com", spanData.attributes[AttributeKey.stringKey("gen_ai.api_base")])
+    }
+
+    @Test
+    fun `populateUnmappedAttributes stores string primitives without surrounding JSON quotes`() {
+        val span = TracingManager.tracer.spanBuilder("test-unmapped-string").startSpan()
+
+        val body = buildJsonObject { put("object", "model") }
+        with(span) { populateUnmappedAttributes(body, emptyList(), PayloadType.RESPONSE) }
+        span.end()
+
+        val traces = analyzeSpans()
+        val trace = traces.single { it.name == "test-unmapped-string" }
+        assertEquals("model", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+    }
+
+    @Test
+    fun `populateUnmappedAttributes stores numeric primitives as bare strings`() {
+        val span = TracingManager.tracer.spanBuilder("test-unmapped-number").startSpan()
+
+        val body = buildJsonObject { put("count", 42) }
+        with(span) { populateUnmappedAttributes(body, emptyList(), PayloadType.RESPONSE) }
+        span.end()
+
+        val traces = analyzeSpans()
+        val trace = traces.single { it.name == "test-unmapped-number" }
+        assertEquals("42", trace.attributes[AttributeKey.stringKey("tracy.response.count")])
+    }
+
+    @Test
+    fun `populateUnmappedAttributes stores JSON arrays as JSON strings`() {
+        val span = TracingManager.tracer.spanBuilder("test-unmapped-array").startSpan()
+
+        val body = buildJsonObject { put("items", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("a")) }) }
+        with(span) { populateUnmappedAttributes(body, emptyList(), PayloadType.REQUEST) }
+        span.end()
+
+        val traces = analyzeSpans()
+        val trace = traces.single { it.name == "test-unmapped-array" }
+        assertEquals("""["a"]""", trace.attributes[AttributeKey.stringKey("tracy.request.items")])
+    }
+
+    @Test
+    fun `populateUnmappedAttributes skips already-mapped attributes`() {
+        val span = TracingManager.tracer.spanBuilder("test-unmapped-skip").startSpan()
+
+        val body = buildJsonObject {
+            put("model", "gpt-4")
+            put("object", "chat.completion")
+        }
+        with(span) { populateUnmappedAttributes(body, listOf("model"), PayloadType.RESPONSE) }
+        span.end()
+
+        val traces = analyzeSpans()
+        val trace = traces.single { it.name == "test-unmapped-skip" }
+        assertEquals(null, trace.attributes[AttributeKey.stringKey("tracy.response.model")])
+        assertEquals("chat.completion", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
     }
 
     @Test
