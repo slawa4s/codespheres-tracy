@@ -327,6 +327,58 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
         }
     }
 
+    // ---- redirect: api type preserved via ThreadLocal ---------------------------
+
+    /**
+     * Verifies that `anthropic.api.type` is still set correctly on an error span even when OkHttp
+     * follows a redirect and the final response URL no longer contains a "batches" path segment.
+     *
+     * The ThreadLocal in [AnthropicLLMTracingAdapter] stores the API type detected from the
+     * *original* request URL so that [getResponseErrorBodyAttributes] does not need to re-parse
+     * the (potentially rewritten) response URL.
+     */
+    @Test
+    fun `test batch error span preserves api type after redirect to non-batch URL`() = runTest {
+        withMockServer { server ->
+            // First response: 307 redirect from /v1/messages/batches to /v1/error (no "batches" segment)
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(307)
+                    .setHeader("Location", server.url("/v1/error").toString())
+            )
+            // Second response: 400 error at the redirect target (URL has no "batches" segment)
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"detail": "At least one request is required in a message batch"}""")
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .addHeader("x-api-key", "test-key")
+                    .post("""{"requests": []}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(StatusCode.ERROR, trace.status.statusCode)
+            assertEquals(400L, trace.attributes[AttributeKey.longKey("http.status_code")])
+            // anthropic.api.type must be "batches" even though the final response URL is /v1/error
+            assertEquals(
+                "batches",
+                trace.attributes[AttributeKey.stringKey("anthropic.api.type")],
+                "ThreadLocal must preserve api type across redirect"
+            )
+            assertEquals("anthropic", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("error.type")])
+        }
+    }
+
     companion object {
         private const val BATCH_ID = "msgbatch_01HkcTjaV5uDC8jWR4ZsDV8d"
 
