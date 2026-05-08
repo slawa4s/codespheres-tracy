@@ -367,6 +367,7 @@ class OpenTelemetryOkHttpInterceptor(
             override val body = TracyHttpResponseBody.Json(body)
             override val url = response.request.url.toProtocolUrl()
             override val requestMethod = response.request.method.uppercase()
+            override val contentLength: Long? = response.body?.contentLength()?.let { if (it >= 0) it else null }
 
             override fun isError() = response.isSuccessful.not()
         }

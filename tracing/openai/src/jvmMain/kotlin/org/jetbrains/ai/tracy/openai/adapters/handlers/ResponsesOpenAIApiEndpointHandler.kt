@@ -30,12 +30,16 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+        span.setAttribute("openai.api.type", "responses")
+        val operationName = when (request.method) {
+            "GET" -> "response.retrieve"
+            "DELETE" -> "response.delete"
+            else -> "generate_content"
+        }
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
-            span.setAttribute("gen_ai.request.previous_response_id", it)
-        }
-        body["store"]?.jsonPrimitive?.booleanOrNull?.let {
-            span.setAttribute("gen_ai.request.store", it)
+            span.setAttribute("tracy.request.previous_response_id", it)
         }
         body["top_p"]?.jsonPrimitive?.doubleOrNull?.let {
             span.setAttribute(GEN_AI_REQUEST_TOP_P, it)
@@ -43,30 +47,27 @@ internal class ResponsesOpenAIApiEndpointHandler(
         body["max_output_tokens"]?.jsonPrimitive?.longOrNull?.let {
             span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it)
         }
-        body["truncation"]?.jsonPrimitive?.contentOrNull?.let {
-            span.setAttribute("gen_ai.request.truncation", it)
-        }
-        body["parallel_tool_calls"]?.jsonPrimitive?.booleanOrNull?.let {
-            span.setAttribute("gen_ai.request.parallel_tool_calls", it)
-        }
-        body["stream"]?.jsonPrimitive?.booleanOrNull?.let {
-            span.setAttribute("gen_ai.request.stream", it)
-        }
-        body["response_format"]?.jsonPrimitive?.contentOrNull?.let {
-            span.setAttribute(GEN_AI_OUTPUT_TYPE, it)
-        }
         body["tool_choice"]?.let {
             val content = when (it) {
                 is JsonPrimitive -> it.content
                 else -> it.toString()
             }
-            span.setAttribute("gen_ai.request.tool_choice", content)
+            span.setAttribute("tracy.request.tool_choice", content)
         }
-        body["reasoning"]?.let {
-            span.setAttribute("gen_ai.request.reasoning", it.toString())
+        body["reasoning"]?.jsonObject?.let { reasoning ->
+            reasoning["effort"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("tracy.request.reasoning.effort", it)
+            }
+            reasoning["summary"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("tracy.request.reasoning.summary", it)
+            }
         }
-        body["text"]?.let {
-            span.setAttribute("gen_ai.request.text", it.toString())
+        body["text"]?.jsonObject?.let { text ->
+            text["format"]?.jsonObject?.let { format ->
+                format["type"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.request.text.format.type", it)
+                }
+            }
         }
 
         // because of inserting instructions property as the first prompt,
@@ -139,6 +140,13 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
+        span.setAttribute("openai.api.type", "responses")
+        val operationName = when (response.requestMethod) {
+            "GET" -> "response.retrieve"
+            "DELETE" -> "response.delete"
+            else -> "generate_content"
+        }
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
@@ -189,8 +197,17 @@ internal class ResponsesOpenAIApiEndpointHandler(
                     }
 
                     else -> {
-                        // any other types, including 'function_call' and 'reasoning'
+                        // any other types, including 'function_call', 'web_search_call', 'reasoning'
                         // See output types: https://platform.openai.com/docs/api-reference/responses/object#responses-object-output
+                        if (index == 0) {
+                            type?.let { span.setAttribute("tracy.response.output.type", it) }
+                            output.jsonObject["name"]?.jsonPrimitive?.contentOrNull?.let {
+                                span.setAttribute("tracy.response.output.name", it)
+                            }
+                            output.jsonObject["call_id"]?.jsonPrimitive?.contentOrNull?.let {
+                                span.setAttribute("tracy.response.output.call_id", it)
+                            }
+                        }
                         for ((k, v) in output.jsonObject.entries) {
                             val key = when {
                                 // prefix `function_call` with "tool_"
@@ -215,6 +232,23 @@ internal class ResponsesOpenAIApiEndpointHandler(
 
         body["usage"]?.let { usage ->
             setUsageAttributes(span, usage.jsonObject)
+        }
+
+        // Extract nested response fields not handled by populateUnmappedAttributes
+        body["reasoning"]?.jsonObject?.let { reasoning ->
+            reasoning["effort"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("tracy.response.reasoning.effort", it)
+            }
+            reasoning["summary"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("tracy.response.reasoning.summary", it)
+            }
+        }
+        body["text"]?.jsonObject?.let { text ->
+            text["format"]?.jsonObject?.let { format ->
+                format["type"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.response.text.format.type", it)
+                }
+            }
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
@@ -340,7 +374,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
     }
 
     /**
-     * Sets usage attributes (input_tokens/output_tokens)
+     * Sets usage attributes (input_tokens/output_tokens and reasoning details)
      */
     private fun setUsageAttributes(span: Span, usage: JsonObject) {
         usage["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
@@ -348,6 +382,11 @@ internal class ResponsesOpenAIApiEndpointHandler(
         }
         usage["output_tokens"]?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+        }
+        usage["output_tokens_details"]?.jsonObject?.let { details ->
+            details["reasoning_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("tracy.response.usage.output_tokens_details.reasoning_tokens", it.toLong())
+            }
         }
     }
 
@@ -399,17 +438,13 @@ internal class ResponsesOpenAIApiEndpointHandler(
     }
 
     // https://platform.openai.com/docs/api-reference/responses/create
+    // Only list attributes handled EXPLICITLY above; everything else auto-flows as tracy.request.*
     private val mappedRequestAttributes: List<String> = listOf(
         "temperature",
         "model",
         "previous_response_id",
-        "store",
         "top_p",
         "max_output_tokens",
-        "truncation",
-        "parallel_tool_calls",
-        "stream",
-        "response_format",
         "tool_choice",
         "reasoning",
         "text",
@@ -419,10 +454,10 @@ internal class ResponsesOpenAIApiEndpointHandler(
     )
 
     // https://platform.openai.com/docs/api-reference/responses/object
+    // Only list attributes handled EXPLICITLY above; everything else auto-flows as tracy.response.*
     private val mappedResponseAttributes: List<String> = listOf(
         // parsed by `OpenAIApiUtils.setCommonResponseAttributes`
         "id",
-        "object",
         "model",
 
         "output",
