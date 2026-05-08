@@ -22,7 +22,7 @@ internal class ListVideosHandler : VideoRouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
         val params = request.url.parameters
         params.queryParameter("after")?.let { span.setAttribute("gen_ai.request.after", it) }
-        params.queryParameter("limit")?.let { span.setAttribute("gen_ai.request.limit", it) }
+        params.queryParameter("limit")?.let { it.toLongOrNull()?.let { value -> span.setAttribute("tracy.request.limit", value) } }
         params.queryParameter("order")?.let { span.setAttribute("gen_ai.request.order", it) }
     }
 
