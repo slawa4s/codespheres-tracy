@@ -541,8 +541,9 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val videosCount = trace.attributes[AttributeKey.longKey("gen_ai.response.videos_count")]
 
             assertEquals(videoList.data().size.toLong(), videosCount)
-            assertNotNull(trace.attributes[AttributeKey.booleanKey("gen_ai.response.has_more")])
-            assertEquals("list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertNotNull(trace.attributes[AttributeKey.booleanKey("tracy.response.has_more")])
+            assertEquals("videos.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("list", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
 
             // Verify individual videos are traced
             if (videosCount != null && videosCount > 0) {
@@ -597,8 +598,8 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = analyzeSpans().first()
 
             // verify query parameters are traced
-            assertEquals(limit.toString(), trace.attributes[AttributeKey.stringKey("gen_ai.request.limit")])
-            assertEquals(order, trace.attributes[AttributeKey.stringKey("gen_ai.request.order")])
+            assertEquals(limit, trace.attributes[AttributeKey.longKey("tracy.request.limit")])
+            assertEquals(order, trace.attributes[AttributeKey.stringKey("tracy.request.order")])
         }
     }
 
