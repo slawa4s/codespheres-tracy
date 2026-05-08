@@ -5,6 +5,10 @@
 
 package org.jetbrains.ai.tracy.anthropic.adapters
 
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.BatchesAnthropicApiEndpointHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.CountTokensAnthropicApiEndpointHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.FilesAnthropicApiEndpointHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.ModelsAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
 import org.jetbrains.ai.tracy.core.adapters.media.*
@@ -16,7 +20,10 @@ import org.jetbrains.ai.tracy.core.policy.ContentKind
 import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
+import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 import mu.KotlinLogging
@@ -48,7 +55,55 @@ import mu.KotlinLogging
  * See: [Anthropic Messages API](https://docs.claude.com/en/api/messages)
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
+    private val batchesHandler = BatchesAnthropicApiEndpointHandler()
+    private val countTokensHandler = CountTokensAnthropicApiEndpointHandler()
+    private val filesHandler = FilesAnthropicApiEndpointHandler()
+    private val modelsHandler = ModelsAnthropicApiEndpointHandler()
+
+    /**
+     * Persists the API type detected from the request URL so that [getResponseErrorBodyAttributes]
+     * can set `anthropic.api.type` reliably without re-parsing [TracyHttpResponse.url].
+     *
+     * After OkHttp follows a redirect the response's `request.url` reflects the *final* URL, which
+     * may no longer contain the original path segment (e.g. `batches`). Reading from this ThreadLocal
+     * avoids that mismatch. The value is always cleaned up in both [getResponseBodyAttributes] and
+     * [getResponseErrorBodyAttributes].
+     */
+    private val requestApiTypeThreadLocal = ThreadLocal<String?>()
+
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        // Detect and persist the API type so error-response handling doesn't need to re-parse the
+        // URL (response.url may differ from request.url after OkHttp redirects).
+        val apiType = when {
+            isCountTokensUrl(request.url) -> "count_tokens"
+            isBatchUrl(request.url) -> "batches"
+            isFilesUrl(request.url) -> "files"
+            isModelsUrl(request.url) -> "models"
+            else -> "messages"
+        }
+        requestApiTypeThreadLocal.set(apiType)
+
+        if (isCountTokensUrl(request.url)) {
+            countTokensHandler.handleRequestAttributes(span, request)
+            return
+        }
+        if (isBatchUrl(request.url)) {
+            batchesHandler.handleRequestAttributes(span, request)
+            return
+        }
+        if (isFilesUrl(request.url)) {
+            filesHandler.handleRequestAttributes(span, request)
+            return
+        }
+        if (isModelsUrl(request.url)) {
+            modelsHandler.handleRequestAttributes(span, request)
+            return
+        }
+
+        // Standard Messages API: set the API type and operation name
+        span.setAttribute("anthropic.api.type", "messages")
+        span.setAttribute("gen_ai.operation.name", "chat")
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -124,6 +179,25 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     }
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
+        requestApiTypeThreadLocal.remove()
+
+        if (isCountTokensUrl(response.url)) {
+            countTokensHandler.handleResponseAttributes(span, response)
+            return
+        }
+        if (isBatchUrl(response.url)) {
+            batchesHandler.handleResponseAttributes(span, response)
+            return
+        }
+        if (isFilesUrl(response.url)) {
+            filesHandler.handleResponseAttributes(span, response)
+            return
+        }
+        if (isModelsUrl(response.url)) {
+            modelsHandler.handleResponseAttributes(span, response)
+            return
+        }
+
         val body = response.body.asJson()?.jsonObject ?: return
 
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
@@ -204,11 +278,167 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
 
+    /**
+     * Overrides error-body attribute extraction to guarantee that `error.type` is always populated
+     * for HTTP error responses, even when the response body does not conform to the standard
+     * Anthropic error envelope (`{"error": {"type": "...", "message": "..."}}`).
+     *
+     * Examples where the standard envelope is absent:
+     * - Batch requests with an empty `requests` array return `{"detail": "..."}`.
+     * - Proxy / gateway errors may return a plain HTML or non-JSON body.
+     *
+     * Fallback mapping:
+     * - 4xx → `"invalid_request_error"`
+     * - 5xx → `"internal_error"`
+     */
+    override fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
+        super.getResponseErrorBodyAttributes(span, response)
+
+        // Prefer the API type already written to the span during request processing (thread-safe,
+        // survives async OkHttp dispatch). Fall back to the ThreadLocal stored during request
+        // processing, then to URL re-detection. After OkHttp follows a redirect, response.url
+        // reflects the final URL and may no longer contain the original path segment (e.g.
+        // "batches"), so re-parsing alone is not reliable; the span attribute is the most robust
+        // source because it was set synchronously in handleRequestAttributes.
+        val spanApiType = (span as? ReadableSpan)
+            ?.toSpanData()
+            ?.attributes
+            ?.get(AttributeKey.stringKey("anthropic.api.type"))
+        val apiType = spanApiType ?: requestApiTypeThreadLocal.get() ?: when {
+            isCountTokensUrl(response.url) -> "count_tokens"
+            isBatchUrl(response.url) -> "batches"
+            isFilesUrl(response.url) -> "files"
+            isModelsUrl(response.url) -> "models"
+            else -> null
+        }
+        requestApiTypeThreadLocal.remove()
+
+        if (apiType != null) {
+            span.setAttribute("anthropic.api.type", apiType)
+            span.setAttribute("gen_ai.provider.name", GenAiSystemIncubatingValues.ANTHROPIC)
+            if (apiType == "batches") {
+                // Preserve the operation name already written to the span during request processing.
+                // Calling detectOperation() on the response URL is unreliable: after a redirect the
+                // URL may no longer contain the "batches" segment, and a redirect-rewritten HTTP
+                // method (e.g. POST→GET after a 302) would produce the wrong operation name.
+                val existingOpName = (span as? ReadableSpan)
+                    ?.toSpanData()
+                    ?.attributes
+                    ?.get(AttributeKey.stringKey("gen_ai.operation.name"))
+                if (existingOpName.isNullOrBlank()) {
+                    span.setAttribute(GEN_AI_OPERATION_NAME, batchesHandler.detectOperation(response.url, response.requestMethod))
+                }
+            }
+        }
+
+        // If the base class already extracted error.type from the body, nothing more to do.
+        val alreadySet = (span as? ReadableSpan)
+            ?.toSpanData()
+            ?.attributes
+            ?.get(AttributeKey.stringKey("error.type"))
+        if (alreadySet != null) return
+
+        // Derive fallback error.type from the HTTP status code directly from the response.
+        val statusCode = response.code.toLong()
+
+        val fallbackType = when {
+            statusCode in 400L..499L -> "invalid_request_error"
+            statusCode in 500L..599L -> "internal_error"
+            else -> return
+        }
+        span.setAttribute("error.type", fallbackType)
+    }
+
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
 
-    // streaming is not supported
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
-    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+    override fun isStreamingRequest(request: TracyHttpRequest): Boolean {
+        val body = request.body.asJson()?.jsonObject ?: return false
+        return body["stream"]?.jsonPrimitive?.booleanOrNull == true
+    }
+
+    /**
+     * Parses Anthropic Server-Sent Events to populate span attributes for streaming responses.
+     *
+     * Handles three event types from the [Anthropic SSE streaming format](https://docs.anthropic.com/en/api/messages-streaming):
+     * - `message_start`: provides response id, model, role, and input token usage
+     * - `content_block_delta`: accumulates streamed text content
+     * - `message_delta`: provides stop reason and output token usage
+     */
+    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String): Unit = runCatching {
+        var responseId: String? = null
+        var responseModel: String? = null
+        var responseRole: String? = null
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
+        val finishReasons = mutableListOf<String>()
+        val contentBuilder = StringBuilder()
+
+        for (line in events.lineSequence()) {
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+
+            val event = runCatching {
+                Json.parseToJsonElement(data).jsonObject
+            }.getOrNull() ?: continue
+
+            when (event["type"]?.jsonPrimitive?.content) {
+                "message_start" -> {
+                    val message = event["message"]?.jsonObject ?: continue
+                    if (responseId == null) responseId = message["id"]?.jsonPrimitive?.content
+                    if (responseModel == null) responseModel = message["model"]?.jsonPrimitive?.content
+                    if (responseRole == null) responseRole = message["role"]?.jsonPrimitive?.content
+                    message["usage"]?.jsonObject?.let { usage ->
+                        inputTokens = usage["input_tokens"]?.jsonPrimitive?.intOrNull
+                    }
+                }
+                "content_block_delta" -> {
+                    val delta = event["delta"]?.jsonObject ?: continue
+                    if (delta["type"]?.jsonPrimitive?.content == "text_delta") {
+                        delta["text"]?.jsonPrimitive?.content?.let { contentBuilder.append(it) }
+                    }
+                }
+                "message_delta" -> {
+                    event["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.content?.let {
+                        finishReasons.add(it)
+                    }
+                    event["usage"]?.jsonObject?.let { usage ->
+                        outputTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull
+                    }
+                }
+            }
+        }
+
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "message")
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        responseRole?.let { span.setAttribute("gen_ai.response.role", it) }
+        inputTokens?.let { span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it) }
+        outputTokens?.let { span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it) }
+        val content = contentBuilder.toString()
+        if (content.isNotEmpty()) {
+            span.setAttribute("gen_ai.completion.0.content", content.orRedactedOutput())
+        }
+        if (finishReasons.isNotEmpty()) {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons)
+        }
+        span.setAttribute("anthropic.api.type", "messages")
+        return@runCatching
+    }.getOrElse { exception ->
+        span.setStatus(StatusCode.ERROR)
+        span.recordException(exception)
+    }
+
+    /** Returns `true` when the URL targets the Count Tokens API (contains a `count_tokens` path segment). */
+    private fun isCountTokensUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("count_tokens")
+
+    /** Returns `true` when the URL targets the Message Batches API (contains a `batches` path segment). */
+    private fun isBatchUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("batches")
+
+    /** Returns `true` when the URL targets the Files API (contains a `files` path segment). */
+    private fun isFilesUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("files")
+
+    /** Returns `true` when the URL targets the Models API (contains a `models` path segment). */
+    private fun isModelsUrl(url: TracyHttpUrl): Boolean = url.pathSegments.contains("models")
 
     /**
      * Parses content of the `messages` field when its type is

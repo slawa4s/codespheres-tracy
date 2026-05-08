@@ -57,15 +57,18 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         validateBasicImageTracing(prompt, model)
         val trace = analyzeSpans().first()
 
+        assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+
         assertEquals(
             size.asString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.size")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.size")]
         )
         assertEquals(
             responseFormat?.asString() ?: "null",
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.response_format")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.response_format")]
         )
-        assertEquals("1", trace.attributes[AttributeKey.stringKey("gen_ai.request.n")])
+        assertEquals("1", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
 
         val expectedImage = when (responseFormat) {
             ImageGenerateParams.ResponseFormat.B64_JSON ->
@@ -119,12 +122,15 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         validateBasicImageTracing(prompt, model)
         val trace = traces.first()
 
+        assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+
         assertEquals(
             size.asString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.size")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.size")]
         )
-        assertEquals("1", trace.attributes[AttributeKey.stringKey("gen_ai.request.n")])
-        assertEquals(format.asString(), trace.attributes[AttributeKey.stringKey("gen_ai.request.output_format")])
+        assertEquals("1", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
+        assertEquals(format.asString(), trace.attributes[AttributeKey.stringKey("tracy.request.output_format")])
 
         val expectedImage = MediaContentAttributeValues.Data(
             field = "output",
@@ -164,11 +170,14 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         validateBasicImageTracing(prompt, model)
         val trace = analyzeSpans().first()
 
+        assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+
         assertEquals(
             size.asString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.size")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.size")]
         )
-        assertEquals("3", trace.attributes[AttributeKey.stringKey("gen_ai.request.n")])
+        assertEquals("3", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
 
         val expectedImage = MediaContentAttributeValues.Url(
             field = "output",
@@ -244,15 +253,18 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         validateBasicImageTracing(prompt, model)
         val trace = analyzeSpans().first()
 
+        assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+
         assertEquals(
             size.asString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.size")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.size")]
         )
         assertEquals(
             partialImagesCount.toString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.partial_images")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.partial_images")]
         )
-        assertEquals("1", trace.attributes[AttributeKey.stringKey("gen_ai.request.n")])
+        assertEquals("1", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
 
         // expect there to be two partial images.
         // mind that it may not always be the case:

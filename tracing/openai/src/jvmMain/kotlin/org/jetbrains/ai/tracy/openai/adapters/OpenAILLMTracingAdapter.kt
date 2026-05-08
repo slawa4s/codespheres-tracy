@@ -12,8 +12,16 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioSpeechOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranscriptionOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranslationOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.BatchesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.models.ModelsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.moderations.ModerationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
@@ -27,21 +35,45 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Detects which OpenAI API is being used based on the request / response structure
  */
-private enum class OpenAIApiType(val route: String) {
+private enum class OpenAIApiType(val route: String, val apiTypeName: String) {
     // See: https://platform.openai.com/docs/api-reference/completions
-    CHAT_COMPLETIONS("completions"),
+    CHAT_COMPLETIONS("completions", "chat_completions"),
 
     // See: https://platform.openai.com/docs/api-reference/responses
-    RESPONSES_API("responses"),
+    RESPONSES_API("responses", "responses"),
 
     // See: https://platform.openai.com/docs/api-reference/images/create
-    IMAGES_GENERATIONS("images/generations"),
+    IMAGES_GENERATIONS("images/generations", "images.generations"),
 
     // See: https://platform.openai.com/docs/api-reference/images/createEdit
-    IMAGES_EDITS("images/edits"),
+    IMAGES_EDITS("images/edits", "images.edits"),
+
+    // See: https://platform.openai.com/docs/api-reference/conversations
+    CONVERSATIONS("conversations", "conversations"),
 
     // See: https://platform.openai.com/docs/api-reference/videos
-    VIDEOS("videos");
+    VIDEOS("videos", "videos"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createSpeech
+    AUDIO_SPEECH("audio/speech", "audio"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createTranscription
+    AUDIO("audio/transcriptions", "audio"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createTranslation
+    AUDIO_TRANSLATION("audio/translations", "audio"),
+
+    // See: https://platform.openai.com/docs/api-reference/files
+    FILES("files", "files"),
+
+    // See: https://platform.openai.com/docs/api-reference/batch
+    BATCHES("batches", "batches"),
+
+    // See: https://platform.openai.com/docs/api-reference/models
+    MODELS("models", "models"),
+
+    // See: https://platform.openai.com/docs/api-reference/moderations
+    MODERATIONS("moderations", "moderations");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -89,14 +121,21 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private val handlers = ConcurrentHashMap<OpenAIApiType, EndpointApiHandler>()
 
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        OpenAIApiType.detect(request.url)?.let { span.setAttribute("openai.api.type", it.apiTypeName) }
         val handler = handlerFor(request.url)
         handler.handleRequestAttributes(span, request)
     }
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
+        OpenAIApiType.detect(response.url)?.let { span.setAttribute("openai.api.type", it.apiTypeName) }
         val handler = handlerFor(response.url)
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
         handler.handleResponseAttributes(span, response)
+    }
+
+    override fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
+        super.getResponseErrorBodyAttributes(span, response)
+        OpenAIApiType.detect(response.url)?.let { span.setAttribute("openai.api.type", it.apiTypeName) }
     }
 
     override fun getSpanName(request: TracyHttpRequest) = "OpenAI-generation"
@@ -134,6 +173,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         val extractor = MediaContentExtractorImpl()
 
         val handler = when (apiType) {
+            OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
+                ConversationsOpenAIApiEndpointHandler()
+            }
+
             OpenAIApiType.CHAT_COMPLETIONS -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
                 ChatCompletionsOpenAIApiEndpointHandler(extractor)
             }
@@ -152,6 +195,34 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.VIDEOS -> handlers.getOrPut(OpenAIApiType.VIDEOS) {
                 VideosOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.AUDIO_SPEECH -> handlers.getOrPut(OpenAIApiType.AUDIO_SPEECH) {
+                AudioSpeechOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.AUDIO -> handlers.getOrPut(OpenAIApiType.AUDIO) {
+                AudioTranscriptionOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.AUDIO_TRANSLATION -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSLATION) {
+                AudioTranslationOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.FILES -> handlers.getOrPut(OpenAIApiType.FILES) {
+                FilesOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.BATCHES -> handlers.getOrPut(OpenAIApiType.BATCHES) {
+                BatchesOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.MODELS -> handlers.getOrPut(OpenAIApiType.MODELS) {
+                ModelsOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.MODERATIONS -> handlers.getOrPut(OpenAIApiType.MODERATIONS) {
+                ModerationsOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {

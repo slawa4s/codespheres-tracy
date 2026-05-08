@@ -27,6 +27,9 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("gen_ai.operation.name", "generate_content")
+        span.setAttribute("gen_ai.output.type", "image")
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["prompt"]?.let { span.setAttribute("gen_ai.prompt.0.content", it.jsonPrimitive.content.orRedactedInput()) }
@@ -37,7 +40,7 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
             if (key in manuallyParsedKeys) {
                 continue
             }
-            span.setAttribute("gen_ai.request.$key", value.asString.orRedactedInput())
+            span.setAttribute("tracy.request.$key", value.asString.orRedactedInput())
         }
     }
 

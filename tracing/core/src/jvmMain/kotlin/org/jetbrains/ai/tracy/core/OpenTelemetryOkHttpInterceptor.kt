@@ -10,6 +10,7 @@ import io.opentelemetry.api.trace.StatusCode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import mu.KotlinLogging
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.OkHttpClient
@@ -23,6 +24,8 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import okhttp3.Request as OkHttpRequest
 import okhttp3.Response as OkHttpResponse
 import okhttp3.ResponseBody as OkHttpResponseBody
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Instruments an [OkHttpClient] with OpenTelemetry tracing for LLM provider API calls,
@@ -143,20 +146,52 @@ fun instrument(client: OkHttpClient, adapter: LLMTracingAdapter): OkHttpClient {
  * with the specified interceptor.
  * Supports OpenAI-compatible (**in terms of internal class structure**) clients.
  *
+ * The reflection path traversed is:
+ * ```
+ * client.clientOptions
+ *   → [originalHttpClient | httpClient]   (falls back to "httpClient" when "originalHttpClient" absent)
+ *   → [if not OkHttpClient wrapper] .httpClient
+ *   → .okHttpClient (okhttp3.OkHttpClient, resolved by name then by type as a fallback)
+ * ```
+ *
  * @param client The instance of the OpenAI-compatible client to patch.
  * @param interceptor The interceptor to be injected into the internal HTTP client of the OpenAI-compatible client.
  */
 fun <T> patchOpenAICompatibleClient(client: T, interceptor: Interceptor) {
     val clientOptions = getFieldValue(client as Any, "clientOptions")
-    val originalHttpClient = getFieldValue(clientOptions, "originalHttpClient")
 
-    val okHttpHolder = if (originalHttpClient::class.simpleName == "OkHttpClient") {
-        originalHttpClient
-    } else {
-        getFieldValue(originalHttpClient, "httpClient")
+    // Some SDK versions store the unwrapped HTTP client under "originalHttpClient"; others may only
+    // have "httpClient". Fall back to "httpClient" when the primary field name is absent so the
+    // instrumentation stays compatible across minor SDK releases.
+    val httpClientHolder = try {
+        getFieldValue(clientOptions, "originalHttpClient")
+    } catch (_: NoSuchFieldException) {
+        getFieldValue(clientOptions, "httpClient")
     }
 
-    val okHttpClient = getFieldValue(okHttpHolder, "okHttpClient") as OkHttpClient
+    val okHttpHolder = if (httpClientHolder::class.simpleName == "OkHttpClient") {
+        httpClientHolder
+    } else {
+        try {
+            getFieldValue(httpClientHolder, "httpClient")
+        } catch (_: NoSuchFieldException) {
+            // The holder itself may directly contain the okHttpClient field; use it as-is.
+            httpClientHolder
+        }
+    }
+
+    // Resolve the underlying okhttp3.OkHttpClient. Try by field name first; if that fails (e.g.
+    // because of Kotlin @JvmSynthetic name mangling across SDK versions) fall back to a type-based
+    // scan of all declared fields so the lookup remains version-resilient.
+    val okHttpClient: OkHttpClient = try {
+        getFieldValue(okHttpHolder, "okHttpClient") as OkHttpClient
+    } catch (_: Exception) {
+        findFieldByType(okHttpHolder, OkHttpClient::class.java)
+            ?: throw NoSuchFieldException(
+                "Could not find okhttp3.OkHttpClient field in ${okHttpHolder.javaClass.name}. " +
+                "This may indicate an incompatible SDK version."
+            )
+    }
 
     // add a given interceptor if the current list of interceptors doesn't contain it already
     val updatedInterceptors = patchInterceptors(okHttpClient.interceptors, interceptor)
@@ -195,6 +230,29 @@ internal fun setFieldValue(instance: Any, fieldName: String, value: Any?) {
         }
     }
     throw NoSuchFieldException("Field '$fieldName' not found in ${instance.javaClass.name}")
+}
+
+/**
+ * Searches the class hierarchy of [instance] for a declared field whose type is assignable to
+ * [type] and returns its value. Returns `null` if no matching field is found or the field value
+ * is not an instance of [type].
+ *
+ * This is used as a fallback when the exact field name is unknown (e.g. due to Kotlin
+ * `@JvmSynthetic internal val` name mangling across different SDK versions).
+ */
+internal fun <T> findFieldByType(instance: Any, type: Class<T>): T? {
+    var cls: Class<*>? = instance.javaClass
+    while (cls != null) {
+        for (field in cls.declaredFields) {
+            if (type.isAssignableFrom(field.type)) {
+                field.isAccessible = true
+                @Suppress("UNCHECKED_CAST")
+                return field.get(instance) as? T
+            }
+        }
+        cls = cls.superclass
+    }
+    return null
 }
 
 /**
@@ -262,7 +320,12 @@ class OpenTelemetryOkHttpInterceptor(
                             JsonObject(emptyMap())
                         }
                         else -> {
-                            JsonObject(emptyMap())
+                            val size = response.body?.contentLength() ?: -1L
+                            if (size >= 0) {
+                                JsonObject(mapOf("_tracy_response_size_bytes" to JsonPrimitive(size)))
+                            } else {
+                                JsonObject(emptyMap())
+                            }
                         }
                     }
 
