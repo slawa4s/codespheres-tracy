@@ -189,6 +189,63 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
     }
 
     // ──────────────────────────────────────────────────────────────────────────────────────────
+    // Error: empty requests (SDK-level)
+    // ──────────────────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Verifies that a span is still exported when the Anthropic SDK makes a batch create
+     * request that the server rejects with a 400 error.
+     *
+     * Note: `BatchCreateParams.builder().build()` (no requests at all) throws an
+     * [IllegalStateException] at build-time before any HTTP call is made, so the OkHttp
+     * interceptor never runs in that path. Instead, we use `requests(emptyList())` to produce
+     * `{"requests":[]}`, which is a valid serialization that reaches the server and causes a 400
+     * response. This exercises the same error-fallback code path that the raw-OkHttp test in
+     * `AnthropicBatchesTracingTest` already covers.
+     */
+    @Test
+    fun `test batch create with empty requests still emits error span`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .addHeader("Content-Type", "application/json")
+                    .setBody("""{"detail": "At least one request is required in a message batch"}""")
+            )
+
+            val client = createClient(server.url("/").toString())
+            instrument(client)
+
+            try {
+                client.messages().batches().create(
+                    BatchCreateParams.builder().requests(emptyList()).build()
+                )
+            } catch (_: Exception) {
+                // SDK throws on 400 response; trace is already recorded by the OkHttp interceptor
+            }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(
+                "batches",
+                trace.attributes[AttributeKey.stringKey("anthropic.api.type")],
+                "anthropic.api.type"
+            )
+            assertNotNull(
+                trace.attributes[AttributeKey.stringKey("error.type")],
+                "error.type must be non-null"
+            )
+            assertEquals(
+                400L,
+                trace.attributes[AttributeKey.longKey("http.response.status_code")],
+                "http.response.status_code"
+            )
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────────────────────
     // Shared assertion helper
     // ──────────────────────────────────────────────────────────────────────────────────────────
 

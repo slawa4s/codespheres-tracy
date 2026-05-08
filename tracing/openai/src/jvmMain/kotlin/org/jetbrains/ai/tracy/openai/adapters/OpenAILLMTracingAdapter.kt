@@ -35,7 +35,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 private enum class OpenAIApiType(val route: String, val apiTypeName: String) {
     // See: https://platform.openai.com/docs/api-reference/completions
-    CHAT_COMPLETIONS("completions", "chat.completions"),
+    CHAT_COMPLETIONS("completions", "chat_completions"),
 
     // See: https://platform.openai.com/docs/api-reference/responses
     RESPONSES_API("responses", "responses"),
