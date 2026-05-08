@@ -22,7 +22,7 @@ dependencyResolutionManagement {
 
 include("docs")
 include("eval")
-include("examples")
+// include("examples")
 include("tracing:anthropic")
 include("tracing:core")
 include("tracing:gemini")

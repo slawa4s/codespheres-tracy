@@ -53,9 +53,12 @@ internal fun URLBuilder.toProtocolUrl(): TracyHttpUrl {
         override fun queryParameterValues(name: String) = params.getAll(name) ?: emptyList()
     }
 
+    val explicitPort = builder.port
+    val defaultPort = if (builder.protocol.name == "https") 443 else 80
     return TracyHttpUrlImpl(
         scheme = builder.protocol.name,
         host = builder.host,
+        port = if (explicitPort > 0) explicitPort else defaultPort,
         pathSegments = builder.pathSegments,
         parameters = params,
     )
@@ -69,9 +72,12 @@ internal fun KtorUrl.toProtocolUrl(): TracyHttpUrl {
         override fun queryParameterValues(name: String) = url.parameters.getAll(name) ?: emptyList()
     }
 
+    val explicitPort = url.port
+    val defaultPort = if (url.protocol.name == "https") 443 else 80
     return TracyHttpUrlImpl(
         scheme = url.protocol.name,
         host = url.host,
+        port = if (explicitPort > 0) explicitPort else defaultPort,
         pathSegments = url.segments,
         parameters = params,
     )
