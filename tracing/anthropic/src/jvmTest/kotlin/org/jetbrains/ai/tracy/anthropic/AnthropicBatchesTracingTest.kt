@@ -260,6 +260,8 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertEquals(400L, trace.attributes[AttributeKey.longKey("http.status_code")])
             // The fallback must populate error.type even though the body has no standard error envelope.
             assertEquals("invalid_request_error", trace.attributes[AttributeKey.stringKey("error.type")])
+            // anthropic.api.type must survive on error-only spans for batch URLs.
+            assertEquals("batches", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
         }
     }
 
