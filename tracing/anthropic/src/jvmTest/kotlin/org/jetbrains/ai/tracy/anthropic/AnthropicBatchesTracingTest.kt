@@ -226,6 +226,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             val trace = traces.first()
 
             assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("messages", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
             assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
         }
     }
