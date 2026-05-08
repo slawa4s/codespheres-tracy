@@ -13,6 +13,8 @@
 **All the weak points can be addressed via prompts alone.**
 
 
+## Newly supported endpoints
+
 | Provider | Endpoint Class | Endpoint Route                                     | New | Implemented by                                                                                        | Note                                                                                   |
 |----------|----------------|----------------------------------------------------|-----|-------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
 | OpenAI   | audio          | `/audio/transcriptions`                            | ✅   | `org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioOpenAIApiEndpointHandler`                 |                                                                                        |
