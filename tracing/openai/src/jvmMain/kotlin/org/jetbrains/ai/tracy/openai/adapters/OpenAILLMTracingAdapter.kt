@@ -28,6 +28,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.Conversatio
 import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.models.ModelsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.moderations.ModerationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import java.util.concurrent.ConcurrentHashMap
@@ -69,6 +70,9 @@ private enum class OpenAIApiType(val route: String, val apiTypeName: String) {
 
     // See: https://platform.openai.com/docs/api-reference/batch
     BATCHES("batches", "batches"),
+
+    // See: https://platform.openai.com/docs/api-reference/models
+    MODELS("models", "models"),
 
     // See: https://platform.openai.com/docs/api-reference/moderations
     MODERATIONS("moderations", "moderations");
@@ -198,6 +202,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.BATCHES -> handlers.getOrPut(OpenAIApiType.BATCHES) {
                 BatchesOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.MODELS -> handlers.getOrPut(OpenAIApiType.MODELS) {
+                ModelsOpenAIApiEndpointHandler()
             }
 
             OpenAIApiType.MODERATIONS -> handlers.getOrPut(OpenAIApiType.MODERATIONS) {
