@@ -20,6 +20,7 @@ import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 
@@ -217,7 +218,56 @@ class GeminiContentGenHandler(
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
 
-    override fun handleStreaming(span: Span, events: String) = Unit
+    override fun handleStreaming(span: Span, events: String): Unit = runCatching {
+        // Accumulate text across all SSE chunks
+        val contentBuilder = StringBuilder()
+        var responseId: String? = null
+        var modelVersion: String? = null
+        var finishReason: String? = null
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
+
+        for (line in events.lineSequence()) {
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+
+            val event = runCatching {
+                Json.parseToJsonElement(data).jsonObject
+            }.getOrNull() ?: continue
+
+            // Capture response metadata from the last event that provides them
+            event["responseId"]?.jsonPrimitive?.content?.let { responseId = it }
+            event["modelVersion"]?.jsonPrimitive?.content?.let { modelVersion = it }
+
+            // Accumulate candidate text
+            event["candidates"]?.jsonArray?.firstOrNull()?.jsonObject?.let { candidate ->
+                candidate["content"]?.jsonObject?.get("parts")?.jsonArray?.forEach { part ->
+                    part.jsonObject["text"]?.jsonPrimitive?.content?.let { contentBuilder.append(it) }
+                }
+                candidate["finishReason"]?.jsonPrimitive?.content?.let { finishReason = it }
+            }
+
+            // Capture usage from the last event that has it
+            event["usageMetadata"]?.jsonObject?.let { usage ->
+                usage["promptTokenCount"]?.jsonPrimitive?.intOrNull?.let { inputTokens = it }
+                usage["candidatesTokenCount"]?.jsonPrimitive?.intOrNull?.let { outputTokens = it }
+            }
+        }
+
+        val content = contentBuilder.toString()
+        if (content.isNotEmpty()) {
+            span.setAttribute("gen_ai.completion.0.content", content.orRedactedOutput())
+        }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        modelVersion?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        inputTokens?.let { span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it) }
+        outputTokens?.let { span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it) }
+        return@runCatching
+    }.getOrElse { exception ->
+        span.setStatus(StatusCode.ERROR)
+        span.recordException(exception)
+    }
 
     private fun parseRequestMediaContent(body: JsonObject): MediaContent? {
         val contents = body["contents"]
