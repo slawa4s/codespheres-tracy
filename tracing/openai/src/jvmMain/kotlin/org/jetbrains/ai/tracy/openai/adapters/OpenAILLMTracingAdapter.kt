@@ -20,6 +20,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.Conversatio
 import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.moderations.ModerationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
@@ -65,7 +66,10 @@ private enum class OpenAIApiType(val route: String, val apiTypeName: String) {
     FILES("files", "files"),
 
     // See: https://platform.openai.com/docs/api-reference/batch
-    BATCHES("batches", "batches");
+    BATCHES("batches", "batches"),
+
+    // See: https://platform.openai.com/docs/api-reference/moderations
+    MODERATIONS("moderations", "moderations");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -123,6 +127,11 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         val handler = handlerFor(response.url)
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
         handler.handleResponseAttributes(span, response)
+    }
+
+    override fun getResponseErrorBodyAttributes(span: Span, response: TracyHttpResponse) {
+        super.getResponseErrorBodyAttributes(span, response)
+        OpenAIApiType.detect(response.url)?.let { span.setAttribute("openai.api.type", it.apiTypeName) }
     }
 
     override fun getSpanName(request: TracyHttpRequest) = "OpenAI-generation"
@@ -202,6 +211,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.BATCHES -> handlers.getOrPut(OpenAIApiType.BATCHES) {
                 BatchesOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.MODERATIONS -> handlers.getOrPut(OpenAIApiType.MODERATIONS) {
+                ModerationsOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {

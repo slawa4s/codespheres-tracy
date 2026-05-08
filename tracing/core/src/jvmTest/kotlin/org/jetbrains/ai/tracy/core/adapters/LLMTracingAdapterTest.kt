@@ -205,6 +205,33 @@ class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
     }
 
     @Test
+    fun `registerRequest sets core identification attributes even when getRequestBodyAttributes throws`() {
+        val throwingAdapter = object : LLMTracingAdapter("throwing-system") {
+            override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+                throw RuntimeException("provider-specific parsing failure")
+            }
+            override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {}
+            override fun getSpanName(request: TracyHttpRequest) = "test-throwing-span"
+            override fun isStreamingRequest(request: TracyHttpRequest) = false
+            override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) {}
+        }
+
+        val span = TracingManager.tracer.spanBuilder("test-throwing").startSpan()
+        throwingAdapter.registerRequest(span, testRequest)
+        span.end()
+
+        val spans = analyzeSpans()
+        assertEquals(1, spans.size)
+        val spanData = spans.first()
+
+        assertEquals("throwing-system", spanData.attributes[AttributeKey.stringKey("gen_ai.system")])
+        assertEquals("throwing-system", spanData.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+        assertEquals("api.example.com", spanData.attributes[AttributeKey.stringKey("server.address")])
+        assertEquals(443L, spanData.attributes[AttributeKey.longKey("server.port")])
+        assertEquals("https://api.example.com", spanData.attributes[AttributeKey.stringKey("gen_ai.api_base")])
+    }
+
+    @Test
     fun `getResponseErrorBodyAttributes sets both error_type and gen_ai_error_type`() {
         val span = TracingManager.tracer.spanBuilder("test-error-type").startSpan()
 
