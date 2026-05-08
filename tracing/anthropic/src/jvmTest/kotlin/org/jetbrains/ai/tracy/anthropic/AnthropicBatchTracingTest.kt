@@ -5,11 +5,13 @@
 
 package org.jetbrains.ai.tracy.anthropic
 
+import com.anthropic.client.AnthropicClient
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
 import com.anthropic.models.messages.Model
 import com.anthropic.models.messages.batches.BatchCancelParams
 import com.anthropic.models.messages.batches.BatchCreateParams
 import com.anthropic.models.messages.batches.BatchRetrieveParams
+import com.anthropic.services.blocking.messages.BatchService
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
@@ -17,6 +19,7 @@ import org.jetbrains.ai.tracy.anthropic.clients.instrument
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import java.lang.reflect.Proxy
 import java.time.Duration
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -246,6 +249,92 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
     }
 
     // ──────────────────────────────────────────────────────────────────────────────────────────
+    // Error: pre-HTTP SDK exception (proxy path)
+    // ──────────────────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Verifies that the [BatchService] proxy installed by [instrument] emits an error span even
+     * when the SDK throws **before** any HTTP call is attempted.
+     *
+     * The scenario is modelled after `BatchCreateParams.builder().build()` (no requests provided),
+     * which throws [IllegalStateException] at build-time so the OkHttp interceptor never fires.
+     * To exercise the proxy path directly, this test replaces the batch service inside the client
+     * with a fake that throws [IllegalStateException] from `create()` without making any HTTP call,
+     * then instruments the client so the proxy wraps the fake service.
+     */
+    @Test
+    fun `test batch create proxy emits error span for pre-HTTP SDK exception`() = runTest {
+        withMockServer { server ->
+            val client = createClient(server.url("/").toString())
+
+            // Inject a fake BatchService that throws IllegalStateException inside create()
+            // *before* calling instrument(). This simulates SDK validation errors (e.g., from
+            // BatchCreateParams.builder().build()) that occur before any HTTP call.
+            injectThrowingBatchService(client)
+
+            // instrument() wraps the fake service with the proxy.
+            instrument(client)
+
+            val caughtException = runCatching {
+                client.messages().batches().create(
+                    // Use valid params – the fake service throws regardless.
+                    BatchCreateParams.builder()
+                        .addRequest(
+                            BatchCreateParams.Request.builder()
+                                .customId("req-1")
+                                .params(
+                                    BatchCreateParams.Request.Params.builder()
+                                        .model(Model.CLAUDE_HAIKU_4_5)
+                                        .maxTokens(10)
+                                        .addUserMessage("Hi")
+                                        .build()
+                                )
+                                .build()
+                        )
+                        .build()
+                )
+            }.exceptionOrNull()
+
+            assertNotNull(caughtException, "Expected an exception from the fake batch service")
+
+            // No MockWebServer response was enqueued, confirming no HTTP call was made.
+            assertEquals(0, server.requestCount, "No HTTP request should have been sent")
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(
+                "anthropic",
+                trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")],
+                "gen_ai.provider.name"
+            )
+            assertEquals(
+                "batches",
+                trace.attributes[AttributeKey.stringKey("anthropic.api.type")],
+                "anthropic.api.type"
+            )
+            assertEquals(
+                "batches.create",
+                trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")],
+                "gen_ai.operation.name"
+            )
+            assertNotNull(
+                trace.attributes[AttributeKey.stringKey("error.type")],
+                "error.type must be set"
+            )
+            assertNotNull(
+                trace.attributes[AttributeKey.stringKey("server.address")],
+                "server.address must be set"
+            )
+            assertNotNull(
+                trace.attributes[AttributeKey.longKey("server.port")],
+                "server.port must be set"
+            )
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────────────────────
     // Shared assertion helper
     // ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -312,5 +401,62 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
             trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.expired")],
             "gen_ai.response.batch.request_counts.expired must be present"
         )
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────────────────────
+    // Test helpers
+    // ──────────────────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Replaces the [BatchService] inside [client] with a dynamic proxy that throws
+     * [IllegalStateException] from every `create(...)` overload without making any HTTP call.
+     *
+     * This simulates the situation where the Anthropic SDK raises a validation error before
+     * the request is serialised and dispatched.
+     */
+    private fun injectThrowingBatchService(client: AnthropicClient) {
+        val messagesService = client.messages()
+
+        // Force lazy initialisation so the field has a real BatchServiceImpl value to read.
+        val realBatchService = messagesService.batches()
+
+        // Build a dynamic proxy that delegates everything to the real service except create(),
+        // which always throws IllegalStateException to simulate a pre-HTTP SDK validation error.
+        val throwingProxy = Proxy.newProxyInstance(
+            realBatchService.javaClass.classLoader,
+            arrayOf(BatchService::class.java),
+        ) { _, method, args ->
+            val actualArgs: Array<Any?> = args ?: emptyArray()
+            if (method.name == "create") {
+                throw IllegalStateException("requests is required, but was not set")
+            }
+            method.invoke(realBatchService, *actualArgs)
+        } as BatchService
+
+        // Swap the cached value inside the existing Lazy.
+        var cls: Class<*>? = messagesService.javaClass
+        while (cls != null) {
+            try {
+                val delegateField = cls.getDeclaredField("batches\$delegate")
+                delegateField.isAccessible = true
+                val lazyDelegate = delegateField.get(messagesService)
+                (lazyDelegate as Lazy<*>).value
+                var lazyCls: Class<*>? = lazyDelegate.javaClass
+                while (lazyCls != null) {
+                    try {
+                        val valueField = lazyCls.getDeclaredField("_value")
+                        valueField.isAccessible = true
+                        valueField.set(lazyDelegate, throwingProxy)
+                        return
+                    } catch (_: NoSuchFieldException) {
+                        lazyCls = lazyCls.superclass
+                    }
+                }
+                error("Could not find _value field in ${lazyDelegate.javaClass.name}")
+            } catch (_: NoSuchFieldException) {
+                cls = cls.superclass
+            }
+        }
+        error("Could not find batches\$delegate field in ${messagesService.javaClass.name}")
     }
 }

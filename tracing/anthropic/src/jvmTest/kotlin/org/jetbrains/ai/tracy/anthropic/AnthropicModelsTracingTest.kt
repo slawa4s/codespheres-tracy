@@ -61,6 +61,10 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
             assertEquals("models", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
             assertEquals("list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertNull(trace.attributes[AttributeKey.stringKey("gen_ai.request.model")])
+            assertEquals(1L, trace.attributes[AttributeKey.longKey("gen_ai.response.list.count")])
+            assertEquals("false", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.has_more")])
+            assertEquals(MODEL_VERSIONED_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.list.first_id")])
+            assertEquals(MODEL_VERSIONED_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.list.last_id")])
         }
     }
 

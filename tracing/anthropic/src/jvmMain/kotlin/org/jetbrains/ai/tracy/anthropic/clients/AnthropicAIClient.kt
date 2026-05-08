@@ -5,14 +5,30 @@
 
 package org.jetbrains.ai.tracy.anthropic.clients
 
+import com.anthropic.client.AnthropicClient
+import com.anthropic.errors.AnthropicException
+import com.anthropic.services.blocking.messages.BatchService
+import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
+import mu.KotlinLogging
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
 import org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.patchOpenAICompatibleClient
-import com.anthropic.client.AnthropicClient
-import mu.KotlinLogging
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Proxy
+import java.net.URI
 
 private val logger = KotlinLogging.logger {}
+
+/**
+ * Marker interface used to detect that a [BatchService] has already been wrapped by Tracy's
+ * pre-HTTP error tracing proxy. Prevents double-instrumentation when [instrument] is called
+ * more than once on the same client.
+ */
+private interface TracyBatchServiceProxy
 
 /**
  * Instruments an Anthropic Claude client with OpenTelemetry tracing capabilities **inplace**.
@@ -119,6 +135,8 @@ private val logger = KotlinLogging.logger {}
  *   to redact sensitive input/output data.
  * - Error responses (e.g., 529 overload errors) are automatically captured with error status and messages.
  * - Multi-turn conversations with tool results are fully traced, showing the complete dialogue history.
+ * - Pre-HTTP failures in `batches().create()` (e.g., SDK validation errors thrown before any HTTP call
+ *   is made) are captured via a dynamic proxy and emitted as error spans even when no HTTP call occurs.
  *
  * @param client The Anthropic client to instrument
  *
@@ -139,4 +157,177 @@ fun instrument(client: AnthropicClient) {
             "Cause: ${e.javaClass.simpleName}: ${e.message}"
         }
     }
+
+    instrumentBatchesService(client)
+}
+
+/**
+ * Wraps the [BatchService] obtained from [client] with a dynamic proxy that emits an error
+ * span whenever [BatchService.create] throws an exception that was **not** caused by an HTTP
+ * response (i.e., the SDK threw before any HTTP call was attempted).
+ *
+ * This complements the OkHttp-level [OpenTelemetryOkHttpInterceptor]: that interceptor records
+ * spans for all HTTP interactions, but it never fires when the SDK raises an exception prior to
+ * making an HTTP call (for example, an `IllegalStateException` thrown by the SDK's parameter
+ * validation before the request is sent). The proxy closes that gap by catching such
+ * non-[AnthropicException] failures and recording a span with:
+ * - `gen_ai.provider.name = "anthropic"`
+ * - `anthropic.api.type = "batches"`
+ * - `gen_ai.operation.name = "batches.create"`
+ * - `error.type` (the exception class name)
+ * - `server.address` / `server.port` (derived from the client's base URL)
+ *
+ * The instrumentation is **idempotent**: a second call on the same client is a no-op because
+ * the proxy already wraps [BatchService].
+ */
+private fun instrumentBatchesService(client: AnthropicClient) {
+    try {
+        // Extract server address and port from the client's configured base URL.
+        val clientOptions = getBatchFieldInHierarchy(client, "clientOptions")
+        val baseUrl = clientOptions.javaClass.getMethod("baseUrl").invoke(clientOptions) as? String
+            ?: return
+        val uri = URI.create(baseUrl)
+        val serverAddress = uri.host ?: return
+        val serverPort = when {
+            uri.port > 0 -> uri.port
+            uri.scheme == "https" -> 443
+            else -> 80
+        }
+
+        // Obtain the MessageService implementation; this also forces its lazy initialisation.
+        val messagesService = client.messages()
+
+        // Obtain the current BatchService, forcing its lazy initialisation inside MessageServiceImpl.
+        val originalBatchService = messagesService.batches()
+
+        // Idempotency guard: if the batch service is already one of our proxies, skip.
+        if (originalBatchService is TracyBatchServiceProxy) return
+
+        // Create the proxy that wraps the original BatchService.
+        val batchProxy = createBatchServiceProxy(originalBatchService, serverAddress, serverPort)
+
+        // Swap the cached value inside the existing Lazy rather than replacing the Lazy itself.
+        val batchesDelegateField = getBatchDeclaredField(messagesService, "batches\$delegate")
+        val lazyDelegate = batchesDelegateField.get(messagesService)
+        // Ensure the Lazy has been initialised so `_value` holds a real object (not UNINITIALIZED_VALUE).
+        (lazyDelegate as Lazy<*>).value
+        val valueField = getBatchDeclaredField(lazyDelegate, "_value")
+        valueField.set(lazyDelegate, batchProxy)
+    } catch (e: Exception) {
+        logger.warn(e) {
+            "Failed to wrap AnthropicClient batch service for pre-HTTP error tracing — " +
+            "batch creation errors that occur before the HTTP call will not be traced. " +
+            "Cause: ${e.javaClass.simpleName}: ${e.message}"
+        }
+    }
+}
+
+/**
+ * Creates a [java.lang.reflect.Proxy] for [BatchService] that wraps [original].
+ *
+ * All methods are forwarded to [original] unchanged, **except** for any overload of
+ * `create(...)`: if `original.create(...)` throws a [Throwable] that is **not** an
+ * [AnthropicException] (which would indicate an HTTP-layer error already handled by the
+ * OkHttp interceptor), a dedicated error span is emitted before the exception is re-thrown.
+ *
+ * The proxy also implements [TracyBatchServiceProxy] so that repeated calls to
+ * [instrumentBatchesService] are no-ops.
+ */
+private fun createBatchServiceProxy(
+    original: BatchService,
+    serverAddress: String,
+    serverPort: Int,
+): BatchService {
+    val handler = java.lang.reflect.InvocationHandler { _, method, args ->
+        val actualArgs: Array<Any?> = args ?: emptyArray()
+
+        if (!TracingManager.isTracingEnabled || method.name != "create") {
+            return@InvocationHandler method.invoke(original, *actualArgs)
+        }
+
+        // Intercept all create(...) overloads.
+        try {
+            method.invoke(original, *actualArgs)
+        } catch (e: InvocationTargetException) {
+            val cause = e.cause ?: e
+            // AnthropicException means the SDK received an HTTP error response;
+            // the OkHttp interceptor already created a span for that case.
+            if (cause !is AnthropicException) {
+                createPreHttpBatchErrorSpan(cause, serverAddress, serverPort)
+            }
+            throw cause
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    return Proxy.newProxyInstance(
+        original.javaClass.classLoader,
+        arrayOf(BatchService::class.java, TracyBatchServiceProxy::class.java),
+        handler,
+    ) as BatchService
+}
+
+/**
+ * Emits a completed error span that represents a `batches.create` call that failed
+ * **before** any HTTP request was attempted (e.g., SDK-level parameter validation).
+ */
+private fun createPreHttpBatchErrorSpan(
+    error: Throwable,
+    serverAddress: String,
+    serverPort: Int,
+) {
+    val span = TracingManager.tracer.spanBuilder("Anthropic-generation").startSpan()
+    try {
+        span.setAttribute("gen_ai.provider.name", GenAiSystemIncubatingValues.ANTHROPIC)
+        span.setAttribute("anthropic.api.type", "batches")
+        span.setAttribute(GEN_AI_OPERATION_NAME, "batches.create")
+        span.setAttribute("error.type", error.javaClass.canonicalName ?: error.javaClass.name)
+        span.setAttribute("server.address", serverAddress)
+        span.setAttribute(AttributeKey.longKey("server.port"), serverPort.toLong())
+        span.setStatus(StatusCode.ERROR)
+        span.recordException(error)
+    } finally {
+        span.end()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reflection helpers (private, scoped to this file)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the value of [fieldName] by traversing the class hierarchy of [instance],
+ * making the field accessible along the way.
+ */
+private fun getBatchFieldInHierarchy(instance: Any, fieldName: String): Any {
+    var cls: Class<*>? = instance.javaClass
+    while (cls != null) {
+        try {
+            val field = cls.getDeclaredField(fieldName)
+            field.isAccessible = true
+            return field.get(instance)
+                ?: throw IllegalStateException("Field '$fieldName' is null in ${instance.javaClass.name}")
+        } catch (_: NoSuchFieldException) {
+            cls = cls.superclass
+        }
+    }
+    throw NoSuchFieldException("Field '$fieldName' not found in ${instance.javaClass.name}")
+}
+
+/**
+ * Returns a [java.lang.reflect.Field] named [fieldName] from the class hierarchy of [instance],
+ * making it accessible so the caller can read or write its value.
+ */
+private fun getBatchDeclaredField(instance: Any, fieldName: String): java.lang.reflect.Field {
+    var cls: Class<*>? = instance.javaClass
+    while (cls != null) {
+        try {
+            val field = cls.getDeclaredField(fieldName)
+            field.isAccessible = true
+            return field
+        } catch (_: NoSuchFieldException) {
+            cls = cls.superclass
+        }
+    }
+    throw NoSuchFieldException("Field '$fieldName' not found in ${instance.javaClass.name}")
 }

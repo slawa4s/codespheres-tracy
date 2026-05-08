@@ -56,6 +56,22 @@ internal class BatchesAnthropicApiEndpointHandler : EndpointApiHandler {
         if (response.isError()) return
         val body = response.body.asJson()?.jsonObject ?: return
 
+        // List response: top-level "data" array is present → set pagination attributes and return early
+        val dataElement = body["data"]
+        if (dataElement is JsonArray) {
+            span.setAttribute("gen_ai.response.list.count", dataElement.size.toLong())
+            body["has_more"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.list.has_more", it)
+            }
+            body["first_id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.list.first_id", it)
+            }
+            body["last_id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.list.last_id", it)
+            }
+            return
+        }
+
         span.setAttribute(GEN_AI_OUTPUT_TYPE, "message_batch")
 
         // id → gen_ai.response.id + gen_ai.response.batch.id
