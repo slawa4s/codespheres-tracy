@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased] – Session 6
+
+### Notes
+
+- Score inherited from session 5 at 100 (ceiling reached).
+- No code changes needed: all 112–113 scoreable scenarios pass at 100%.
+- 42 provider-error scenarios are excluded from scoring (API returns non-200 due to missing/invalid keys or transient errors).
+- `openai/batches/list_pagination` transitioned to provider_error this session due to a transient API 500 on the cancel step; score unaffected.
+
+### Evaluation Results
+
+| Attempt | Score | Notes |
+|---------|-------|-------|
+| 0 (session baseline) | 100 | Inherited from session 5; 112 scoreable scenarios, 42 provider errors |
+
+**Artifacts:** `artifacts/6/evaluation_0.json`
+
 ## [Unreleased] – Session 5
 
 ### Fixed
