@@ -1,5 +1,27 @@
 # Changelog
 
+## Session 3
+
+- **Branch**: `claude-session-3` (based on `claude-session-2`)
+- **Evaluator attempts**: 1 (`artifacts/3/evaluation_0.json`)
+- **Score**: 98 (unchanged from session 2)
+
+### Analysis
+
+Ran a full baseline evaluation with 154 scenarios (112 scoreable after excluding 42 provider_error cases). Score remained at 98. One previously-passing scenario (`openai/batches/responses_lifecycle`) became a provider_error due to a LiteLLM proxy change, but the overall score was unaffected.
+
+The 6 remaining non-provider-error failures are all proxy/SDK limitations that Tracy cannot resolve:
+
+1. **`anthropic/batches/invalid_empty_requests`** — Score 0/6. The Anthropic Java SDK validates client-side before any HTTP call when the batch `requests` array is empty, so no OkHttp interceptor fires and no span is emitted.
+
+2. **`anthropic/count_tokens/basic`**, **`/with_system_prompt`**, **`/with_tools`**, **`/with_vision`** — Each missing `gen_ai.response.id` (non_empty check). The LiteLLM proxy returns only `{"input_tokens": N}` for count_tokens with no `id` field and no `request-id`/`x-request-id`/`anthropic-request-id` response headers forwarded. The real Anthropic API does return a `request-id` header, but the proxy strips it.
+
+3. **`anthropic/messages/tool_use_with_result`** — Score 24/25. Missing `gen_ai.completion.0.content` (non_empty). LiteLLM returns `content: []` for the follow-up message even though `output_tokens: 2`, leaving Tracy no content to capture.
+
+No code changes were made in this session. The score plateau at 98 reflects the ceiling achievable against this LiteLLM proxy configuration.
+
+---
+
 ## Session 2
 
 - **Branch**: `claude-session-2` (based on `claude-session-1`)
