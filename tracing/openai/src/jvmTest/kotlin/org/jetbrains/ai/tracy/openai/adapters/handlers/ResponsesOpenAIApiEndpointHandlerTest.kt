@@ -6,8 +6,10 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers
 
 import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
+import org.jetbrains.ai.tracy.openai.adapters.OpenAILLMTracingAdapter
 import org.jetbrains.ai.tracy.openai.adapters.containsToolCall
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.jetbrains.ai.tracy.test.utils.MediaSource
@@ -18,6 +20,12 @@ import com.openai.models.ChatModel
 import com.openai.models.responses.*
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -637,6 +645,45 @@ class ResponsesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         verifyMediaContentUploadAttributes(trace, expected = media.map {
             it.toMediaContentAttributeValues(field = "input")
         })
+    }
+
+    @Test
+    fun `test response object field is emitted as tracy_response_object`() = runTest {
+        withMockServer { server ->
+            val client = buildMockClient()
+            server.enqueueResponsesApiResponse(objectType = "response")
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/responses"))
+                    .post("""{"model":"gpt-4o-mini","input":"hi"}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            // populateUnmappedAttributes stores JsonElement.toString(), so string values retain JSON quotes
+            assertEquals(
+                "\"response\"",
+                trace.attributes[AttributeKey.stringKey("tracy.response.object")],
+                "tracy.response.object must be emitted from the 'object' field in the Responses API response body"
+            )
+        }
+    }
+
+    // ===== Mock helpers =====
+
+    private fun buildMockClient(): OkHttpClient =
+        instrument(OkHttpClient(), OpenAILLMTracingAdapter())
+
+    private fun MockWebServer.enqueueResponsesApiResponse(objectType: String = "response") {
+        enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(
+                    """{"id":"resp_abc","object":"$objectType","created_at":1700000000,"model":"gpt-4o-mini","output":[{"type":"message","role":"assistant","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"Hello!","annotations":[]}]}],"usage":{"input_tokens":10,"output_tokens":5}}"""
+                )
+        )
     }
 
     private fun inputWith(vararg content: ResponseInputContent) = ResponseCreateParams.Input
