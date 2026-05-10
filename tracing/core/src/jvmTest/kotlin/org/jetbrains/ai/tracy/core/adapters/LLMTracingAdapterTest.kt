@@ -7,6 +7,7 @@ package org.jetbrains.ai.tracy.core.adapters
 
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.api.trace.StatusCode
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -131,6 +132,42 @@ class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
             val statusCode = span.attributes[AttributeKey.longKey("http.response.status_code")]
             assertNotNull(statusCode, "http.response.status_code must be set")
             assertEquals(200L, statusCode)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `registerResponse emits http_response_status_code and error span status for 4xx with empty body`() = runTest {
+        val server = MockWebServer()
+        server.start()
+        // Simulate a 400 response with no body (e.g. an invalid batch request)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(400)
+                .addHeader("Content-Type", "application/json")
+                .setBody("")
+        )
+
+        try {
+            val client = instrument(OkHttpClient(), testAdapter)
+            val body = """{"model":"test"}""".toRequestBody("application/json".toMediaType())
+            val request = Request.Builder()
+                .url(server.url("/v1/test"))
+                .post(body)
+                .build()
+
+            client.newCall(request).execute().close()
+
+            val spans = analyzeSpans()
+            assertEquals(1, spans.size)
+            val span = spans.first()
+
+            val statusCode = span.attributes[AttributeKey.longKey("http.response.status_code")]
+            assertNotNull(statusCode, "http.response.status_code must be set even for empty-body error responses")
+            assertEquals(400L, statusCode)
+
+            assertEquals(StatusCode.ERROR, span.status.statusCode, "span status must be ERROR for 4xx responses")
         } finally {
             server.shutdown()
         }

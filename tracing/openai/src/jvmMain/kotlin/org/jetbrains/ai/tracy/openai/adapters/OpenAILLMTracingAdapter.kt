@@ -13,7 +13,9 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiE
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.BatchesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
@@ -48,8 +50,14 @@ private enum class OpenAIApiType(val route: String) {
     // See: https://platform.openai.com/docs/api-reference/videos
     VIDEOS("videos"),
 
+    // See: https://platform.openai.com/docs/api-reference/files
+    FILES("files"),
+
     // See: https://platform.openai.com/docs/api-reference/conversations
-    CONVERSATIONS("conversations");
+    CONVERSATIONS("conversations"),
+
+    // See: https://platform.openai.com/docs/api-reference/batch
+    BATCHES("batches");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -74,7 +82,9 @@ private enum class OpenAIApiType(val route: String) {
  * - **Image Editing**: `/v1/images/edits`
  * - **Audio Transcription**: `/v1/audio/transcriptions`
  * - **Video Generation**: `/v1/videos`
+ * - **Files**: `/v1/files`
  * - **Conversations**: `/v1/conversations`
+ * - **Batches**: `/v1/batches`
  *
  * ## Example Usage
  * ```kotlin
@@ -170,6 +180,14 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
                 ConversationsOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.FILES -> handlers.getOrPut(OpenAIApiType.FILES) {
+                FilesOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.BATCHES -> handlers.getOrPut(OpenAIApiType.BATCHES) {
+                BatchesOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
