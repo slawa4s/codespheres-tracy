@@ -18,10 +18,11 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 /**
  * Endpoint handler for the Anthropic Message Batches API.
  *
- * Covers three operations detected from the HTTP method and URL path:
+ * Covers four operations detected from the HTTP method and URL path:
  * - `batches.create`   — POST /v1/messages/batches
  * - `batches.retrieve` — GET  /v1/messages/batches/{id}
  * - `batches.cancel`   — POST /v1/messages/batches/{id}/cancel
+ * - `batches.results`  — GET  /v1/messages/batches/{id}/results
  *
  * See: [Anthropic Message Batches API](https://docs.anthropic.com/en/api/creating-message-batches)
  */
@@ -81,6 +82,7 @@ internal class AnthropicBatchesEndpointHandler : EndpointApiHandler {
         val afterBatches = if (batchesIdx >= 0) pathSegments.drop(batchesIdx + 1) else emptyList()
         return when {
             afterBatches.lastOrNull() == "cancel" -> "batches.cancel"
+            afterBatches.lastOrNull() == "results" -> "batches.results"
             method.uppercase() == "POST" && afterBatches.isEmpty() -> "batches.create"
             else -> "batches.retrieve"
         }
