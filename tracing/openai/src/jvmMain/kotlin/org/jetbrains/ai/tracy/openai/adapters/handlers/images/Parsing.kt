@@ -159,9 +159,9 @@ private fun setUsageAttributes(span: Span, usage: JsonObject) {
     }
 
     usage["input_tokens_details"]?.jsonObject?.let {
-        span.setAttribute("gen_ai.usage.input_tokens_details", it.asString)
+        span.setAttribute("openai.usage.input_tokens_details", it.asString)
     }
     usage["total_tokens"]?.jsonPrimitive?.intOrNull?.let {
-        span.setAttribute(AttributeKey.longKey("gen_ai.usage.total_tokens"), it)
+        span.setAttribute(AttributeKey.longKey("tracy.usage.total_tokens"), it)
     }
 }
