@@ -49,6 +49,15 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
+        if (request.url.pathSegments.contains("models")) {
+            span.setAttribute("anthropic.api.type", "models")
+            val lastSegment = request.url.pathSegments.lastOrNull()
+            if (lastSegment != null && lastSegment != "models") {
+                span.setAttribute(GEN_AI_REQUEST_MODEL, lastSegment)
+            }
+            return
+        }
+
         if (request.url.pathSegments.contains("batches")) {
             span.setAttribute("anthropic.api.type", "batches")
             return
@@ -134,6 +143,36 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
 
         val body = response.body.asJson()?.jsonObject ?: return
+
+        if (response.url.pathSegments.contains("models")) {
+            body["id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                span.setAttribute("gen_ai.response.model.id", it)
+            }
+            body["display_name"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.model.display_name", it)
+            }
+            body["created_at"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.model.created_at", it)
+            }
+            body["max_input_tokens"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_input_tokens", it)
+            }
+            body["max_output_tokens"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_output_tokens", it)
+            }
+            body["capabilities"]?.jsonObject?.let { caps ->
+                fun capFlag(element: JsonElement?): Boolean? = when (element) {
+                    is JsonObject -> element["enabled"]?.jsonPrimitive?.booleanOrNull
+                    is JsonPrimitive -> element.booleanOrNull
+                    else -> null
+                }
+                capFlag(caps["vision"])?.let { span.setAttribute("gen_ai.response.model.capabilities.vision", it) }
+                capFlag(caps["citations"])?.let { span.setAttribute("gen_ai.response.model.capabilities.citations", it) }
+                capFlag(caps["batch"])?.let { span.setAttribute("gen_ai.response.model.capabilities.batch", it) }
+            }
+            return
+        }
 
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
