@@ -27,7 +27,7 @@ internal class DeleteVideoHandler : VideoRouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
         val videoId = extractVideoIdFromPath(request.url)
         if (videoId != null) {
-            span.setAttribute("gen_ai.request.video.requested_id", videoId)
+            span.setAttribute("tracy.request.video.requested_id", videoId)
         } else {
             logger.warn { "Failed to extract video ID from URL: ${request.url}" }
         }
@@ -39,6 +39,6 @@ internal class DeleteVideoHandler : VideoRouteHandler {
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
         body["id"]?.let { span.setAttribute("gen_ai.response.video.id", it.jsonPrimitive.content) }
-        body["deleted"]?.let { span.setAttribute("gen_ai.response.deleted", it.jsonPrimitive.boolean) }
+        body["deleted"]?.let { span.setAttribute("tracy.response.deleted", it.jsonPrimitive.boolean) }
     }
 }
