@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refactored `AnthropicLLMTracingAdapter` to use URL-based API-type dispatch via a new `AnthropicApiType` enum (`MESSAGES`, `BATCHES`) and a `handlerFor(url)` method; extracted the existing Messages API logic into `AnthropicMessagesEndpointHandler` and added `AnthropicBatchesEndpointHandler` to capture batch lifecycle attributes (`anthropic.batch.processing_status`, `anthropic.batch.request_counts.*`, `gen_ai.response.id`) for `/v1/messages/batches` create/retrieve/cancel operations
+
 - Added `gen_ai.provider.name` span attribute (stable OTel GenAI registry name) to all LLM provider requests, emitting the same value as `gen_ai.system`
 - Added `server.address` and `server.port` span attributes to all LLM provider requests, extracted from the request URL
 - Changed HTTP status attribute key from deprecated `http.status_code` to stable `http.response.status_code`
