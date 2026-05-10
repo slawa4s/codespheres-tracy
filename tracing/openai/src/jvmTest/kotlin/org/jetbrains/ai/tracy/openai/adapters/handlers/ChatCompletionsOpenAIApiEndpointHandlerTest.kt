@@ -23,6 +23,7 @@ import com.openai.models.embeddings.EmbeddingModel
 import com.openai.models.responses.ResponseCreateParams
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -570,6 +571,51 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
                 .build()
         )
         validateBasicTracing(model4)
+    }
+
+    @Test
+    fun `test LLM adapter emits provider, server, and HTTP status attributes`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = "mock-api-key",
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "id": "chatcmpl-test",
+                          "object": "chat.completion",
+                          "created": 1677858242,
+                          "model": "gpt-4o-mini",
+                          "choices": [{
+                            "message": { "role": "assistant", "content": "Hello!" },
+                            "index": 0,
+                            "finish_reason": "stop"
+                          }],
+                          "usage": { "prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8 }
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = ChatCompletionCreateParams.builder()
+                .addUserMessage("Say hello")
+                .model(ChatModel.GPT_4O_MINI)
+                .build()
+
+            client.chat().completions().create(params)
+
+            val trace = analyzeSpans().first()
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertFalse(trace.attributes[AttributeKey.stringKey("server.address")].isNullOrEmpty())
+            assertNotNull(trace.attributes[AttributeKey.longKey("server.port")])
+            assertEquals(200L, trace.attributes[AttributeKey.longKey("http.response.status_code")])
+        }
     }
 
     private fun partText(prompt: String) = ChatCompletionContentPart.ofText(
