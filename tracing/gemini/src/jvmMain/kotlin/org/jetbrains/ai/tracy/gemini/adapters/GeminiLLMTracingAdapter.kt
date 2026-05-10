@@ -47,6 +47,7 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
         model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
         operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
+        span.setAttribute("gemini.api.type", "models")
 
         val handler = selectHandler(request.url)
         handler.handleRequestAttributes(span, request)

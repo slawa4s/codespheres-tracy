@@ -52,21 +52,24 @@ internal class ResponsesOpenAIApiEndpointHandler(
             request.url.parameters.queryParameter("after")?.let {
                 span.setAttribute("tracy.request.after", it)
             }
-            request.url.parameters.queryParameter("include")?.let {
+            // SDK may use "include[]" notation for array query params
+            (request.url.parameters.queryParameter("include")
+                ?: request.url.parameters.queryParameterValues("include[]").firstOrNull())?.let {
                 span.setAttribute("tracy.request.include", it)
             }
         }
 
-        // Also extract `include` query param for retrieve operations
+        // Also extract `include` query param for retrieve operations; SDK may use "include[]"
         if (op == "response.retrieve") {
-            request.url.parameters.queryParameter("include")?.let {
+            (request.url.parameters.queryParameter("include")
+                ?: request.url.parameters.queryParameterValues("include[]").firstOrNull())?.let {
                 span.setAttribute("tracy.request.include", it)
             }
         }
 
         val body = request.body.asJson()?.jsonObject ?: return
 
-        body["service_tier"]?.jsonPrimitive?.contentOrNull?.let {
+        (body["service_tier"] as? JsonPrimitive)?.contentOrNull?.let {
             span.setAttribute("openai.request.service_tier", it)
         }
         body["top_p"]?.jsonPrimitive?.doubleOrNull?.let {
@@ -85,17 +88,17 @@ internal class ResponsesOpenAIApiEndpointHandler(
             }
             span.setAttribute("tracy.request.tool_choice", content)
         }
-        body["reasoning"]?.jsonObject?.let { reasoning ->
-            reasoning["effort"]?.jsonPrimitive?.contentOrNull?.let {
+        (body["reasoning"] as? JsonObject)?.let { reasoning ->
+            (reasoning["effort"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.request.reasoning.effort", it)
             }
-            reasoning["summary"]?.jsonPrimitive?.contentOrNull?.let {
+            (reasoning["summary"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.request.reasoning.summary", it)
             }
         }
-        body["text"]?.jsonObject?.let { text ->
-            text["format"]?.jsonObject?.let { format ->
-                format["type"]?.jsonPrimitive?.contentOrNull?.let {
+        (body["text"] as? JsonObject)?.let { text ->
+            (text["format"] as? JsonObject)?.let { format ->
+                (format["type"] as? JsonPrimitive)?.contentOrNull?.let {
                     span.setAttribute("tracy.request.text.format.type", it)
                 }
             }
@@ -191,91 +194,90 @@ internal class ResponsesOpenAIApiEndpointHandler(
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
 
-        // Error response handling
-        body["error"]?.jsonObject?.let { error ->
-            error["message"]?.jsonPrimitive?.contentOrNull?.let {
+        // Error response handling — body["error"] may be JsonNull; use as? to avoid crash
+        (body["error"] as? JsonObject)?.let { error ->
+            (error["message"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.response.error.message", it)
             }
-            error["type"]?.jsonPrimitive?.contentOrNull?.let {
+            (error["type"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.response.error.type", it)
             }
-            error["code"]?.jsonPrimitive?.contentOrNull?.let {
+            (error["code"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.response.error.code", it)
             }
         }
 
-        body["service_tier"]?.jsonPrimitive?.contentOrNull?.let {
+        (body["service_tier"] as? JsonPrimitive)?.contentOrNull?.let {
             span.setAttribute("openai.response.service_tier", it)
         }
 
-        // reasoning response attributes
-        body["reasoning"]?.jsonObject?.let { reasoning ->
-            reasoning["effort"]?.jsonPrimitive?.contentOrNull?.let {
+        // reasoning response attributes — effort/summary may be JsonNull
+        (body["reasoning"] as? JsonObject)?.let { reasoning ->
+            (reasoning["effort"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.response.reasoning.effort", it)
             }
-            reasoning["summary"]?.jsonPrimitive?.contentOrNull?.let {
+            (reasoning["summary"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.response.reasoning.summary", it)
             }
         }
 
         // text.format.type from response body
-        body["text"]?.jsonObject?.let { text ->
-            text["format"]?.jsonObject?.let { format ->
-                format["type"]?.jsonPrimitive?.contentOrNull?.let {
+        (body["text"] as? JsonObject)?.let { text ->
+            (text["format"] as? JsonObject)?.let { format ->
+                (format["type"] as? JsonPrimitive)?.contentOrNull?.let {
                     span.setAttribute("tracy.response.text.format.type", it)
                 }
             }
         }
 
         // For list responses (input_items, etc.)
-        body["data"]?.let { data ->
-            if (data is JsonArray) {
-                data.firstOrNull()?.jsonObject?.let { first ->
-                    first["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.data.id", it) }
-                    first["type"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.data.type", it) }
-                }
+        (body["data"] as? JsonArray)?.let { data ->
+            (data.firstOrNull() as? JsonObject)?.let { first ->
+                (first["id"] as? JsonPrimitive)?.contentOrNull?.let { span.setAttribute("tracy.response.data.id", it) }
+                (first["type"] as? JsonPrimitive)?.contentOrNull?.let { span.setAttribute("tracy.response.data.type", it) }
             }
         }
 
         // For input_tokens.count endpoint - input_tokens at top level
-        body["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+        (body["input_tokens"] as? JsonPrimitive)?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
         }
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
-        body["output"]?.let { outputs ->
-            for ((index, output) in outputs.jsonArray.withIndex()) {
-                when (val type = output.jsonObject["type"]?.jsonPrimitive?.content) {
+        (body["output"] as? JsonArray)?.let { outputs ->
+            for ((index, output) in outputs.withIndex()) {
+                val outputObj = output as? JsonObject ?: continue
+                when (val type = (outputObj["type"] as? JsonPrimitive)?.content) {
                     "message", null -> {
                         // See schema: https://platform.openai.com/docs/api-reference/responses/object#responses-object-output-output_message
-                        output.jsonObject["role"]?.jsonPrimitive?.content?.let {
+                        (outputObj["role"] as? JsonPrimitive)?.content?.let {
                             span.setAttribute("gen_ai.completion.$index.role", it)
                         }
-                        output.jsonObject["id"]?.jsonPrimitive?.content?.let {
+                        (outputObj["id"] as? JsonPrimitive)?.content?.let {
                             span.setAttribute("gen_ai.completion.$index.id", it)
                         }
-                        output.jsonObject["status"]?.jsonPrimitive?.content?.let {
+                        (outputObj["status"] as? JsonPrimitive)?.content?.let {
                             span.setAttribute("gen_ai.completion.$index.finish_reason", it)
                         }
 
-                        val content = output.jsonObject["content"]
+                        val content = outputObj["content"]
                         // See schema: https://platform.openai.com/docs/api-reference/responses/object#responses-object-output-output_message-content
                         if (content is JsonArray) {
                             // if there is a single message that has a type of `output_text`, then install it as completion content;
                             // otherwise, set the entire array instead.
-                            if (content.size == 1 && content.first().jsonObject["type"]?.jsonPrimitive?.contentOrNull == "output_text") {
+                            if (content.size == 1 && (content.first() as? JsonObject)?.get("type")?.let { (it as? JsonPrimitive)?.contentOrNull } == "output_text") {
                                 val message = content
-                                    .first { it.jsonObject["type"]?.jsonPrimitive?.contentOrNull == "output_text" }
-                                    .jsonObject
+                                    .first { (it as? JsonObject)?.get("type")?.let { t -> (t as? JsonPrimitive)?.contentOrNull } == "output_text" }
+                                    as? JsonObject
 
-                                message["text"]?.jsonPrimitive?.content?.let {
+                                (message?.get("text") as? JsonPrimitive)?.content?.let {
                                     span.setAttribute(
                                         "gen_ai.completion.$index.content",
                                         it
                                     )
                                 }
-                                message["annotations"]?.let {
+                                message?.get("annotations")?.let {
                                     span.setAttribute(
                                         "gen_ai.completion.$index.annotations",
                                         it.toString()
@@ -293,7 +295,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
                     else -> {
                         // any other types, including 'function_call' and 'reasoning'
                         // See output types: https://platform.openai.com/docs/api-reference/responses/object#responses-object-output
-                        for ((k, v) in output.jsonObject.entries) {
+                        for ((k, v) in outputObj.entries) {
                             val key = when {
                                 // prefix `function_call` with "tool_"
                                 type == "function_call" && k == "type" -> "tool_call_type"
@@ -315,10 +317,10 @@ internal class ResponsesOpenAIApiEndpointHandler(
                         if (index == 0 && type != null) {
                             span.setAttribute("tracy.response.output.type", type)
                             if (type == "function_call") {
-                                output.jsonObject["name"]?.jsonPrimitive?.contentOrNull?.let {
+                                (outputObj["name"] as? JsonPrimitive)?.contentOrNull?.let {
                                     span.setAttribute("tracy.response.output.name", it.orRedactedOutput())
                                 }
-                                output.jsonObject["call_id"]?.jsonPrimitive?.contentOrNull?.let {
+                                (outputObj["call_id"] as? JsonPrimitive)?.contentOrNull?.let {
                                     span.setAttribute("tracy.response.output.call_id", it)
                                 }
                             }
@@ -328,8 +330,8 @@ internal class ResponsesOpenAIApiEndpointHandler(
             }
         }
 
-        body["usage"]?.let { usage ->
-            setUsageAttributes(span, usage.jsonObject)
+        (body["usage"] as? JsonObject)?.let { usage ->
+            setUsageAttributes(span, usage)
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
@@ -355,14 +357,14 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 }
                 "response.completed", "response.done" -> {
                     // Extract final response attributes from the completed event
-                    val response = event["response"]?.jsonObject ?: event
-                    response["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
-                    response["model"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
-                    response["status"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.status", it) }
-                    response["object"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.object", it) }
-                    response["created_at"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
-                    response["completed_at"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.completed_at", it) }
-                    response["usage"]?.jsonObject?.let { usage ->
+                    val response = (event["response"] as? JsonObject) ?: event
+                    (response["id"] as? JsonPrimitive)?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+                    (response["model"] as? JsonPrimitive)?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+                    (response["status"] as? JsonPrimitive)?.contentOrNull?.let { span.setAttribute("tracy.response.status", it) }
+                    (response["object"] as? JsonPrimitive)?.contentOrNull?.let { span.setAttribute("tracy.response.object", it) }
+                    (response["created_at"] as? JsonPrimitive)?.longOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
+                    (response["completed_at"] as? JsonPrimitive)?.longOrNull?.let { span.setAttribute("tracy.response.completed_at", it) }
+                    (response["usage"] as? JsonObject)?.let { usage ->
                         setUsageAttributes(span, usage)
                     }
                 }
@@ -397,7 +399,8 @@ internal class ResponsesOpenAIApiEndpointHandler(
 
             // See: https://platform.openai.com/docs/api-reference/responses/create#responses_create-input
             when (val type = input.jsonObject["type"]?.jsonPrimitive?.content) {
-                "message" -> {
+                // EasyInputMessage has no "type" field, just "role" + "content"
+                "message", null -> {
                     // this message can be either:
                     //   1. Input message: https://platform.openai.com/docs/api-reference/responses/create#responses_create-input-input_item_list-item-input_message
                     //   2. Output message: https://platform.openai.com/docs/api-reference/responses/create#responses_create-input-input_item_list-item-output_message
@@ -433,6 +436,28 @@ internal class ResponsesOpenAIApiEndpointHandler(
                         } else {
                             // set the entire array as prompt content
                             span.setAttribute("gen_ai.prompt.$position.content", content.toString().orRedactedInput())
+                        }
+
+                        // extract file/image-specific attributes from content items
+                        for (contentItem in content) {
+                            val itemObj = contentItem as? JsonObject ?: continue
+                            when ((itemObj["type"] as? JsonPrimitive)?.content) {
+                                "input_file" -> {
+                                    span.setAttribute("tracy.request.input.content.type", "input_file")
+                                    (itemObj["file_id"] as? JsonPrimitive)?.contentOrNull?.let {
+                                        span.setAttribute("tracy.request.input.file.id", it)
+                                    }
+                                    (itemObj["filename"] as? JsonPrimitive)?.contentOrNull?.let {
+                                        span.setAttribute("tracy.request.input.file.filename", it)
+                                    }
+                                }
+                                "input_image" -> {
+                                    span.setAttribute("tracy.request.input.content.type", "input_image")
+                                    (itemObj["detail"] as? JsonPrimitive)?.contentOrNull?.let {
+                                        span.setAttribute("tracy.request.input.image.detail", it)
+                                    }
+                                }
+                            }
                         }
                     } else if (content != null) {
                         val value = when (content) {
@@ -474,19 +499,19 @@ internal class ResponsesOpenAIApiEndpointHandler(
      * Sets usage attributes (input_tokens/output_tokens)
      */
     private fun setUsageAttributes(span: Span, usage: JsonObject) {
-        usage["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+        (usage["input_tokens"] as? JsonPrimitive)?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
         }
-        usage["output_tokens"]?.jsonPrimitive?.intOrNull?.let {
+        (usage["output_tokens"] as? JsonPrimitive)?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
         }
-        usage["input_tokens_details"]?.jsonObject?.let { details ->
-            details["cached_tokens"]?.jsonPrimitive?.intOrNull?.let {
+        (usage["input_tokens_details"] as? JsonObject)?.let { details ->
+            (details["cached_tokens"] as? JsonPrimitive)?.intOrNull?.let {
                 span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
             }
         }
-        usage["output_tokens_details"]?.jsonObject?.let { details ->
-            details["reasoning_tokens"]?.jsonPrimitive?.intOrNull?.let {
+        (usage["output_tokens_details"] as? JsonObject)?.let { details ->
+            (details["reasoning_tokens"] as? JsonPrimitive)?.intOrNull?.let {
                 span.setAttribute("tracy.response.usage.output_tokens_details.reasoning_tokens", it.toLong())
             }
         }

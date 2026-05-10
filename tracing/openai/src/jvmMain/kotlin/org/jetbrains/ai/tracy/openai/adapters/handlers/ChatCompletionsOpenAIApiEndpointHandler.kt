@@ -332,10 +332,19 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                 firstToolCallId?.let { span.setAttribute("gen_ai.tool.call.id", it) }
                 firstToolCallArguments?.let { span.setAttribute("gen_ai.tool.call.arguments", it.orRedactedOutput()) }
             }
+
+            // Count logprob tokens from first choice
+            (choices.jsonArray.firstOrNull() as? JsonObject)?.let { firstChoice ->
+                (firstChoice["logprobs"] as? JsonObject)?.let { logprobs ->
+                    (logprobs["content"] as? JsonArray)?.size?.toLong()?.let {
+                        span.setAttribute("tracy.response.logprobs.token.count", it)
+                    }
+                }
+            }
         }
 
-        body["usage"]?.let { usage ->
-            setUsageAttributes(span, usage.jsonObject)
+        (body["usage"] as? JsonObject)?.let { usage ->
+            setUsageAttributes(span, usage)
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)

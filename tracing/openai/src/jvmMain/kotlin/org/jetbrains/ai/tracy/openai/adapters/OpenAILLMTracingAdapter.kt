@@ -27,6 +27,8 @@ import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import mu.KotlinLogging
 import java.util.concurrent.ConcurrentHashMap
@@ -144,7 +146,8 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             }
             is TracyHttpRequestBody.Json -> {
                 val body = request.body.asJson()?.jsonObject ?: return false
-                body["stream"]?.jsonPrimitive?.boolean ?: false
+                (body["stream"]?.jsonPrimitive?.boolean ?: false) ||
+                    (body["stream_format"] as? JsonPrimitive)?.contentOrNull == "sse"
             }
             is TracyHttpRequestBody.Empty -> false
         }

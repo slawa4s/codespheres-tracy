@@ -32,13 +32,13 @@ internal fun handleImageGenerationResponseAttributes(
 ) {
     val body = response.body.asJson()?.jsonObject ?: return
 
-    body["data"]?.jsonArray?.let { data ->
+    (body["data"] as? JsonArray)?.let { data ->
         // collect AI response content
         for ((index, image) in data.withIndex()) {
             span.setAttribute("gen_ai.completion.$index.content", image.asString.orRedactedOutput())
         }
         // extract image URL from first result
-        data.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content?.let {
+        ((data.firstOrNull() as? JsonObject)?.get("url") as? JsonPrimitive)?.content?.let {
             span.setAttribute("tracy.response.image.url", it)
         }
         // install media content for further upload
@@ -51,14 +51,9 @@ internal fun handleImageGenerationResponseAttributes(
         }
     }
 
-    body["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
+    (body["usage"] as? JsonObject)?.let { setUsageAttributes(span, it) }
 
-    // Normalize `created` → `created_at` for timestamp consistency
-    body["created"]?.jsonPrimitive?.longOrNull?.let {
-        span.setAttribute("tracy.response.created_at", it)
-    }
-
-    val manuallyParsedKeys = listOf("data", "usage", "created")
+    val manuallyParsedKeys = listOf("data", "usage")
     for ((key, value) in body.entries) {
         if (key in manuallyParsedKeys) {
             continue
@@ -87,7 +82,7 @@ internal fun handleStreamedImage(
             )
             span.setAttribute("gen_ai.completion.0.content", content.asString.orRedactedOutput())
 
-            data["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
+            (data["usage"] as? JsonObject)?.let { setUsageAttributes(span, it) }
 
             // insert other attributes using tracy.response.* prefix
             val manuallyParsedKeys = listOf("b64_json", "usage")
@@ -160,17 +155,17 @@ private fun JsonObject.hasNonNull(key: String): Boolean {
 }
 
 private fun setUsageAttributes(span: Span, usage: JsonObject) {
-    usage["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+    (usage["input_tokens"] as? JsonPrimitive)?.intOrNull?.let {
         span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
     }
-    usage["output_tokens"]?.jsonPrimitive?.intOrNull?.let {
+    (usage["output_tokens"] as? JsonPrimitive)?.intOrNull?.let {
         span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
     }
 
-    usage["input_tokens_details"]?.jsonObject?.let {
+    (usage["input_tokens_details"] as? JsonObject)?.let {
         span.setAttribute("gen_ai.usage.input_tokens_details", it.asString)
     }
-    usage["total_tokens"]?.jsonPrimitive?.intOrNull?.let {
+    (usage["total_tokens"] as? JsonPrimitive)?.intOrNull?.let {
         span.setAttribute(AttributeKey.longKey("gen_ai.usage.total_tokens"), it)
     }
 }

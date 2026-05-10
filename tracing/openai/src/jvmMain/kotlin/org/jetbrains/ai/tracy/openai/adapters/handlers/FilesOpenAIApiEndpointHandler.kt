@@ -16,6 +16,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -47,9 +48,16 @@ internal class FilesOpenAIApiEndpointHandler : EndpointApiHandler {
         for (part in formData.parts) {
             val charset = part.contentType?.charset() ?: Charsets.UTF_8
             when (part.name) {
-                "purpose" -> span.setAttribute("tracy.request.purpose", part.content.toString(charset))
+                "purpose" -> {
+                    val purpose = part.content.toString(charset)
+                    span.setAttribute("tracy.request.purpose", purpose)
+                    span.setAttribute("tracy.request.file.purpose", purpose)
+                }
                 "file" -> {
-                    part.filename?.let { span.setAttribute("tracy.request.file.filename", it) }
+                    part.filename?.let {
+                        span.setAttribute("tracy.request.file.filename", it)
+                        span.setAttribute("tracy.request.file.name", it)
+                    }
                     span.setAttribute("tracy.request.file.size_bytes", part.content.size.toLong())
                 }
                 "expires_after[anchor]" -> span.setAttribute("tracy.request.expires_after.anchor", part.content.toString(charset))
@@ -104,8 +112,10 @@ internal class FilesOpenAIApiEndpointHandler : EndpointApiHandler {
                 body["has_more"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("tracy.response.has_more", it) }
             }
             "files.content" -> {
-                // Binary content response - size may come from content-length or raw body
-                body["size_bytes"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.file.size_bytes", it) }
+                // Binary content response — size from _response_content_length injected by interceptor
+                (body["_response_content_length"] as? JsonPrimitive)?.longOrNull?.let {
+                    span.setAttribute("tracy.response.file.size_bytes", it)
+                }
             }
         }
 
@@ -131,5 +141,5 @@ internal class FilesOpenAIApiEndpointHandler : EndpointApiHandler {
         }
     }
 
-    private val mappedResponseAttributes = listOf("id", "filename", "bytes", "purpose", "created_at", "status", "expires_at", "deleted", "data", "has_more")
+    private val mappedResponseAttributes = listOf("id", "filename", "bytes", "purpose", "created_at", "status", "expires_at", "deleted", "data", "has_more", "_response_content_length")
 }

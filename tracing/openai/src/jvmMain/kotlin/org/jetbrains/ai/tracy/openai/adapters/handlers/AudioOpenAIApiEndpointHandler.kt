@@ -18,11 +18,14 @@ import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /**
  * Handler for OpenAI Audio API (speech, transcriptions, translations).
@@ -50,8 +53,9 @@ internal class AudioOpenAIApiEndpointHandler : EndpointApiHandler {
     }
 
     private fun handleTranscriptionTranslationRequest(span: Span, request: TracyHttpRequest, op: String) {
-        // extract `include` from query params (transcription logprobs, etc.)
-        request.url.parameters.queryParameter("include")?.let {
+        // extract `include` from query params; the SDK may use "include[]" notation for array params
+        (request.url.parameters.queryParameter("include")
+            ?: request.url.parameters.queryParameterValues("include[]").firstOrNull())?.let {
             span.setAttribute("tracy.request.include", it)
         }
 
@@ -74,7 +78,7 @@ internal class AudioOpenAIApiEndpointHandler : EndpointApiHandler {
                         span.setAttribute("tracy.request.temperature", it)
                     }
                 }
-                "include" -> span.setAttribute("tracy.request.include", part.content.toString(charset))
+                "include", "include[]" -> span.setAttribute("tracy.request.include", part.content.toString(charset))
                 "timestamp_granularities[]" -> span.setAttribute("tracy.request.timestamp_granularities", part.content.toString(charset))
                 "prompt" -> span.setAttribute("tracy.request.prompt.present", true)
                 "stream" -> {
@@ -97,15 +101,20 @@ internal class AudioOpenAIApiEndpointHandler : EndpointApiHandler {
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
 
-        // Error response handling
-        body["error"]?.jsonObject?.let { error ->
-            error["message"]?.jsonPrimitive?.contentOrNull?.let {
+        // Binary audio response: size reported via _response_content_length injected by interceptor
+        (body["_response_content_length"] as? JsonPrimitive)?.longOrNull?.let {
+            span.setAttribute("tracy.response.audio.size_bytes", it)
+        }
+
+        // Error response handling — body["error"] may be JsonNull
+        (body["error"] as? JsonObject)?.let { error ->
+            (error["message"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.response.error.message", it)
             }
-            error["type"]?.jsonPrimitive?.contentOrNull?.let {
+            (error["type"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.response.error.type", it)
             }
-            error["code"]?.jsonPrimitive?.contentOrNull?.let {
+            (error["code"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.response.error.code", it)
             }
         }
