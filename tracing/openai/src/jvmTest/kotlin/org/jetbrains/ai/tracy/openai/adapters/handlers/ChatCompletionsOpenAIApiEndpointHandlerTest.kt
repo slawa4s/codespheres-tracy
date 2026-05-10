@@ -8,6 +8,7 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
+import org.jetbrains.ai.tracy.openai.adapters.OpenAILLMTracingAdapter
 import org.jetbrains.ai.tracy.openai.adapters.containsToolCall
 import org.jetbrains.ai.tracy.openai.adapters.name
 import org.jetbrains.ai.tracy.openai.clients.instrument
@@ -23,6 +24,12 @@ import com.openai.models.embeddings.EmbeddingModel
 import com.openai.models.responses.ResponseCreateParams
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -467,6 +474,102 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             it.toMediaContentAttributeValues(field = "input")
         })
     }
+
+    // ===== Mock-server-based attribute tests =====
+
+    @Test
+    fun `chat completions sets gen_ai operation name and openai api type`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """{"id":"chatcmpl-001","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"Hello!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}"""
+                    )
+            )
+
+            buildMockClient().newCall(
+                Request.Builder()
+                    .url(server.url("/v1/chat/completions"))
+                    .addHeader("Authorization", "Bearer MOCK_API_KEY")
+                    .post("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("chat_completions", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+        }
+    }
+
+    @Test
+    fun `chat completions sets gen_ai request stream when stream is true`() = runTest {
+        withMockServer { server ->
+            val sseBody = buildString {
+                appendLine("""data: {"id":"chatcmpl-s1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}""")
+                appendLine()
+                appendLine("""data: {"id":"chatcmpl-s1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}""")
+                appendLine()
+                appendLine("data: [DONE]")
+            }
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody(sseBody)
+            )
+
+            buildMockClient().newCall(
+                Request.Builder()
+                    .url(server.url("/v1/chat/completions"))
+                    .addHeader("Authorization", "Bearer MOCK_API_KEY")
+                    .post("""{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"hi"}]}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals(true, trace.attributes[AttributeKey.booleanKey("gen_ai.request.stream")])
+        }
+    }
+
+    @Test
+    fun `streaming chat completions captures response id, model, and finish reasons`() = runTest {
+        withMockServer { server ->
+            val sseBody = buildString {
+                appendLine("""data: {"id":"chatcmpl-stream1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}""")
+                appendLine()
+                appendLine("""data: {"id":"chatcmpl-stream1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}]}""")
+                appendLine()
+                appendLine("data: [DONE]")
+            }
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody(sseBody)
+            )
+
+            buildMockClient().newCall(
+                Request.Builder()
+                    .url(server.url("/v1/chat/completions"))
+                    .addHeader("Authorization", "Bearer MOCK_API_KEY")
+                    .post("""{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"hi"}]}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("chatcmpl-stream1", trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
+            assertEquals("gpt-4o-mini", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
+            assertEquals(
+                listOf("stop"),
+                trace.attributes[AttributeKey.stringArrayKey("gen_ai.response.finish_reasons")]
+            )
+        }
+    }
+
+    private fun buildMockClient(): OkHttpClient =
+        org.jetbrains.ai.tracy.core.instrument(OkHttpClient(), OpenAILLMTracingAdapter())
 
     @Test
     fun `test OpenAI chat completions auto tracing disable`() = runTest {
