@@ -348,7 +348,8 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "top_k",
         "top_p",
         "messages",
-        "tools"
+        "tools",
+        "requests"
     )
 
     private val mappedResponseAttributes: List<String> = listOf(
