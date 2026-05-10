@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased] – Session 9
+
+### Notes
+
+- Score confirmed at 100 (ceiling maintained).
+- No code changes needed: all 111 scoreable scenarios pass at 100% (43 provider errors excluded).
+- Provider-error count increased from 41 (session 8) to 43 (session 9): `openai/batches/lifecycle` and `openai/images/generate` transitioned to provider_error due to LiteLLM proxy API changes. Score unaffected since provider errors are excluded from scoring.
+- Provider-error scenarios fail due to HTTP 401/404 from the LiteLLM proxy (Gemini Vertex AI routing not configured; Anthropic batches/files require real API keys; OpenAI images, videos, stored chat not supported by proxy).
+
+### Evaluation Results
+
+| Attempt | Score | Notes |
+|---------|-------|-------|
+| 0 (session baseline) | 100 | 111 scoreable scenarios, 43 provider errors |
+
+**Artifacts:** `artifacts/9/evaluation_0.json`
+
 ## [Unreleased] – Session 8
 
 ### Notes
