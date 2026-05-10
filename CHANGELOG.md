@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased] – Session 8
+
+### Notes
+
+- Score confirmed at 100 (ceiling maintained).
+- No code changes needed: all 113 scoreable scenarios pass at 100% (41 provider errors excluded).
+- Provider-error scenarios fail due to HTTP 401/404 from the LiteLLM proxy (Gemini Vertex AI routing not configured; Anthropic batches/files require real API keys; OpenAI images variation, stored chat, and videos not supported by proxy).
+- Score distribution unchanged from session 7: 113 passing, 0 failing, 41 provider errors.
+
+### Evaluation Results
+
+| Attempt | Score | Notes |
+|---------|-------|-------|
+| 0 (session baseline) | 100 | 113 scoreable scenarios, 41 provider errors |
+
+**Artifacts:** `artifacts/8/evaluation_0.json`
+
 ## [Unreleased] – Session 7
 
 ### Notes
