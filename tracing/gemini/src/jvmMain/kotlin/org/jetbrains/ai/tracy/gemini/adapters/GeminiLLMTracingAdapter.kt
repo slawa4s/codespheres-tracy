@@ -48,6 +48,9 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
         operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
 
+        val apiType = if (request.url.pathSegments.contains("cachedContents")) "cachedContents" else "models"
+        span.setAttribute("gemini.api.type", apiType)
+
         val handler = selectHandler(request.url)
         handler.handleRequestAttributes(span, request)
     }

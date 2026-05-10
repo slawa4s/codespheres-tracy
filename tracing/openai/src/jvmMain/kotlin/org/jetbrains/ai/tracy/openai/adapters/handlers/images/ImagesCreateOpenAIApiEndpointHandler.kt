@@ -13,10 +13,17 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.openai.adapters.handlers.asString
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /**
  * Extracts request/response bodies of Image Generation API.
@@ -29,10 +36,20 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
 
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
+
         body["prompt"]?.let { span.setAttribute("gen_ai.prompt.0.content", it.jsonPrimitive.content.orRedactedInput()) }
         body["model"]?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it.jsonPrimitive.content) }
+        body["size"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.request.size", it) }
+        body["n"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.request.n", it) }
+        body["response_format"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.request.response_format", it) }
+        body["quality"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.request.quality", it) }
+        body["output_format"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.request.output_format", it) }
+        body["background"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.request.background", it) }
+        body["partial_images"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.request.partial_images", it) }
+        body["stream"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("gen_ai.request.stream", it) }
 
-        val manuallyParsedKeys = listOf("prompt", "model")
+        val manuallyParsedKeys = listOf("prompt", "model", "stream")
         for ((key, value) in body.entries) {
             if (key in manuallyParsedKeys) {
                 continue
@@ -43,6 +60,15 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         handleImageGenerationResponseAttributes(span, response, extractor)
+
+        val body = response.body.asJson()?.jsonObject ?: return
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "image")
+        body["created"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.created", it) }
+        body["created_at"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
+        body["data"]?.jsonArray?.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
+            ?.let { span.setAttribute("tracy.response.image.url", it) }
+        body["stream"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("gen_ai.request.stream", it) }
+        body["model"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
     }
 
     override fun handleStreaming(span: Span, events: String) {

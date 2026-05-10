@@ -40,6 +40,7 @@ internal class TracyHttpResponseView(
     override val body = TracyHttpResponseBody.Json(body)
     override val url = response.request.url.toProtocolUrl()
     override val requestMethod = response.request.method.value.uppercase()
+    override val contentLength = response.headers["Content-Length"]?.toLongOrNull()
 
     override fun isError() = response.status.isSuccess().not()
 }

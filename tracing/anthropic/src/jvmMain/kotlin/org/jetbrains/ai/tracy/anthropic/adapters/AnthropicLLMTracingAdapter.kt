@@ -109,6 +109,15 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
 
+    override fun processResponseHeaders(span: Span, headers: Map<String, List<String>>) {
+        val requestId = headers["request-id"]?.firstOrNull()
+            ?: headers["x-request-id"]?.firstOrNull()
+            ?: headers["anthropic-request-id"]?.firstOrNull()
+            ?: headers["Request-Id"]?.firstOrNull()
+            ?: headers["X-Request-Id"]?.firstOrNull()
+        requestId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+    }
+
     override fun isStreamingRequest(request: TracyHttpRequest): Boolean =
         request.body.asJson()?.jsonObject?.get("stream")?.jsonPrimitive?.booleanOrNull == true
 

@@ -13,13 +13,20 @@ import org.jetbrains.ai.tracy.core.adapters.media.Resource
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asFormData
+import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.ContentKind
 import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import java.util.*
 
@@ -32,6 +39,8 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
+
         val body = request.body.asFormData() ?: return
 
         val mediaContentParts = mutableListOf<MediaContentPart>()
@@ -82,19 +91,58 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                     )
                 }
                 // either a single image or an array of images
-                "image", "image[]" -> if (contentTracingAllowed(ContentKind.INPUT)) {
-                    // trace images only when input content tracing is allowed.
-                    // base64-encoded image content
-                    span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
-                    span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
-                    if (part.filename != null) {
-                        span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                "image", "image[]" -> {
+                    if (imagesCount == 0) {
+                        span.setAttribute("tracy.request.image.size_bytes", part.content.size.toLong())
                     }
-                    // save image for further upload
-                    mediaContentParts.add(
-                        MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
-                    )
+                    if (contentTracingAllowed(ContentKind.INPUT)) {
+                        // trace images only when input content tracing is allowed.
+                        // base64-encoded image content
+                        span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
+                        span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
+                        if (part.filename != null) {
+                            span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                        }
+                        // save image for further upload
+                        mediaContentParts.add(
+                            MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
+                        )
+                    }
                     ++imagesCount
+                }
+
+                "size" -> {
+                    span.setAttribute("tracy.request.size", content.orRedactedInput())
+                    span.setAttribute("gen_ai.request.${part.name}", content.orRedactedInput())
+                }
+
+                "n" -> {
+                    content.toLongOrNull()?.let { span.setAttribute("tracy.request.n", it) }
+                    span.setAttribute("gen_ai.request.${part.name}", content.orRedactedInput())
+                }
+
+                "response_format" -> {
+                    span.setAttribute("tracy.request.response_format", content.orRedactedInput())
+                    span.setAttribute("gen_ai.request.${part.name}", content.orRedactedInput())
+                }
+
+                "quality" -> {
+                    span.setAttribute("tracy.request.quality", content.orRedactedInput())
+                    span.setAttribute("gen_ai.request.${part.name}", content.orRedactedInput())
+                }
+
+                "output_format" -> {
+                    span.setAttribute("tracy.request.output_format", content.orRedactedInput())
+                    span.setAttribute("gen_ai.request.${part.name}", content.orRedactedInput())
+                }
+
+                "partial_images" -> {
+                    content.toLongOrNull()?.let { span.setAttribute("tracy.request.partial_images", it) }
+                    span.setAttribute("gen_ai.request.${part.name}", content.orRedactedInput())
+                }
+
+                "stream" -> {
+                    content.toBooleanStrictOrNull()?.let { span.setAttribute("gen_ai.request.stream", it) }
                 }
 
                 null -> logger.warn { "Form data part with missing name ignored. Content type: '$contentType'" }
@@ -117,6 +165,13 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         handleImageGenerationResponseAttributes(span, response, extractor)
+
+        val body = response.body.asJson()?.jsonObject ?: return
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "image")
+        body["created"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.created", it) }
+        body["created_at"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
+        body["data"]?.jsonArray?.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
+            ?.let { span.setAttribute("tracy.response.image.url", it) }
     }
 
     override fun handleStreaming(span: Span, events: String) {
