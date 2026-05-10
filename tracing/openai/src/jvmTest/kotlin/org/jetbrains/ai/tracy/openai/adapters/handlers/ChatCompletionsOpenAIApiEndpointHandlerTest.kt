@@ -618,6 +618,50 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         }
     }
 
+    @Test
+    fun `test chat completions span has registry-compliant operation name and raw object attribute`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = "mock-api-key",
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "id": "chatcmpl-abc123",
+                          "object": "chat.completion",
+                          "created": 1677858242,
+                          "model": "gpt-4o-mini",
+                          "choices": [{
+                            "message": { "role": "assistant", "content": "Hello!" },
+                            "index": 0,
+                            "finish_reason": "stop"
+                          }],
+                          "usage": { "prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8 }
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = ChatCompletionCreateParams.builder()
+                .addUserMessage("Say hello")
+                .model(ChatModel.GPT_4O_MINI)
+                .build()
+
+            client.chat().completions().create(params)
+
+            val trace = analyzeSpans().first()
+            assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("chat.completion", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+            assertEquals("chat_completions", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+        }
+    }
+
     private fun partText(prompt: String) = ChatCompletionContentPart.ofText(
         ChatCompletionContentPartText.builder()
             .text(prompt)

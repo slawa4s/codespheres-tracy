@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed `setCommonResponseAttributes` to write `body["object"]` to `tracy.response.object` instead of `gen_ai.operation.name`, preventing non-registry API object types (e.g. `"chat.completion"`, `"response"`, `"file"`) from overwriting the OTel-compliant operation name
+- Added explicit `gen_ai.operation.name = "chat"` and `openai.api.type = "chat_completions"` to `ChatCompletionsOpenAIApiEndpointHandler.handleRequestAttributes` so Chat Completions spans always carry a registry-compliant operation name
+
 - Added `gen_ai.provider.name` span attribute (stable OTel GenAI registry name) to all LLM provider requests, emitting the same value as `gen_ai.system`
 - Added `server.address` and `server.port` span attributes to all LLM provider requests, extracted from the request URL
 - Changed HTTP status attribute key from deprecated `http.status_code` to stable `http.response.status_code`
