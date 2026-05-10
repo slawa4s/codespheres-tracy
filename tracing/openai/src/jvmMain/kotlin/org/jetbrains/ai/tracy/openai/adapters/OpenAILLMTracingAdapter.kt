@@ -18,6 +18,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.Conversatio
 import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.moderations.ModerationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
@@ -57,7 +58,10 @@ private enum class OpenAIApiType(val route: String) {
     BATCHES("batches"),
 
     // See: https://platform.openai.com/docs/api-reference/conversations
-    CONVERSATIONS("conversations");
+    CONVERSATIONS("conversations"),
+
+    // See: https://platform.openai.com/docs/api-reference/moderations
+    MODERATIONS("moderations");
 
     companion object {
         fun detect(url: TracyHttpUrl): OpenAIApiType? {
@@ -86,6 +90,7 @@ private enum class OpenAIApiType(val route: String) {
  * - **Files**: `/v1/files`
  * - **Batches**: `/v1/batches` (create, retrieve, cancel)
  * - **Conversations**: `/v1/conversations`
+ * - **Moderations**: `/v1/moderations`
  *
  * ## Example Usage
  * ```kotlin
@@ -189,6 +194,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
                 ConversationsOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.MODERATIONS -> handlers.getOrPut(OpenAIApiType.MODERATIONS) {
+                ModerationsOpenAIApiEndpointHandler()
             }
 
             null -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {

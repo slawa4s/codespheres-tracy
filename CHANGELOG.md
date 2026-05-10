@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added OpenAI Moderations API tracing: `POST /v1/moderations` is now handled by `ModerationsOpenAIApiEndpointHandler`, setting `gen_ai.operation.name=moderations`, `openai.api.type=moderations`, `tracy.request.input.type` (`"string"` for plain-text input, `"multimodal"` for mixed content arrays), `tracy.response.results.count`, `tracy.response.results.flagged`, `tracy.response.results.categories`, `tracy.response.results.category_scores`, and (for multimodal requests) `tracy.response.results.category_applied_input_types`.
+
 - Added Anthropic Messages streaming support: `isStreamingRequest()` now detects `"stream": true` in the request body; `handleStreaming()` parses Anthropic SSE events (`message_start`, `content_block_delta`, `message_delta`) to populate `gen_ai.response.id`, `gen_ai.output.type`, `gen_ai.response.role`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, and `gen_ai.completion.0.content` on the span.
 - Fixed `anthropic.api.type` never being set on Anthropic Messages spans: the default messages endpoint branch now sets `anthropic.api.type = "messages"`, consistent with `"batches"` and `"models"` on their respective paths.
 - Fixed Anthropic batches sub-client not being instrumented when its internal options class names the HTTP-client holder field `"httpClient"` or `"client"` instead of `"originalHttpClient"`: `patchOpenAICompatibleClient` now tries all three field names in order before re-throwing.
