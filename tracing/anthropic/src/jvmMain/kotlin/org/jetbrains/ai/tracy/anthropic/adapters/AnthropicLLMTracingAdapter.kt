@@ -14,9 +14,13 @@ import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Detects which Anthropic API endpoint is being called based on the request URL.
@@ -86,9 +90,11 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
 
-    // streaming is not supported
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
-    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+    override fun isStreamingRequest(request: TracyHttpRequest) =
+        request.body.asJson()?.jsonObject?.get("stream")?.jsonPrimitive?.boolean ?: false
+
+    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) =
+        handlerFor(url).handleStreaming(span, events)
 
     /**
      * Returns the [EndpointApiHandler] appropriate for the given URL, creating and caching
