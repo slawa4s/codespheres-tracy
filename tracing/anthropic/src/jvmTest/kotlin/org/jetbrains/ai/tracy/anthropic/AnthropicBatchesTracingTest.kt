@@ -73,6 +73,40 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
         }
     }
 
+    @Test
+    fun batchCreateSetsOperationName() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"id":"msgbatch_abc123","type":"message_batch","processing_status":"in_progress","request_counts":{"processing":1,"succeeded":0,"errored":0,"canceled":0,"expired":0},"ended_at":null,"created_at":"2024-09-24T18:37:24.100435Z","expires_at":"2024-09-25T18:37:24.100435Z","archived_at":null,"cancel_initiated_at":null,"results_url":null}""")
+            )
+
+            val client = makeInstrumentedClient()
+            val body = """{"requests":[{"custom_id":"req-1","params":{"model":"claude-opus-4-5","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}}]}""".toRequestBody(JSON)
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .post(body)
+                    .header("x-api-key", MOCK_API_KEY)
+                    .header("anthropic-version", "2023-06-01")
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            val trace = traces.firstOrNull()
+            assertNotNull(trace, "Expected a span for the batch create request")
+
+            assertEquals(
+                "create_batch",
+                trace!!.attributes[AttributeKey.stringKey("gen_ai.operation.name")],
+                "gen_ai.operation.name should be 'create_batch' for POST /v1/messages/batches"
+            )
+        }
+    }
+
     companion object {
         private const val MOCK_API_KEY = "mock-api-key"
     }

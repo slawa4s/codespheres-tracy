@@ -49,7 +49,17 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
-        if (request.url.pathSegments.contains("batches")) {
+        val segments = request.url.pathSegments
+        val operationName = when {
+            segments.contains("cancel") -> "cancel_batch"
+            segments.contains("batches") && request.method == "GET" -> "retrieve_batch"
+            segments.contains("batches") -> "create_batch"
+            segments.contains("models") -> "retrieve_model"
+            else -> "chat"
+        }
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+
+        if (segments.contains("batches")) {
             span.setAttribute("anthropic.api.type", "batches")
             return
         }
