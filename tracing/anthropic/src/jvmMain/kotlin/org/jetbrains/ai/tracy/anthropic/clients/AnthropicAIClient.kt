@@ -164,16 +164,23 @@ private fun patchOkHttpClient(okHttpClient: OkHttpClient, interceptor: Intercept
 /**
  * Recursively walks [obj]'s object graph (depth ≤ 5, identity-hash visited-set to break cycles),
  * scanning declared fields at each level. Fields assignable to [OkHttpClient] are patched with
- * [interceptor]; other non-primitive, non-array, non-JDK/Kotlin fields are recursed into.
- * Used as a fallback when [patchOpenAICompatibleClient] fails for [BatchServiceImpl] due to SDK
+ * [interceptor]; `java.util.Optional` and `java.util.concurrent.atomic.AtomicReference` fields
+ * are transparently unwrapped and recursed at the same depth so that an `OkHttpClient` hidden
+ * inside a JDK wrapper is still reachable; other non-primitive, non-array, non-JDK/Kotlin fields
+ * are recursed into at `depth + 1`.
+ * Used as a fallback when [patchOpenAICompatibleClient] fails for `BatchServiceImpl` due to SDK
  * version differences where the [OkHttpClient] is nested inside a holder (e.g. `ClientOptions`).
  */
-private fun tryPatchAllOkHttpClients(
+internal fun tryPatchAllOkHttpClients(
     obj: Any,
     interceptor: Interceptor,
     depth: Int = 0,
     visited: MutableSet<Int> = mutableSetOf(),
 ) {
+    if (OkHttpClient::class.java.isAssignableFrom(obj.javaClass)) {
+        patchOkHttpClient(obj as OkHttpClient, interceptor)
+        return
+    }
     if (!visited.add(System.identityHashCode(obj))) return
     var cls: Class<*>? = obj.javaClass
     while (cls != null) {
@@ -185,6 +192,22 @@ private fun tryPatchAllOkHttpClients(
                     patchOkHttpClient(okHttpClient, interceptor)
                 } catch (e: Exception) {
                     logger.warn(e) { "Failed to patch OkHttpClient field '${field.name}' in ${cls?.name}" }
+                }
+            } else if (java.util.Optional::class.java.isAssignableFrom(field.type)) {
+                try {
+                    field.isAccessible = true
+                    val unwrapped = (field.get(obj) as? java.util.Optional<*>)?.orElse(null) ?: continue
+                    tryPatchAllOkHttpClients(unwrapped, interceptor, depth, visited)
+                } catch (e: Exception) {
+                    logger.warn(e) { "Failed to unwrap Optional field '${field.name}' in ${cls?.name}" }
+                }
+            } else if (java.util.concurrent.atomic.AtomicReference::class.java.isAssignableFrom(field.type)) {
+                try {
+                    field.isAccessible = true
+                    val unwrapped = (field.get(obj) as? java.util.concurrent.atomic.AtomicReference<*>)?.get() ?: continue
+                    tryPatchAllOkHttpClients(unwrapped, interceptor, depth, visited)
+                } catch (e: Exception) {
+                    logger.warn(e) { "Failed to unwrap AtomicReference field '${field.name}' in ${cls?.name}" }
                 }
             } else if (depth < 5 && !field.type.isPrimitive && !field.type.isArray &&
                 !field.type.name.startsWith("java.") && !field.type.name.startsWith("kotlin.")

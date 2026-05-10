@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed `tryPatchAllOkHttpClients` in `AnthropicAIClient` to unwrap `java.util.Optional` and `java.util.concurrent.atomic.AtomicReference` fields before recursing, so an `OkHttpClient` hidden inside a JDK wrapper (e.g. `Optional<ClientOptions>` → `OkHttpClient`) is reachable and the batch-service interceptor is applied. Also added a direct-patch guard so that when the unwrapped value itself is an `OkHttpClient` it is patched immediately rather than its own fields being scanned (which would find nothing).
+
 - Fixed silent exception swallow in `instrument(AnthropicClient)`: the `BatchServiceImpl` patch failure now logs a warning via `logger.warn` and falls back to `tryPatchAllOkHttpClients`, which walks the batch service's class hierarchy to find and patch every `OkHttpClient`-typed field directly, covering SDK versions where `BatchServiceImpl` does not expose `clientOptions`.
 - Added OpenAI Audio Speech (`/v1/audio/speech`) tracing: new `AUDIO_SPEECH` dispatch entry and `AudioSpeechOpenAIApiEndpointHandler` set `gen_ai.operation.name = "audio.speech"`, `gen_ai.output.type = "speech"`, `gen_ai.request.model`, `tracy.request.voice`, `tracy.request.response_format`, and `tracy.request.speed` from the JSON request body; `/v1/audio/transcriptions` is unaffected.
 - Enhanced non-JSON response handling in `OpenTelemetryOkHttpInterceptor`: binary responses (e.g., audio speech) now embed `tracy.response.body.size_bytes` in the JSON stub passed to `registerResponse`, enabling handlers such as the audio speech handler to report response size without interface changes.

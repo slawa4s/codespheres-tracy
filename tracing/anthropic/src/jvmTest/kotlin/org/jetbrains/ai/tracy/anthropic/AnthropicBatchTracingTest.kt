@@ -17,6 +17,8 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
 import org.jetbrains.ai.tracy.anthropic.clients.instrument as instrumentSdkClient
+import org.jetbrains.ai.tracy.anthropic.clients.tryPatchAllOkHttpClients
+import org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -25,6 +27,8 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import java.time.Duration
+import java.util.Optional
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * MockWebServer-based tests for Anthropic Message Batches API tracing.
@@ -284,7 +288,54 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
         }
     }
 
+    // ===== tryPatchAllOkHttpClients JDK-wrapper unwrapping =====
+
+    @Test
+    fun `tryPatchAllOkHttpClients patches OkHttpClient directly wrapped in Optional`() {
+        val okHttpClient = OkHttpClient.Builder().build()
+        val holder = OptionalWrappedOkHttpClient(okHttpClient)
+        val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+        tryPatchAllOkHttpClients(holder, interceptor)
+        assertNotNull(okHttpClient.interceptors.find { it is OpenTelemetryOkHttpInterceptor },
+            "Interceptor should be attached to OkHttpClient unwrapped from Optional")
+    }
+
+    @Test
+    fun `tryPatchAllOkHttpClients patches OkHttpClient directly wrapped in AtomicReference`() {
+        val okHttpClient = OkHttpClient.Builder().build()
+        val holder = AtomicReferenceWrappedOkHttpClient(okHttpClient)
+        val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+        tryPatchAllOkHttpClients(holder, interceptor)
+        assertNotNull(okHttpClient.interceptors.find { it is OpenTelemetryOkHttpInterceptor },
+            "Interceptor should be attached to OkHttpClient unwrapped from AtomicReference")
+    }
+
+    @Test
+    fun `tryPatchAllOkHttpClients patches OkHttpClient nested inside Optional holder`() {
+        val okHttpClient = OkHttpClient.Builder().build()
+        val inner = InnerHolderWithOkHttpClient(okHttpClient)
+        val holder = OptionalWrappedHolder(inner)
+        val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+        tryPatchAllOkHttpClients(holder, interceptor)
+        assertNotNull(okHttpClient.interceptors.find { it is OpenTelemetryOkHttpInterceptor },
+            "Interceptor should be attached to OkHttpClient nested inside Optional<Holder>")
+    }
+
     // ===== Helpers =====
+
+    private class OptionalWrappedOkHttpClient(client: OkHttpClient) {
+        val wrappedClient: Optional<OkHttpClient> = Optional.of(client)
+    }
+
+    private class AtomicReferenceWrappedOkHttpClient(client: OkHttpClient) {
+        val wrappedClient: AtomicReference<OkHttpClient> = AtomicReference(client)
+    }
+
+    private class InnerHolderWithOkHttpClient(val httpClient: OkHttpClient)
+
+    private class OptionalWrappedHolder(inner: InnerHolderWithOkHttpClient) {
+        val holder: Optional<InnerHolderWithOkHttpClient> = Optional.of(inner)
+    }
 
     private fun MockWebServer.enqueueBatchResponse(
         id: String = "msgbatch_abc123",
