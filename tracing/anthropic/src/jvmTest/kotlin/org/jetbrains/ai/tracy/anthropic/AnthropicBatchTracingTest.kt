@@ -166,7 +166,7 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
             ).execute().use { it.body?.string() }
 
             val trace = analyzeSpans().first()
-            assertEquals(2L, trace.attributes[AttributeKey.longKey("anthropic.batch.requests.count")])
+            assertEquals(2L, trace.attributes[AttributeKey.longKey("gen_ai.request.batch.size")])
         }
     }
 
@@ -196,15 +196,16 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
             ).execute().use { it.body?.string() }
 
             val trace = analyzeSpans().first()
-            assertEquals("msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", trace.attributes[AttributeKey.stringKey("anthropic.batch.id")])
-            assertEquals("in_progress", trace.attributes[AttributeKey.stringKey("anthropic.batch.processing_status")])
-            assertEquals("2024-09-24T18:37:24.100435Z", trace.attributes[AttributeKey.stringKey("anthropic.batch.created_at")])
-            assertEquals("2024-09-25T18:37:24.100435Z", trace.attributes[AttributeKey.stringKey("anthropic.batch.expires_at")])
-            assertEquals(100L, trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.processing")])
-            assertEquals(50L, trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.succeeded")])
-            assertEquals(1L, trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.errored")])
-            assertEquals(0L, trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.canceled")])
-            assertEquals(0L, trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.expired")])
+            assertEquals("message_batch", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+            assertEquals("msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.id")])
+            assertEquals("in_progress", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
+            assertEquals("2024-09-24T18:37:24.100435Z", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.created_at")])
+            assertEquals("2024-09-25T18:37:24.100435Z", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.expires_at")])
+            assertEquals(100L, trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.processing")])
+            assertEquals(50L, trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")])
+            assertEquals(1L, trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.errored")])
+            assertEquals(0L, trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.canceled")])
+            assertEquals(0L, trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.expired")])
         }
     }
 
@@ -230,9 +231,10 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
             ).execute().use { it.body?.string() }
 
             val trace = analyzeSpans().first()
-            assertEquals("msgbatch_retrieve_xyz", trace.attributes[AttributeKey.stringKey("anthropic.batch.id")])
-            assertEquals("ended", trace.attributes[AttributeKey.stringKey("anthropic.batch.processing_status")])
-            assertNotNull(trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.succeeded")])
+            assertEquals("message_batch", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+            assertEquals("msgbatch_retrieve_xyz", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.id")])
+            assertEquals("ended", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")])
         }
     }
 
