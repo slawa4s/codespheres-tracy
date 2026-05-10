@@ -72,7 +72,24 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         if (apiType.isNotEmpty()) span.setAttribute("anthropic.api.type", apiType)
         if (operationName.isNotEmpty()) span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
 
+        // For model retrieve: extract model ID from URL path (no request body on GET)
+        if (apiType == "models") {
+            val segments = request.url.pathSegments.dropWhile { it.isBlank() }
+            // /v1/models/{model_id} has the model ID at index 2
+            if (segments.size >= 3) {
+                val modelId = segments[2]
+                if (modelId.isNotBlank()) span.setAttribute(GEN_AI_REQUEST_MODEL, modelId)
+            }
+        }
+
         val body = request.body.asJson()?.jsonObject ?: return
+
+        // For batch create: record the number of requests in the batch
+        body["requests"]?.let { requests ->
+            if (requests is JsonArray) {
+                span.setAttribute("gen_ai.request.batch.size", requests.size.toLong())
+            }
+        }
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
         body["model"]?.jsonPrimitive?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it.content) }
@@ -271,6 +288,71 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             }
             usage["service_tier"]?.jsonPrimitive?.let {
                 span.setAttribute("gen_ai.usage.service_tier", it.content)
+            }
+        }
+
+        // API-type-specific response attributes
+        val (responseApiType, _) = anthropicApiTypeAndOperation(response.url.pathSegments)
+        when (responseApiType) {
+            "batches" -> {
+                (body["id"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.id", it)
+                }
+                (body["processing_status"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.processing_status", it)
+                }
+                (body["created_at"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.created_at", it)
+                }
+                (body["expires_at"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.expires_at", it)
+                }
+                (body["request_counts"] as? JsonObject)?.let { counts ->
+                    counts["processing"]?.jsonPrimitive?.intOrNull?.let {
+                        span.setAttribute("gen_ai.response.batch.request_counts.processing", it.toLong())
+                    }
+                    counts["succeeded"]?.jsonPrimitive?.intOrNull?.let {
+                        span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it.toLong())
+                    }
+                    counts["errored"]?.jsonPrimitive?.intOrNull?.let {
+                        span.setAttribute("gen_ai.response.batch.request_counts.errored", it.toLong())
+                    }
+                    counts["canceled"]?.jsonPrimitive?.intOrNull?.let {
+                        span.setAttribute("gen_ai.response.batch.request_counts.canceled", it.toLong())
+                    }
+                    counts["expired"]?.jsonPrimitive?.intOrNull?.let {
+                        span.setAttribute("gen_ai.response.batch.request_counts.expired", it.toLong())
+                    }
+                }
+            }
+            "models" -> {
+                (body["id"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                    span.setAttribute("gen_ai.response.model.id", it)
+                }
+                (body["display_name"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.display_name", it)
+                }
+                (body["created_at"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.created_at", it)
+                }
+                (body["max_input_tokens"] as? JsonPrimitive)?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.max_input_tokens", it.toLong())
+                }
+                (body["max_output_tokens"] as? JsonPrimitive)?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.max_output_tokens", it.toLong())
+                }
+                (body["capabilities"] as? JsonObject)?.let { caps ->
+                    caps["batch"]?.jsonPrimitive?.booleanOrNull?.let {
+                        span.setAttribute("gen_ai.response.model.capabilities.batch", it)
+                    }
+                    caps["citations"]?.jsonPrimitive?.booleanOrNull?.let {
+                        span.setAttribute("gen_ai.response.model.capabilities.citations", it)
+                    }
+                    caps["vision"]?.jsonPrimitive?.booleanOrNull?.let {
+                        span.setAttribute("gen_ai.response.model.capabilities.vision", it)
+                    }
+                }
             }
         }
 
@@ -511,7 +593,8 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "messages",
         "tools",
         "stop_sequences",
-        "thinking"
+        "thinking",
+        "requests"
     )
 
     private val mappedResponseAttributes: List<String> = listOf(
@@ -527,7 +610,18 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "has_more",
         "first_id",
         "last_id",
-        "_request_id"
+        "_request_id",
+        // batch response fields
+        "processing_status",
+        "created_at",
+        "expires_at",
+        "request_counts",
+        "deleted",
+        // model response fields
+        "display_name",
+        "max_input_tokens",
+        "max_output_tokens",
+        "capabilities"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes

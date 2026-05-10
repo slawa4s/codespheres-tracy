@@ -74,6 +74,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("tracy.request.messages.count", messages.size.toLong())
 
             var systemCount = 0L
+            var imageCount = 0L
             for ((index, message) in messages.withIndex()) {
                 val role = message.jsonObject["role"]?.jsonPrimitive?.content
                 val kind = kindByRole(role)
@@ -88,6 +89,13 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                 val messageContent = message.jsonObject["content"]
                 attachRequestContent(span, index, kind, messageContent)
 
+                // count image_url parts across all messages
+                if (messageContent is JsonArray) {
+                    imageCount += messageContent.count { part ->
+                        part.jsonObject["type"]?.jsonPrimitive?.content == "image_url"
+                    }
+                }
+
                 // when a tool result is encountered
                 if (role?.lowercase() == "tool") {
                     span.setAttribute(
@@ -98,6 +106,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             }
             if (systemCount > 0) {
                 span.setAttribute("tracy.request.system_messages.count", systemCount)
+            }
+            if (imageCount > 0) {
+                span.setAttribute("tracy.request.input_image.count", imageCount)
             }
         }
 

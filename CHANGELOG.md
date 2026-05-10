@@ -1,5 +1,25 @@
 # Changelog
 
+## Session 6
+
+**Session:** 6 | **Branch:** `claude-session-6` | **Base:** `claude-session-5`
+**Evaluator attempts:** 2 | **Artifacts:** `artifacts/6/evaluation_0.json` (baseline, score 100, 94 scoreable/60 provider_error), `artifacts/6/evaluation_1.json` (after changes, score 100, 94 scoreable/60 provider_error)
+
+### Anthropic adapter improvements
+- `AnthropicLLMTracingAdapter`: fixed model-retrieve URL extraction (`gen_ai.request.model` from `/v1/models/{id}` path) — was unreachable after the early `?: return` on missing body; moved before the null-body guard so GET requests (no body) correctly set the attribute
+- `AnthropicLLMTracingAdapter`: added `gen_ai.request.batch.size` from `body["requests"].size` for batch create requests
+- `AnthropicLLMTracingAdapter`: added batch-specific response attributes extracted from the response body when `apiType == "batches"`: `gen_ai.response.batch.id`, `gen_ai.response.batch.processing_status`, `gen_ai.response.batch.created_at`, `gen_ai.response.batch.expires_at`, and `gen_ai.response.batch.request_counts.{processing,succeeded,errored,canceled,expired}`
+- `AnthropicLLMTracingAdapter`: added model-specific response attributes extracted from the response body when `apiType == "models"`: `gen_ai.response.model` (from `body["id"]`), `gen_ai.response.model.id`, `gen_ai.response.model.display_name`, `gen_ai.response.model.created_at`, `gen_ai.response.model.max_input_tokens`, `gen_ai.response.model.max_output_tokens`, and `gen_ai.response.model.capabilities.{batch,citations,vision}`
+- Updated `mappedRequestAttributes` to include `requests` and `mappedResponseAttributes` to include batch/model response fields to prevent double-emission via `populateUnmappedAttributes`
+
+### Gemini adapter improvements
+- `GeminiImagenHandler`: added `gen_ai.output.type = "image"` (via `GEN_AI_OUTPUT_TYPE`) in `handleRequestAttributes`
+- `GeminiImagenHandler`: added `gen_ai.request.image.number_of_images` from `parameters.sampleCount` in `handleRequestAttributes`
+- `GeminiImagenHandler`: added `gen_ai.response.image.count` from `predictions.size` in `handleResponseAttributes`
+
+### OpenAI adapter improvements
+- `ChatCompletionsOpenAIApiEndpointHandler`: added counting of `image_url` content parts across all messages; sets `tracy.request.input_image.count` when at least one image is present
+
 ## Session 4
 
 **Session:** 4 | **Branch:** `claude-session-4` | **Base:** `claude-session-3`

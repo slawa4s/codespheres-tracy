@@ -14,6 +14,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
 import kotlinx.serialization.json.*
 
 /**
@@ -25,7 +26,13 @@ class GeminiImagenHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "image")
+
         val body = request.body.asJson()?.jsonObject ?: return
+
+        body["parameters"]?.jsonObject?.get("sampleCount")?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.request.image.number_of_images", it.toLong())
+        }
 
         val instances = body["instances"]?.jsonArray ?: return
         for ((index, instance) in instances.withIndex()) {
@@ -74,6 +81,7 @@ class GeminiImagenHandler(
         val body = response.body.asJson()?.jsonObject ?: return
 
         val predictions = body["predictions"]?.jsonArray ?: return
+        span.setAttribute("gen_ai.response.image.count", predictions.size.toLong())
         for ((index, prediction) in predictions.withIndex()) {
             span.setAttribute(
                 "gen_ai.completion.$index.content",
