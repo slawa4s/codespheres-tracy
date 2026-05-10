@@ -1,0 +1,315 @@
+/*
+ * Copyright © 2026 JetBrains s.r.o. and contributors.
+ * Use of this source code is governed by the Apache 2.0 license.
+ */
+
+package org.jetbrains.ai.tracy.anthropic.adapters.handlers
+
+import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
+import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.populateUnmappedAttributes
+import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
+import org.jetbrains.ai.tracy.core.adapters.media.MediaContent
+import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
+import org.jetbrains.ai.tracy.core.adapters.media.MediaContentPart
+import org.jetbrains.ai.tracy.core.adapters.media.Resource
+import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
+import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
+import org.jetbrains.ai.tracy.core.http.protocol.asJson
+import org.jetbrains.ai.tracy.core.policy.ContentKind
+import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
+import org.jetbrains.ai.tracy.core.policy.orRedactedInput
+import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
+import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
+import kotlinx.serialization.json.*
+import mu.KotlinLogging
+
+/**
+ * Handler for the Anthropic Messages API (`POST /v1/messages`).
+ *
+ * Extracts telemetry attributes from Messages API requests and responses, including model
+ * parameters, message content, tool definitions, tool calls, usage statistics, and media content
+ * (images, documents).
+ *
+ * @param extractor Used to attach uploadable media content attributes (images, PDFs) to spans.
+ *
+ * See: [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages)
+ */
+internal class AnthropicMessagesEndpointHandler(
+    private val extractor: MediaContentExtractor
+) : EndpointApiHandler {
+
+    override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        val body = request.body.asJson()?.jsonObject ?: return
+
+        body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
+        body["model"]?.jsonPrimitive?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it.content) }
+        body["max_tokens"]?.jsonPrimitive?.intOrNull?.let { span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it.toLong()) }
+
+        // metadata
+        body["metadata"]?.jsonObject?.let { metadata ->
+            metadata["user_id"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.metadata.user_id", it.content) }
+        }
+        body["service_tier"]?.jsonPrimitive?.let {
+            span.setAttribute("gen_ai.usage.service_tier", it.content)
+        }
+
+        // system prompt
+        when (val system = body["system"]) {
+            is JsonPrimitive -> {
+                span.setAttribute("gen_ai.prompt.system.content", system.content.orRedactedInput())
+            }
+            is JsonArray -> {
+                for ((index, block) in system.withIndex()) {
+                    block.jsonObject["type"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.prompt.system.$index.type", it)
+                    }
+                    block.jsonObject["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.prompt.system.$index.content", it.orRedactedInput())
+                    }
+                }
+            }
+            else -> {}
+        }
+
+        body["top_k"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_K, it) }
+        body["top_p"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_P, it) }
+
+        body["messages"]?.let {
+            if (it is JsonArray) {
+                for ((index, message) in it.jsonArray.withIndex()) {
+                    span.setAttribute("gen_ai.prompt.$index.role", message.jsonObject["role"]?.jsonPrimitive?.content)
+                    val content = message.jsonObject["content"]?.toString()
+                    // treat all request messages (including assistant history) as input per policy
+                    span.setAttribute("gen_ai.prompt.$index.content", content?.orRedactedInput())
+                }
+            }
+        }
+
+        // extracting definitions of tool calls
+        // see: https://docs.anthropic.com/en/api/messages#body-tools
+        body["tools"]?.let {
+            if (it is JsonArray) {
+                for ((index, tool) in it.jsonArray.withIndex()) {
+                    val name = tool.jsonObject["name"]?.jsonPrimitive?.contentOrNull
+                    val description = tool.jsonObject["description"]?.jsonPrimitive?.contentOrNull
+                    val type = tool.jsonObject["type"]?.jsonPrimitive?.contentOrNull
+                    val parameters = tool.jsonObject["input_schema"]?.toString()
+
+                    span.setAttribute("gen_ai.tool.$index.name", name?.orRedactedInput())
+                    span.setAttribute("gen_ai.tool.$index.description", description?.orRedactedInput())
+                    span.setAttribute("gen_ai.tool.$index.type", type)
+                    span.setAttribute("gen_ai.tool.$index.parameters", parameters?.orRedactedInput())
+                }
+            }
+        }
+
+        if (contentTracingAllowed(ContentKind.INPUT)) {
+            val mediaContent = parseMediaContent(body)
+            if (mediaContent != null) {
+                extractor.setUploadableContentAttributes(span, field = "input", mediaContent)
+            }
+        }
+
+        span.populateUnmappedAttributes(body, mappedRequestAttributes, PayloadType.REQUEST)
+    }
+
+    override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        val body = response.body.asJson()?.jsonObject ?: return
+
+        body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
+        body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
+        body["role"]?.let { span.setAttribute("gen_ai.response.role", it.jsonPrimitive.content) }
+        body["model"]?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it.jsonPrimitive.content) }
+
+        // collecting response messages
+        body["content"]?.let {
+            for ((index, message) in it.jsonArray.withIndex()) {
+                val type = message.jsonObject["type"]?.jsonPrimitive?.content
+                span.setAttribute("gen_ai.completion.$index.type", type)
+
+                when (type) {
+                    "text" -> {
+                        span.setAttribute(
+                            "gen_ai.completion.$index.content",
+                            message.jsonObject["text"]?.jsonPrimitive?.content?.orRedactedOutput()
+                        )
+                    }
+
+                    "tool_use" -> {
+                        val toolCall = message
+                        span.setAttribute(
+                            "gen_ai.completion.$index.tool.call.id",
+                            toolCall.jsonObject["id"]?.jsonPrimitive?.content
+                        )
+                        span.setAttribute(
+                            "gen_ai.completion.$index.tool.call.type",
+                            toolCall.jsonObject["type"]?.jsonPrimitive?.content
+                        )
+                        span.setAttribute(
+                            "gen_ai.completion.$index.tool.name",
+                            toolCall.jsonObject["name"]?.jsonPrimitive?.content?.orRedactedOutput()
+                        )
+                        span.setAttribute(
+                            "gen_ai.completion.$index.tool.arguments",
+                            toolCall.jsonObject["input"]?.toString()?.orRedactedOutput()
+                        )
+                    }
+
+                    else -> {
+                        span.setAttribute("gen_ai.completion.$index.content", message.toString().orRedactedOutput())
+                    }
+                }
+            }
+        }
+
+        // finish reason
+        body["stop_reason"]?.let {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, listOf(it.jsonPrimitive.content))
+        }
+
+        // collecting usage stats (e.g., input/output tokens)
+        body["usage"]?.jsonObject?.let { usage ->
+            usage["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
+            }
+            usage["output_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+            }
+            usage["cache_creation_input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.usage.cache_creation.input_tokens", it.toLong())
+            }
+            usage["cache_read_input_tokens"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
+            }
+            usage["service_tier"]?.jsonPrimitive?.let {
+                span.setAttribute("gen_ai.usage.service_tier", it.content)
+            }
+        }
+
+        span.populateUnmappedAttributes(body, mappedResponseAttributes, PayloadType.RESPONSE)
+    }
+
+    override fun handleStreaming(span: Span, events: String) = Unit
+
+    private fun parseMediaContent(body: JsonObject): MediaContent? {
+        if (body["messages"] !is JsonArray) {
+            return null
+        }
+
+        val messages = body["messages"]?.jsonArray ?: return null
+
+        val parts: List<MediaContentPart> = buildList {
+            val supportedMessageTypes = listOf("image", "document")
+
+            for (message in messages) {
+                if (message !is JsonObject || message["content"] !is JsonArray) {
+                    continue
+                }
+                val content = message["content"]?.jsonArray ?: continue
+
+                for (part in content) {
+                    val messageType = part.jsonObject["type"]?.jsonPrimitive?.content ?: continue
+                    if (messageType !in supportedMessageTypes) {
+                        continue
+                    }
+
+                    val source = part.jsonObject["source"]?.jsonObject ?: continue
+                    val contentParts = parseSource(messageType, source).map {
+                        MediaContentPart(it)
+                    }
+                    addAll(contentParts)
+                }
+            }
+        }
+
+        return MediaContent(parts)
+    }
+
+    private fun parseSource(messageType: String, source: JsonObject): List<Resource> {
+        val sourceType = source["type"]?.jsonPrimitive?.content ?: return emptyList()
+        return when (sourceType) {
+            "url" -> {
+                val url = parseUrl(messageType, source) ?: return emptyList()
+                listOf(url)
+            }
+
+            "base64" -> {
+                val base64 = parseBase64(messageType, source) ?: return emptyList()
+                listOf(base64)
+            }
+
+            "content" -> parseContent(messageType, source)
+            else -> emptyList()
+        }
+    }
+
+    private fun parseUrl(messageType: String, source: JsonObject): Resource.Url? {
+        val url = source["url"]?.jsonPrimitive?.content
+        if (url == null) {
+            logger.warn { "Message with type '$messageType' has no URL source" }
+            return null
+        }
+        return Resource.Url(url)
+    }
+
+    private fun parseBase64(messageType: String, source: JsonObject): Resource.Base64? {
+        val data = source["data"]?.jsonPrimitive?.content
+        val mediaType = source["media_type"]?.jsonPrimitive?.content
+
+        if (data == null || mediaType == null) {
+            logger.warn { "Message with type '$messageType' misses either 'data' or 'media_type' attribute" }
+            return null
+        }
+
+        return Resource.Base64(data, mediaType)
+    }
+
+    private fun parseContent(messageType: String, source: JsonObject): List<Resource> {
+        val content = source["content"]
+
+        if (content == null || content !is JsonArray) {
+            logger.warn { "Message with type '$messageType' has no content source" }
+            return emptyList()
+        }
+
+        return buildList {
+            for (param in content.jsonArray) {
+                val type = param.jsonObject["type"]?.jsonPrimitive?.content ?: continue
+                if (type == "image") {
+                    val imageSource = param.jsonObject["source"]?.jsonObject ?: continue
+                    val resource = parseSource(messageType, imageSource)
+                    addAll(resource)
+                }
+            }
+        }
+    }
+
+    // "requests" is included to prevent populateUnmappedAttributes from leaking batch payloads
+    // https://docs.claude.com/en/api/messages
+    private val mappedRequestAttributes: List<String> = listOf(
+        "temperature",
+        "model",
+        "max_tokens",
+        "metadata",
+        "service_tier",
+        "system",
+        "top_k",
+        "top_p",
+        "messages",
+        "tools",
+        "requests"
+    )
+
+    private val mappedResponseAttributes: List<String> = listOf(
+        "id",
+        "type",
+        "role",
+        "model",
+        "content",
+        "stop_reason",
+        "usage"
+    )
+
+    private val logger = KotlinLogging.logger {}
+}
