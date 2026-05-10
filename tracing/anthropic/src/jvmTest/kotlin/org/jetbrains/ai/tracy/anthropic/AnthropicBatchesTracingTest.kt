@@ -73,6 +73,211 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
         }
     }
 
+    @Test
+    fun batchCreateErrorSetsErrorType() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"type":"error","error":{"type":"invalid_request_error","message":"requests array is empty"}}""")
+            )
+
+            val client = makeInstrumentedClient()
+            val body = """{"requests":[]}""".toRequestBody(JSON)
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .post(body)
+                    .header("x-api-key", MOCK_API_KEY)
+                    .header("anthropic-version", "2023-06-01")
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            val trace = traces.firstOrNull()
+            assertNotNull(trace, "Expected a span for the batches request")
+
+            assertEquals(
+                "400",
+                trace!!.attributes[AttributeKey.stringKey("error.type")],
+                "error.type should be set to the HTTP status code string on error spans"
+            )
+        }
+    }
+
+    @Test
+    fun batchCreateSetsOperationName() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"id":"msgbatch_abc123","type":"message_batch","processing_status":"in_progress","request_counts":{"processing":1,"succeeded":0,"errored":0,"canceled":0,"expired":0},"ended_at":null,"created_at":"2024-09-24T18:37:24.100435Z","expires_at":"2024-09-25T18:37:24.100435Z","archived_at":null,"cancel_initiated_at":null,"results_url":null}""")
+            )
+
+            val client = makeInstrumentedClient()
+            val body = """{"requests":[{"custom_id":"req-1","params":{"model":"claude-opus-4-5","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}}]}""".toRequestBody(JSON)
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .post(body)
+                    .header("x-api-key", MOCK_API_KEY)
+                    .header("anthropic-version", "2023-06-01")
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            val trace = traces.firstOrNull()
+            assertNotNull(trace, "Expected a span for the batch create request")
+
+            assertEquals(
+                "create_batch",
+                trace!!.attributes[AttributeKey.stringKey("gen_ai.operation.name")],
+                "gen_ai.operation.name should be 'create_batch' for POST /v1/messages/batches"
+            )
+        }
+    }
+
+    @Test
+    fun batchCreateResponseSetsBatchAttributes() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                            "id": "msgbatch_abc123",
+                            "type": "message_batch",
+                            "processing_status": "in_progress",
+                            "created_at": 1714404061,
+                            "expires_at": 1714490461,
+                            "request_counts": {
+                                "processing": 5,
+                                "succeeded": 2,
+                                "errored": 1,
+                                "canceled": 0,
+                                "expired": 0
+                            }
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val client = makeInstrumentedClient()
+            val body = """{"requests":[{"custom_id":"req1","params":{"model":"claude-3-haiku-20240307","max_tokens":100,"messages":[{"role":"user","content":"Hello"}]}}]}""".toRequestBody(JSON)
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .post(body)
+                    .header("x-api-key", MOCK_API_KEY)
+                    .header("anthropic-version", "2023-06-01")
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            val span = traces.firstOrNull()
+            assertNotNull(span, "Expected a span for the batches request")
+
+            assertEquals(
+                "msgbatch_abc123",
+                span!!.attributes[AttributeKey.stringKey("gen_ai.response.batch.id")],
+                "gen_ai.response.batch.id should be set from batch response id"
+            )
+            assertEquals(
+                "message_batch",
+                span.attributes[AttributeKey.stringKey("gen_ai.output.type")],
+                "gen_ai.output.type should be set from batch response type field"
+            )
+            assertEquals(
+                "in_progress",
+                span.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")],
+                "gen_ai.response.batch.processing_status should be set"
+            )
+            assertEquals(
+                1714404061L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.created_at")],
+                "gen_ai.response.batch.created_at should be set"
+            )
+            assertEquals(
+                1714490461L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.expires_at")],
+                "gen_ai.response.batch.expires_at should be set"
+            )
+            assertEquals(
+                5L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.processing")],
+                "gen_ai.response.batch.request_counts.processing should be set"
+            )
+            assertEquals(
+                2L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")],
+                "gen_ai.response.batch.request_counts.succeeded should be set"
+            )
+            assertEquals(
+                1L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.errored")],
+                "gen_ai.response.batch.request_counts.errored should be set"
+            )
+            assertEquals(
+                0L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.canceled")],
+                "gen_ai.response.batch.request_counts.canceled should be set"
+            )
+            assertEquals(
+                0L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.expired")],
+                "gen_ai.response.batch.request_counts.expired should be set"
+            )
+        }
+    }
+
+    @Test
+    fun batchCreateSetsRequestBatchSize() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"id":"msgbatch_01","type":"message_batch","processing_status":"in_progress","request_counts":{"processing":2,"succeeded":0,"errored":0,"canceled":0,"expired":0},"ended_at":null,"created_at":"2025-01-01T00:00:00Z","expires_at":"2025-01-02T00:00:00Z","archived_at":null,"cancel_initiated_at":null,"results_url":null}""")
+            )
+
+            val client = makeInstrumentedClient()
+            val body = """
+                {
+                  "requests": [
+                    {"custom_id":"req-1","params":{"model":"claude-3-5-haiku-20241022","max_tokens":10,"messages":[{"role":"user","content":"Hello"}]}},
+                    {"custom_id":"req-2","params":{"model":"claude-3-5-haiku-20241022","max_tokens":10,"messages":[{"role":"user","content":"World"}]}}
+                  ]
+                }
+            """.trimIndent().toRequestBody(JSON)
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .post(body)
+                    .header("x-api-key", MOCK_API_KEY)
+                    .header("anthropic-version", "2023-06-01")
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            val trace = traces.firstOrNull()
+            assertNotNull(trace, "Expected a span for the batches create request")
+
+            assertEquals(
+                2L,
+                trace!!.attributes[AttributeKey.longKey("gen_ai.request.batch.size")],
+                "gen_ai.request.batch.size should equal the number of entries in the requests array"
+            )
+        }
+    }
+
     companion object {
         private const val MOCK_API_KEY = "mock-api-key"
     }

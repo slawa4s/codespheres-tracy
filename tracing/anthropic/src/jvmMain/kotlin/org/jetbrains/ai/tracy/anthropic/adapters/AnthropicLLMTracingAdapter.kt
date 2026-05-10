@@ -49,8 +49,29 @@ import mu.KotlinLogging
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
-        if (request.url.pathSegments.contains("batches")) {
+        val segments = request.url.pathSegments
+        val operationName = when {
+            segments.contains("cancel") -> "cancel_batch"
+            segments.contains("batches") && request.method == "GET" -> "retrieve_batch"
+            segments.contains("batches") -> "create_batch"
+            segments.contains("models") -> "retrieve_model"
+            else -> "chat"
+        }
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
+
+        if (segments.contains("models")) {
+            span.setAttribute("anthropic.api.type", "models")
+            val lastSegment = segments.lastOrNull()
+            if (lastSegment != null && lastSegment != "models") {
+                span.setAttribute(GEN_AI_REQUEST_MODEL, lastSegment)
+            }
+            return
+        }
+
+        if (segments.contains("batches")) {
             span.setAttribute("anthropic.api.type", "batches")
+            val batchBody = request.body.asJson()?.jsonObject
+            batchBody?.get("requests")?.jsonArray?.size?.let { span.setAttribute("gen_ai.request.batch.size", it.toLong()) }
             return
         }
 
@@ -129,11 +150,69 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     }
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
+        val body = response.body.asJson()?.jsonObject ?: return
+
         if (response.url.pathSegments.contains("batches")) {
+            body["id"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.batch.id", it) }
+            body["type"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it) }
+            body["processing_status"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.batch.processing_status", it)
+            }
+            body["created_at"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.created_at", it)
+            }
+            body["expires_at"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.expires_at", it)
+            }
+            body["request_counts"]?.jsonObject?.let { counts ->
+                counts["processing"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.processing", it.toLong())
+                }
+                counts["succeeded"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it.toLong())
+                }
+                counts["errored"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.errored", it.toLong())
+                }
+                counts["canceled"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.canceled", it.toLong())
+                }
+                counts["expired"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.expired", it.toLong())
+                }
+            }
             return
         }
 
-        val body = response.body.asJson()?.jsonObject ?: return
+        if (response.url.pathSegments.contains("models")) {
+            body["id"]?.jsonPrimitive?.content?.let {
+                span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                span.setAttribute("gen_ai.response.model.id", it)
+            }
+            body["display_name"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.model.display_name", it)
+            }
+            body["created_at"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.model.created_at", it)
+            }
+            body["max_input_tokens"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_input_tokens", it)
+            }
+            body["max_output_tokens"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_output_tokens", it)
+            }
+            body["capabilities"]?.jsonObject?.let { caps ->
+                fun capFlag(element: JsonElement?): Boolean? = when (element) {
+                    is JsonObject -> element["enabled"]?.jsonPrimitive?.booleanOrNull
+                    is JsonPrimitive -> element.booleanOrNull
+                    else -> null
+                }
+                capFlag(caps["vision"])?.let { span.setAttribute("gen_ai.response.model.capabilities.vision", it) }
+                capFlag(caps["citations"])?.let { span.setAttribute("gen_ai.response.model.capabilities.citations", it) }
+                capFlag(caps["batch"])?.let { span.setAttribute("gen_ai.response.model.capabilities.batch", it) }
+            }
+            return
+        }
 
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
