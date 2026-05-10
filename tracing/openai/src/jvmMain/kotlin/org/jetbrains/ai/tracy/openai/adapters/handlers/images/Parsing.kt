@@ -54,7 +54,7 @@ internal fun handleImageGenerationResponseAttributes(
         if (key in manuallyParsedKeys) {
             continue
         }
-        span.setAttribute("gen_ai.response.$key", value.asString)
+        span.setAttribute("tracy.response.$key", value.asString)
     }
 }
 

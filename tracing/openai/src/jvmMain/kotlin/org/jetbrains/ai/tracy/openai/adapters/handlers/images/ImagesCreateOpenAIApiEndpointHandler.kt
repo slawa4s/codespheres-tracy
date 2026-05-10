@@ -37,7 +37,7 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
             if (key in manuallyParsedKeys) {
                 continue
             }
-            span.setAttribute("gen_ai.request.$key", value.asString.orRedactedInput())
+            span.setAttribute("tracy.request.$key", value.asString.orRedactedInput())
         }
     }
 
