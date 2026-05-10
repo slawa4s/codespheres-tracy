@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `patchClientByFieldScan` fallback in `instrument(AnthropicClient)`: when the standard `patchOpenAICompatibleClient` path fails for `messages().batches()`, the function now walks all declared fields (including superclass fields) of the sub-client's object hierarchy looking for `OkHttpClient` instances and patches each one. If all patching attempts fail the failure is now logged at ERROR level (previously WARN) so operators are alerted.
+
 - Added Anthropic Messages streaming support: `isStreamingRequest()` now detects `"stream": true` in the request body; `handleStreaming()` parses Anthropic SSE events (`message_start`, `content_block_delta`, `message_delta`) to populate `gen_ai.response.id`, `gen_ai.output.type`, `gen_ai.response.role`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, and `gen_ai.completion.0.content` on the span.
 - Fixed `anthropic.api.type` never being set on Anthropic Messages spans: the default messages endpoint branch now sets `anthropic.api.type = "messages"`, consistent with `"batches"` and `"models"` on their respective paths.
 - Fixed Anthropic batches sub-client not being instrumented when its internal options class names the HTTP-client holder field `"httpClient"` or `"client"` instead of `"originalHttpClient"`: `patchOpenAICompatibleClient` now tries all three field names in order before re-throwing.
