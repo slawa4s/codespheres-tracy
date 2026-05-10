@@ -16,6 +16,7 @@ import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -112,6 +113,44 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
     // ===== Response attribute extraction =====
 
     @Test
+    fun `models retrieve sets gen_ai output type to model`() = runTest {
+        withMockServer { server ->
+            val client = buildClient()
+            server.enqueueModelRetrieveResponse()
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/models/claude-3-5-sonnet-20241022"))
+                    .get()
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("model", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+        }
+    }
+
+    @Test
+    fun `models retrieve uses URL alias for gen_ai response model and versioned id for model id`() = runTest {
+        withMockServer { server ->
+            val client = buildClient()
+            // URL alias is "claude-haiku-4-5"; response id is the versioned form
+            server.enqueueModelRetrieveResponse(id = "claude-haiku-4-5-20251001")
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/models/claude-haiku-4-5"))
+                    .get()
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("claude-haiku-4-5", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
+            assertEquals("claude-haiku-4-5-20251001", trace.attributes[AttributeKey.stringKey("gen_ai.response.model.id")])
+        }
+    }
+
+    @Test
     fun `models retrieve extracts response model attributes`() = runTest {
         withMockServer { server ->
             val client = buildClient()
@@ -131,8 +170,8 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
 
             val trace = analyzeSpans().first()
             assertEquals("claude-3-5-sonnet-20241022", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
-            assertEquals("Claude 3.5 Sonnet", trace.attributes[AttributeKey.stringKey("anthropic.model.display_name")])
-            assertEquals(1724534400L, trace.attributes[AttributeKey.longKey("anthropic.model.created_at")])
+            assertEquals("Claude 3.5 Sonnet", trace.attributes[AttributeKey.stringKey("gen_ai.response.model.display_name")])
+            assertEquals(1724534400L, trace.attributes[AttributeKey.longKey("gen_ai.response.model.created_at")])
             assertEquals(200000L, trace.attributes[AttributeKey.longKey("anthropic.model.context_window")])
         }
     }
@@ -157,9 +196,57 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
 
             val trace = analyzeSpans().first()
             assertEquals("claude-opus-4-5", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
-            assertEquals("Claude Opus 4.5", trace.attributes[AttributeKey.stringKey("anthropic.model.display_name")])
-            assertEquals(1736985600L, trace.attributes[AttributeKey.longKey("anthropic.model.created_at")])
+            assertEquals("Claude Opus 4.5", trace.attributes[AttributeKey.stringKey("gen_ai.response.model.display_name")])
+            assertEquals(1736985600L, trace.attributes[AttributeKey.longKey("gen_ai.response.model.created_at")])
             assertEquals(200000L, trace.attributes[AttributeKey.longKey("anthropic.model.context_window")])
+        }
+    }
+
+    @Test
+    fun `models retrieve extracts max token limits`() = runTest {
+        withMockServer { server ->
+            val client = buildClient()
+            server.enqueueModelRetrieveResponse(
+                id = "claude-3-5-sonnet-20241022",
+                maxTokensInContext = 200000L,
+                maxOutputTokens = 8192L
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/models/claude-3-5-sonnet-20241022"))
+                    .get()
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals(200000L, trace.attributes[AttributeKey.longKey("gen_ai.response.model.max_input_tokens")])
+            assertEquals(8192L, trace.attributes[AttributeKey.longKey("gen_ai.response.model.max_output_tokens")])
+        }
+    }
+
+    @Test
+    fun `models retrieve extracts capabilities`() = runTest {
+        withMockServer { server ->
+            val client = buildClient()
+            server.enqueueModelRetrieveResponse(
+                id = "claude-3-5-sonnet-20241022",
+                capabilitiesBatch = true,
+                capabilitiesCitations = true,
+                capabilitiesVision = true
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/models/claude-3-5-sonnet-20241022"))
+                    .get()
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertTrue(trace.attributes[AttributeKey.booleanKey("gen_ai.response.model.capabilities.batch")] == true)
+            assertTrue(trace.attributes[AttributeKey.booleanKey("gen_ai.response.model.capabilities.citations")] == true)
+            assertTrue(trace.attributes[AttributeKey.booleanKey("gen_ai.response.model.capabilities.vision")] == true)
         }
     }
 
@@ -170,7 +257,22 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
         displayName: String = "Claude 3.5 Sonnet",
         createdAt: Long = 1724534400L,
         contextWindow: Long = 200000L,
+        maxTokensInContext: Long? = null,
+        maxOutputTokens: Long? = null,
+        capabilitiesBatch: Boolean? = null,
+        capabilitiesCitations: Boolean? = null,
+        capabilitiesVision: Boolean? = null,
     ) {
+        val maxInputField = if (maxTokensInContext != null) """"max_tokens_in_context": $maxTokensInContext,""" else ""
+        val maxOutputField = if (maxOutputTokens != null) """"max_output_tokens": $maxOutputTokens,""" else ""
+        val capsField = if (capabilitiesBatch != null || capabilitiesCitations != null || capabilitiesVision != null) {
+            val batchPart = if (capabilitiesBatch != null) """"batch": $capabilitiesBatch""" else null
+            val citPart = if (capabilitiesCitations != null) """"citations": $capabilitiesCitations""" else null
+            val visionPart = if (capabilitiesVision != null) """"image_input": {"supported": $capabilitiesVision}""" else null
+            val parts = listOfNotNull(batchPart, citPart, visionPart).joinToString(", ")
+            """"capabilities": { $parts },"""
+        } else ""
+
         enqueue(
             MockResponse()
                 .setResponseCode(200)
@@ -182,7 +284,11 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
                       "id": "$id",
                       "display_name": "$displayName",
                       "created_at": $createdAt,
-                      "context_window": $contextWindow
+                      "context_window": $contextWindow,
+                      $maxInputField
+                      $maxOutputField
+                      $capsField
+                      "dummy": "end"
                     }
                     """.trimIndent()
                 )

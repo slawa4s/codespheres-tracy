@@ -161,10 +161,50 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
         if (apiType == "models") {
             val data = body["data"]?.jsonArray?.firstOrNull()?.jsonObject ?: body
-            data["id"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
-            data["display_name"]?.jsonPrimitive?.content?.let { span.setAttribute("anthropic.model.display_name", it) }
-            data["created_at"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("anthropic.model.created_at", it) }
-            data["context_window"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("anthropic.model.context_window", it) }
+
+            span.setAttribute(GEN_AI_OUTPUT_TYPE, "model")
+
+            // Use the URL path alias (e.g. "claude-haiku-4-5") for GEN_AI_RESPONSE_MODEL and
+            // the versioned response id (e.g. "claude-haiku-4-5-20251001") for model.id.
+            val modelAlias = response.url.pathSegments
+                .dropWhile { it != "models" }
+                .drop(1)
+                .filter { it.isNotEmpty() }
+                .firstOrNull()
+            val modelIdValue = data["id"]?.jsonPrimitive?.content
+            (modelAlias ?: modelIdValue)?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+            modelIdValue?.let { span.setAttribute("gen_ai.response.model.id", it) }
+
+            data["display_name"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.model.display_name", it)
+            }
+            data["created_at"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.model.created_at", it)
+            }
+            data["context_window"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("anthropic.model.context_window", it)
+            }
+
+            val maxInputTokens = data["max_tokens_in_context"]?.jsonPrimitive?.longOrNull
+                ?: data["max_input_tokens"]?.jsonPrimitive?.longOrNull
+            maxInputTokens?.let { span.setAttribute("gen_ai.response.model.max_input_tokens", it) }
+
+            data["max_output_tokens"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.model.max_output_tokens", it)
+            }
+
+            data["capabilities"]?.jsonObject?.let { caps ->
+                caps["batch"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.capabilities.batch", it)
+                }
+                caps["citations"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.capabilities.citations", it)
+                }
+                caps["image_input"]?.jsonObject?.get("supported")?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.model.capabilities.vision", it)
+                }
+            }
+
             return
         }
 
