@@ -30,8 +30,8 @@ import mu.KotlinLogging
  *
  * Sets `anthropic.api.type` to `"messages"`, `"batches"`, or `"models"` on every span, and sets
  * `gen_ai.operation.name` to `"chat"` for the Messages API, to the appropriate batch operation
- * name (`batches.create`, `batches.retrieve`, `batches.cancel`, `batches.results`) for the Batches
- * API, or to `"models.list"` / `"models.retrieve"` for the Models API.
+ * name (`batches.list`, `batches.create`, `batches.retrieve`, `batches.cancel`, `batches.results`)
+ * for the Batches API, or to `"models.list"` / `"models.retrieve"` for the Models API.
  *
  * ## Example Usage
  * ```kotlin
@@ -478,17 +478,19 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
      * Determines the gen_ai.operation.name for a Batches API URL.
      *
      * Anthropic batch routes:
+     * - `GET  /v1/messages/batches`              → `batches.list`
      * - `POST /v1/messages/batches`              → `batches.create`
      * - `GET  /v1/messages/batches/{id}`         → `batches.retrieve`
      * - `POST /v1/messages/batches/{id}/cancel`  → `batches.cancel`
      * - `GET  /v1/messages/batches/{id}/results` → `batches.results`
      */
-    private fun detectBatchOperationName(url: TracyHttpUrl, @Suppress("UNUSED_PARAMETER") method: String): String {
+    private fun detectBatchOperationName(url: TracyHttpUrl, method: String): String {
         val segments = url.pathSegments
         val batchesIdx = segments.indexOf("batches")
         if (batchesIdx < 0) return "chat"
         val after = segments.drop(batchesIdx + 1)
         return when {
+            after.isEmpty() && method == "GET" -> "batches.list"
             after.isEmpty() -> "batches.create"
             after.contains("cancel") -> "batches.cancel"
             after.contains("results") -> "batches.results"
