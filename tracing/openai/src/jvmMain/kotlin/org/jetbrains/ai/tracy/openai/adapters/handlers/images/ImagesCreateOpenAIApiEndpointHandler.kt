@@ -12,14 +12,25 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.openai.adapters.handlers.asString
+import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Extracts request/response bodies of Image Generation API.
+ *
+ * Sets [GEN_AI_OPERATION_NAME] to `"generate_content"` and [GEN_AI_OUTPUT_TYPE] to `"image"` on
+ * every span. Provider-specific request parameters (e.g. `size`, `n`, `quality`) are emitted under
+ * the `tracy.request.*` namespace; `stream` is the sole exception and is emitted as the registered
+ * `gen_ai.request.stream` boolean key. The attributes are re-asserted in
+ * [handleResponseAttributes] to prevent [OpenAIApiUtils.setCommonResponseAttributes] from
+ * overwriting `gen_ai.operation.name` with the response `object` value (`"list"`).
  *
  * See [Image Generation API](https://platform.openai.com/docs/api-reference/images/create)
  */
@@ -27,6 +38,9 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "image")
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["prompt"]?.let { span.setAttribute("gen_ai.prompt.0.content", it.jsonPrimitive.content.orRedactedInput()) }
@@ -37,11 +51,21 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
             if (key in manuallyParsedKeys) {
                 continue
             }
-            span.setAttribute("gen_ai.request.$key", value.asString.orRedactedInput())
+            if (key == "stream") {
+                span.setAttribute(
+                    AttributeKey.booleanKey("gen_ai.request.stream"),
+                    value.jsonPrimitive.booleanOrNull ?: false
+                )
+            } else {
+                span.setAttribute("tracy.request.$key", value.asString.orRedactedInput())
+            }
         }
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        // Re-assert to prevent setCommonResponseAttributes from overwriting with body["object"] = "list".
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "image")
         handleImageGenerationResponseAttributes(span, response, extractor)
     }
 
