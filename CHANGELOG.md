@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added OpenAI Audio API tracing: `POST /v1/audio/transcriptions` and `POST /v1/audio/translations` are now handled by `AudioOpenAIApiEndpointHandler`, setting `openai.api.type=audio`, `gen_ai.operation.name` (`audio.transcription` or `audio.translation`), `gen_ai.request.model`, `tracy.request.response_format`, `gen_ai.output.type` (set to `"json"` when response format is `json` or `verbose_json`), `tracy.request.timestamp_granularities`, `tracy.request.temperature`, `tracy.request.prompt.present`, `tracy.request.audio.size_bytes`, `tracy.request.audio.format`, and verbose-json response fields (`tracy.response.transcription.duration_seconds`, `tracy.response.transcription.language`, `tracy.response.transcription.words.count`, `tracy.response.translation.duration_seconds`).
 - Fixed `gen_ai.system` and `gen_ai.api_base` being silently dropped when `getRequestBodyAttributes` throws: both attributes are now set before the handler is called in `LLMTracingAdapter.registerRequest`.
 - Added `server.address` and `server.port` span attributes (set from the outgoing request URL) to all provider spans via `LLMTracingAdapter.registerRequest`.
 - Added `val port: Int` to `TracyHttpUrl` and `TracyHttpUrlImpl`, populated from the underlying HTTP URL, so callers can read the port without parsing the host string.
