@@ -192,7 +192,7 @@ class GeminiContentGenHandler(
                 span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
             }
             usage.jsonObject["totalTokenCount"]?.jsonPrimitive?.intOrNull?.let {
-                span.setAttribute("gen_ai.usage.total_tokens", it.toLong())
+                span.setAttribute("tracy.gemini.usage.total_tokens", it.toLong())
             }
 
             /**
