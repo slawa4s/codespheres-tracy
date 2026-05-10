@@ -17,6 +17,8 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
 import org.jetbrains.ai.tracy.anthropic.clients.instrument as instrumentSdkClient
+import org.jetbrains.ai.tracy.anthropic.clients.tryPatchAllOkHttpClients
+import org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -25,6 +27,8 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import java.time.Duration
+import java.util.Optional
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * MockWebServer-based tests for Anthropic Message Batches API tracing.
@@ -166,7 +170,7 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
             ).execute().use { it.body?.string() }
 
             val trace = analyzeSpans().first()
-            assertEquals(2L, trace.attributes[AttributeKey.longKey("gen_ai.request.batch.size")])
+            assertEquals(2L, trace.attributes[AttributeKey.longKey("anthropic.batch.request.size")])
         }
     }
 
@@ -197,15 +201,15 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
 
             val trace = analyzeSpans().first()
             assertEquals("message_batch", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
-            assertEquals("msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.id")])
-            assertEquals("in_progress", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
-            assertEquals("2024-09-24T18:37:24.100435Z", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.created_at")])
-            assertEquals("2024-09-25T18:37:24.100435Z", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.expires_at")])
-            assertEquals(100L, trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.processing")])
-            assertEquals(50L, trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")])
-            assertEquals(1L, trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.errored")])
-            assertEquals(0L, trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.canceled")])
-            assertEquals(0L, trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.expired")])
+            assertEquals("msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", trace.attributes[AttributeKey.stringKey("anthropic.batch.id")])
+            assertEquals("in_progress", trace.attributes[AttributeKey.stringKey("anthropic.batch.processing_status")])
+            assertEquals("2024-09-24T18:37:24.100435Z", trace.attributes[AttributeKey.stringKey("anthropic.batch.created_at")])
+            assertEquals("2024-09-25T18:37:24.100435Z", trace.attributes[AttributeKey.stringKey("anthropic.batch.expires_at")])
+            assertEquals(100L, trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.processing")])
+            assertEquals(50L, trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.succeeded")])
+            assertEquals(1L, trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.errored")])
+            assertEquals(0L, trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.canceled")])
+            assertEquals(0L, trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.expired")])
         }
     }
 
@@ -232,9 +236,9 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
 
             val trace = analyzeSpans().first()
             assertEquals("message_batch", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
-            assertEquals("msgbatch_retrieve_xyz", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.id")])
-            assertEquals("ended", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
-            assertNotNull(trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")])
+            assertEquals("msgbatch_retrieve_xyz", trace.attributes[AttributeKey.stringKey("anthropic.batch.id")])
+            assertEquals("ended", trace.attributes[AttributeKey.stringKey("anthropic.batch.processing_status")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("anthropic.batch.request_counts.succeeded")])
         }
     }
 
@@ -284,7 +288,54 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
         }
     }
 
+    // ===== tryPatchAllOkHttpClients JDK-wrapper unwrapping =====
+
+    @Test
+    fun `tryPatchAllOkHttpClients patches OkHttpClient directly wrapped in Optional`() {
+        val okHttpClient = OkHttpClient.Builder().build()
+        val holder = OptionalWrappedOkHttpClient(okHttpClient)
+        val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+        tryPatchAllOkHttpClients(holder, interceptor)
+        assertNotNull(okHttpClient.interceptors.find { it is OpenTelemetryOkHttpInterceptor },
+            "Interceptor should be attached to OkHttpClient unwrapped from Optional")
+    }
+
+    @Test
+    fun `tryPatchAllOkHttpClients patches OkHttpClient directly wrapped in AtomicReference`() {
+        val okHttpClient = OkHttpClient.Builder().build()
+        val holder = AtomicReferenceWrappedOkHttpClient(okHttpClient)
+        val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+        tryPatchAllOkHttpClients(holder, interceptor)
+        assertNotNull(okHttpClient.interceptors.find { it is OpenTelemetryOkHttpInterceptor },
+            "Interceptor should be attached to OkHttpClient unwrapped from AtomicReference")
+    }
+
+    @Test
+    fun `tryPatchAllOkHttpClients patches OkHttpClient nested inside Optional holder`() {
+        val okHttpClient = OkHttpClient.Builder().build()
+        val inner = InnerHolderWithOkHttpClient(okHttpClient)
+        val holder = OptionalWrappedHolder(inner)
+        val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+        tryPatchAllOkHttpClients(holder, interceptor)
+        assertNotNull(okHttpClient.interceptors.find { it is OpenTelemetryOkHttpInterceptor },
+            "Interceptor should be attached to OkHttpClient nested inside Optional<Holder>")
+    }
+
     // ===== Helpers =====
+
+    private class OptionalWrappedOkHttpClient(client: OkHttpClient) {
+        val wrappedClient: Optional<OkHttpClient> = Optional.of(client)
+    }
+
+    private class AtomicReferenceWrappedOkHttpClient(client: OkHttpClient) {
+        val wrappedClient: AtomicReference<OkHttpClient> = AtomicReference(client)
+    }
+
+    private class InnerHolderWithOkHttpClient(val httpClient: OkHttpClient)
+
+    private class OptionalWrappedHolder(inner: InnerHolderWithOkHttpClient) {
+        val holder: Optional<InnerHolderWithOkHttpClient> = Optional.of(inner)
+    }
 
     private fun MockWebServer.enqueueBatchResponse(
         id: String = "msgbatch_abc123",
