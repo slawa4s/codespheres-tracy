@@ -72,7 +72,10 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         if (segments.contains("batches")) {
             span.setAttribute("anthropic.api.type", "batches")
             val batchBody = request.body.asJson()?.jsonObject
-            batchBody?.get("requests")?.jsonArray?.size?.let { span.setAttribute("anthropic.batch.request_size", it.toLong()) }
+            batchBody?.get("requests")?.jsonArray?.size?.let {
+                span.setAttribute("anthropic.batch.request_size", it.toLong())
+                span.setAttribute("gen_ai.request.batch.size", it.toLong())
+            }
             return
         }
 
