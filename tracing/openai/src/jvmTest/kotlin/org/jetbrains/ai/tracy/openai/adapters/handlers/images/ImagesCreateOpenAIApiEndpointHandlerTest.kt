@@ -6,8 +6,10 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.images
 
 import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
+import org.jetbrains.ai.tracy.openai.adapters.OpenAILLMTracingAdapter
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.jetbrains.ai.tracy.test.utils.MediaContentAttributeValues
 import com.openai.models.images.ImageGenerateParams
@@ -15,8 +17,14 @@ import com.openai.models.images.ImageModel
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.StatusCode
 import kotlinx.coroutines.test.runTest
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -59,13 +67,13 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
         assertEquals(
             size.asString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.size")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.size")]
         )
         assertEquals(
             responseFormat?.asString() ?: "null",
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.response_format")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.response_format")]
         )
-        assertEquals("1", trace.attributes[AttributeKey.stringKey("gen_ai.request.n")])
+        assertEquals("1", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
 
         val expectedImage = when (responseFormat) {
             ImageGenerateParams.ResponseFormat.B64_JSON ->
@@ -121,10 +129,10 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
         assertEquals(
             size.asString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.size")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.size")]
         )
-        assertEquals("1", trace.attributes[AttributeKey.stringKey("gen_ai.request.n")])
-        assertEquals(format.asString(), trace.attributes[AttributeKey.stringKey("gen_ai.request.output_format")])
+        assertEquals("1", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
+        assertEquals(format.asString(), trace.attributes[AttributeKey.stringKey("tracy.request.output_format")])
 
         val expectedImage = MediaContentAttributeValues.Data(
             field = "output",
@@ -166,9 +174,9 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
         assertEquals(
             size.asString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.size")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.size")]
         )
-        assertEquals("3", trace.attributes[AttributeKey.stringKey("gen_ai.request.n")])
+        assertEquals("3", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
 
         val expectedImage = MediaContentAttributeValues.Url(
             field = "output",
@@ -246,13 +254,13 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
         assertEquals(
             size.asString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.size")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.size")]
         )
         assertEquals(
             partialImagesCount.toString(),
-            trace.attributes[AttributeKey.stringKey("gen_ai.request.partial_images")]
+            trace.attributes[AttributeKey.stringKey("tracy.request.partial_images")]
         )
-        assertEquals("1", trace.attributes[AttributeKey.stringKey("gen_ai.request.n")])
+        assertEquals("1", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
 
         // expect there to be two partial images.
         // mind that it may not always be the case:
@@ -337,6 +345,119 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         verifyMediaContentUploadAttributes(trace, expected = uploads)
     }
 
+    // ==================== MockWebServer tests ====================
+
+    /**
+     * Verifies that `gen_ai.operation.name` is set to `"generate_content"` and `gen_ai.output.type`
+     * is set to `"image"` on a non-streaming span, and that the response's `"object": "list"` does
+     * NOT overwrite `gen_ai.operation.name`.
+     */
+    @Test
+    fun `imagesGenerateNonStreamingOperationNameIsNotOverwrittenByResponseObject`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """{"created":1234567890,"object":"list","data":[{"url":"https://example.com/img.png"}]}"""
+                    )
+            )
+
+            val client = makeInstrumentedClient()
+            val requestBody = """{"model":"dall-e-3","prompt":"A cute cat","n":1,"size":"1024x1024"}"""
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/images/generations"))
+                    .post(requestBody.toRequestBody("application/json".toMediaType()))
+                    .header("Authorization", "Bearer $MOCK_API_KEY")
+                    .build()
+            ).execute().close()
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+        }
+    }
+
+    /**
+     * Verifies that provider-specific request parameters are emitted under `tracy.request.*`
+     * (not `gen_ai.request.*`), matching the OTel attribute-naming policy.
+     */
+    @Test
+    fun `imagesGenerateRequestAttributesUseTracyNamespace`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"created":1234567890,"object":"list","data":[{"url":"https://example.com/img.png"}]}""")
+            )
+
+            val client = makeInstrumentedClient()
+            val requestBody =
+                """{"model":"dall-e-3","prompt":"A cat","n":2,"size":"512x512","quality":"hd","response_format":"url"}"""
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/images/generations"))
+                    .post(requestBody.toRequestBody("application/json".toMediaType()))
+                    .header("Authorization", "Bearer $MOCK_API_KEY")
+                    .build()
+            ).execute().close()
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("2", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
+            assertEquals("512x512", trace.attributes[AttributeKey.stringKey("tracy.request.size")])
+            assertEquals("hd", trace.attributes[AttributeKey.stringKey("tracy.request.quality")])
+            assertEquals("url", trace.attributes[AttributeKey.stringKey("tracy.request.response_format")])
+        }
+    }
+
+    /**
+     * Verifies that a streaming images/generations span carries `gen_ai.operation.name=generate_content`
+     * and `gen_ai.output.type=image`, which are set in [handleRequestAttributes] and survive the
+     * streaming path (where [handleResponseAttributes] is never called).
+     */
+    @Test
+    fun `imagesGenerateStreamingOperationNameAndOutputTypeAreSet`() = runTest {
+        withMockServer { server ->
+            val sseBody =
+                "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"aGVsbG8=\"," +
+                    "\"output_format\":\"png\",\"quality\":\"high\",\"size\":\"1024x1024\"," +
+                    "\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}\n\n"
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody(sseBody)
+            )
+
+            val client = makeInstrumentedClient()
+            val requestBody =
+                """{"stream":true,"model":"gpt-image-1","prompt":"A cute cat","n":1,"size":"1024x1024"}"""
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/images/generations"))
+                    .post(requestBody.toRequestBody("application/json".toMediaType()))
+                    .header("Authorization", "Bearer $MOCK_API_KEY")
+                    .build()
+            ).execute().use { response ->
+                response.body?.bytes()
+            }
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.completion.0.content")])
+        }
+    }
+
+    // ==================== helpers ====================
+
     fun provideResponseFormats(): Stream<Arguments> {
         return Stream.of(
             Arguments.of(null),
@@ -355,5 +476,12 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             true,
             trace.attributes[AttributeKey.stringKey("gen_ai.request.model")]?.startsWith(model.asString())
         )
+    }
+
+    private fun makeInstrumentedClient(): OkHttpClient =
+        instrument(OkHttpClient(), OpenAILLMTracingAdapter()).newBuilder().build()
+
+    companion object {
+        private const val MOCK_API_KEY = "mock-api-key"
     }
 }

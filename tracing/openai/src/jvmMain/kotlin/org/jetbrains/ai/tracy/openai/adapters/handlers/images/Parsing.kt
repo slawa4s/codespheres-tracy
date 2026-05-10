@@ -21,7 +21,7 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAG
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.*
 
-private val TRACY_RESPONSE_CREATED = AttributeKey.longKey("tracy.response.created")
+private val TRACY_RESPONSE_CREATED = AttributeKey.longKey("tracy.response.created_at")
 
 
 // See: https://platform.openai.com/docs/api-reference/images/create#images_create-output_format
@@ -89,10 +89,10 @@ internal fun handleStreamedImage(
             data["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
 
             // insert other attributes
-            val manuallyParsedKeys = listOf("b64_json", "usage")
+            val manuallyParsedKeys = listOf("b64_json", "usage", "type")
             for ((key, value) in data.entries) {
                 if (key !in manuallyParsedKeys) {
-                    span.setAttribute("gen_ai.response.$key", value.asString)
+                    span.setAttribute("tracy.response.$key", value.asString)
                 }
             }
         }
