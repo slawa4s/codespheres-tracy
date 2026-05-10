@@ -104,6 +104,17 @@ class AnthropicMessagesEndpointHandlerTest {
     // ── Request attributes ────────────────────────────────────────────────────
 
     @Test
+    fun `sets anthropic api type, operation name, and output type unconditionally`() {
+        val attrs = capture(
+            requestJson = """{"model":"claude-3-5-haiku-latest","max_tokens":100,"messages":[{"role":"user","content":"Hello"}]}""",
+            responseJson = """{"id":"msg_01","type":"message","role":"assistant","model":"claude-3-5-haiku-latest","content":[],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":0}}"""
+        )
+        assertEquals("messages", attrs[AttributeKey.stringKey("anthropic.api.type")])
+        assertEquals("chat", attrs[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("message", attrs[AttributeKey.stringKey("gen_ai.output.type")])
+    }
+
+    @Test
     fun `extracts model from request`() {
         val attrs = capture(
             requestJson = """{"model":"claude-3-5-haiku-latest","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}""",

@@ -40,6 +40,10 @@ internal class AnthropicMessagesEndpointHandler(
 ) : EndpointApiHandler {
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("anthropic.api.type", "messages")
+        span.setAttribute("gen_ai.operation.name", "chat")
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "message")
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }

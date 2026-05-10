@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `anthropic.api.type = "messages"`, `gen_ai.operation.name = "chat"`, and `gen_ai.output.type = "message"` to every Anthropic Messages API span, set unconditionally before request-body parsing so they appear on all paths including streaming and error spans
+
 - Added `gen_ai.provider.name` span attribute (stable OTel GenAI registry name) to all LLM provider requests, emitting the same value as `gen_ai.system`
 - Added `server.address` and `server.port` span attributes to all LLM provider requests, extracted from the request URL
 - Changed HTTP status attribute key from deprecated `http.status_code` to stable `http.response.status_code`
