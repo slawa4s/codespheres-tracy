@@ -57,6 +57,10 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
         getRequestBodyAttributes(span, request)
         span.setAttribute("gen_ai.api_base", "${request.url.scheme}://${request.url.host}")
         span.setAttribute(GEN_AI_SYSTEM, genAISystem)
+        // gen_ai.provider.name is the OTel GenAI semconv stable name for the provider
+        span.setAttribute("gen_ai.provider.name", genAISystem)
+        span.setAttribute("server.address", request.url.host)
+        span.setAttribute("server.port", request.url.port.toLong())
 
         return@runCatching
     }.getOrElse { exception ->
@@ -87,9 +91,11 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             }
 
             span.setAttribute("http.status_code", response.code.toLong())
+            span.setAttribute("http.response.status_code", response.code.toLong())
 
             if (response.isError()) {
                 getResponseErrorBodyAttributes(span, response.body)
+                span.setAttribute("error.type", response.code.toString())
                 span.setStatus(StatusCode.ERROR)
             } else {
                 span.setStatus(StatusCode.OK)

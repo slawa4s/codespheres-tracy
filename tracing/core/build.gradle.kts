@@ -3,7 +3,7 @@
  * Use of this source code is governed by the Apache 2.0 license.
  */
 
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
 
 plugins {
     kotlin("multiplatform")
@@ -14,10 +14,10 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
 
     jvm {
-        compilerOptions.jvmTarget = JVM_17
+        compilerOptions.jvmTarget = JVM_21
     }
 
     sourceSets {
