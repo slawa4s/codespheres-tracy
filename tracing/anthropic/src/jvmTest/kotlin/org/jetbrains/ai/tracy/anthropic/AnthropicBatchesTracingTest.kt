@@ -73,6 +73,40 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
         }
     }
 
+    @Test
+    fun batchCreateErrorSetsErrorType() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"type":"error","error":{"type":"invalid_request_error","message":"requests array is empty"}}""")
+            )
+
+            val client = makeInstrumentedClient()
+            val body = """{"requests":[]}""".toRequestBody(JSON)
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .post(body)
+                    .header("x-api-key", MOCK_API_KEY)
+                    .header("anthropic-version", "2023-06-01")
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            val trace = traces.firstOrNull()
+            assertNotNull(trace, "Expected a span for the batches request")
+
+            assertEquals(
+                "400",
+                trace!!.attributes[AttributeKey.stringKey("error.type")],
+                "error.type should be set to the HTTP status code string on error spans"
+            )
+        }
+    }
+
     companion object {
         private const val MOCK_API_KEY = "mock-api-key"
     }
