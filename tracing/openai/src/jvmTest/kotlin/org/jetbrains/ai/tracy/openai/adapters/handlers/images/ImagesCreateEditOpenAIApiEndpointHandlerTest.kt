@@ -6,8 +6,10 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.images
 
 import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
+import org.jetbrains.ai.tracy.openai.adapters.OpenAILLMTracingAdapter
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.jetbrains.ai.tracy.test.utils.MediaContentAttributeValues
 import org.jetbrains.ai.tracy.test.utils.MediaSource
@@ -19,6 +21,11 @@ import com.openai.models.images.ImageModel
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import mu.KotlinLogging
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -438,5 +445,42 @@ class ImagesCreateEditOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             true,
             trace.attributes[AttributeKey.stringKey("gen_ai.request.model")]?.startsWith(model.asString())
         )
+    }
+
+    /**
+     * Verifies that `tracy.response.created` (long) and `tracy.response.image.url` are extracted
+     * from a non-streaming images/edits response body.
+     */
+    @Test
+    fun `responseCreatedAndImageUrlAreExtracted`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"created":1234567890,"data":[{"url":"https://example.com/img.png"}]}""")
+            )
+
+            val client = instrument(OkHttpClient(), OpenAILLMTracingAdapter()).newBuilder().build()
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/images/edits"))
+                    .post("".toRequestBody(null))
+                    .header("Authorization", "Bearer $MOCK_API_KEY")
+                    .build()
+            ).execute().close()
+
+            val trace = analyzeSpans().first()
+            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.response.created")],
+                "tracy.response.created should be non-null")
+            assertEquals(
+                "https://example.com/img.png",
+                trace.attributes[AttributeKey.stringKey("tracy.response.image.url")]
+            )
+        }
+    }
+
+    companion object {
+        private const val MOCK_API_KEY = "mock-api-key"
     }
 }
