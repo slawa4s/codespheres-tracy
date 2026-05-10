@@ -5,11 +5,17 @@
 
 package org.jetbrains.ai.tracy.anthropic.clients
 
+import com.anthropic.client.AnthropicClient
+import mu.KotlinLogging
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
 import org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.patchInterceptors
 import org.jetbrains.ai.tracy.core.patchOpenAICompatibleClient
-import com.anthropic.client.AnthropicClient
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Instruments an Anthropic Claude client with OpenTelemetry tracing capabilities **inplace**.
@@ -131,7 +137,42 @@ fun instrument(client: AnthropicClient) {
     // BatchServiceImpl holds a separate OkHttpClient instance that must also be patched.
     try {
         patchOpenAICompatibleClient(client = client.messages().batches(), interceptor = interceptor)
-    } catch (_: Exception) {
-        // Tolerate structural differences across SDK versions.
+    } catch (e: Exception) {
+        logger.warn(e) { "Standard patchOpenAICompatibleClient failed for BatchServiceImpl; trying direct scan" }
+        tryPatchAllOkHttpClients(client.messages().batches(), interceptor)
+    }
+}
+
+/**
+ * Walks [obj]'s class hierarchy scanning for fields of type [OkHttpClient] and patches each
+ * one's interceptors with [interceptor]. Used as a fallback when [patchOpenAICompatibleClient]
+ * fails for [BatchServiceImpl] due to SDK version differences in the class structure.
+ */
+private fun tryPatchAllOkHttpClients(obj: Any, interceptor: Interceptor) {
+    var cls: Class<*>? = obj.javaClass
+    while (cls != null) {
+        for (field in cls.declaredFields) {
+            if (OkHttpClient::class.java.isAssignableFrom(field.type)) {
+                try {
+                    field.isAccessible = true
+                    val okHttpClient = field.get(obj) as? OkHttpClient ?: continue
+                    val updated = patchInterceptors(okHttpClient.interceptors, interceptor)
+                    var targetCls: Class<*>? = okHttpClient.javaClass
+                    while (targetCls != null) {
+                        try {
+                            val interceptorsField = targetCls.getDeclaredField("interceptors")
+                            interceptorsField.isAccessible = true
+                            interceptorsField.set(okHttpClient, updated)
+                            break
+                        } catch (_: NoSuchFieldException) {
+                            targetCls = targetCls.superclass
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.warn(e) { "Failed to patch OkHttpClient field '${field.name}' in ${cls?.name}" }
+                }
+            }
+        }
+        cls = cls.superclass
     }
 }
