@@ -538,10 +538,10 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             // Verify list response attributes
-            val videosCount = trace.attributes[AttributeKey.longKey("gen_ai.response.videos_count")]
+            val videosCount = trace.attributes[AttributeKey.longKey("tracy.response.videos_count")]
 
             assertEquals(videoList.data().size.toLong(), videosCount)
-            assertNotNull(trace.attributes[AttributeKey.booleanKey("gen_ai.response.has_more")])
+            assertNotNull(trace.attributes[AttributeKey.booleanKey("tracy.response.has_more")])
             assertEquals("list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
 
             // Verify individual videos are traced
@@ -597,8 +597,8 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = analyzeSpans().first()
 
             // verify query parameters are traced
-            assertEquals(limit.toString(), trace.attributes[AttributeKey.stringKey("gen_ai.request.limit")])
-            assertEquals(order, trace.attributes[AttributeKey.stringKey("gen_ai.request.order")])
+            assertEquals(limit.toString(), trace.attributes[AttributeKey.stringKey("tracy.request.limit")])
+            assertEquals(order, trace.attributes[AttributeKey.stringKey("tracy.request.order")])
         }
     }
 
@@ -642,7 +642,7 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val traces = analyzeSpans()
             assertTracesCount(1, traces)
             val trace = traces.first()
-            assertEquals(after, trace.attributes[AttributeKey.stringKey("gen_ai.request.after")])
+            assertEquals(after, trace.attributes[AttributeKey.stringKey("tracy.request.after")])
         }
     }
 
@@ -702,11 +702,11 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.last()
 
             // Verify requested_id is traced
-            assertEquals(video.id(), trace.attributes[AttributeKey.stringKey("gen_ai.request.video.requested_id")])
+            assertEquals(video.id(), trace.attributes[AttributeKey.stringKey("tracy.request.video.requested_id")])
 
             // Verify deletion response (Note: DeleteVideoHandler uses gen_ai.response.video.id, not gen_ai.response.id)
             assertEquals(deleteResponse.id(), trace.attributes[AttributeKey.stringKey("gen_ai.response.video.id")])
-            assertEquals(true, trace.attributes[AttributeKey.booleanKey("gen_ai.response.deleted")])
+            assertEquals(true, trace.attributes[AttributeKey.booleanKey("tracy.response.deleted")])
         }
     }
 
