@@ -30,6 +30,8 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+        span.setAttribute("openai.api.type", "responses")
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
 
         body["previous_response_id"]?.jsonPrimitive?.contentOrNull?.let {
             span.setAttribute("gen_ai.request.previous_response_id", it)
@@ -139,6 +141,11 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
+        body["status"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.status", it) }
+        body["object"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.object", it) }
+        body["created_at"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
+        body["completed_at"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.completed_at", it) }
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
@@ -234,6 +241,17 @@ internal class ResponsesOpenAIApiEndpointHandler(
                 event["text"]?.jsonPrimitive?.content?.let {
                     span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
                     span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+                }
+            }
+            if (type == "response.completed") {
+                event["response"]?.jsonObject?.let { responseObj ->
+                    responseObj["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+                    responseObj["model"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+                    responseObj["object"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.object", it) }
+                    responseObj["status"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.status", it) }
+                    responseObj["created_at"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
+                    responseObj["completed_at"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.completed_at", it) }
+                    responseObj["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
                 }
             }
         }
@@ -427,6 +445,9 @@ internal class ResponsesOpenAIApiEndpointHandler(
 
         "output",
         "usage",
+        "status",
+        "created_at",
+        "completed_at",
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
