@@ -5,11 +5,14 @@
 
 package org.jetbrains.ai.tracy.anthropic.clients
 
+import mu.KotlinLogging
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
 import org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.patchOpenAICompatibleClient
 import com.anthropic.client.AnthropicClient
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Instruments an Anthropic Claude client with OpenTelemetry tracing capabilities **inplace**.
@@ -126,12 +129,17 @@ import com.anthropic.client.AnthropicClient
 fun instrument(client: AnthropicClient) {
     val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
     patchOpenAICompatibleClient(client = client, interceptor = interceptor)
-    // The batches sub-client (client.messages().batches()) may use an OkHttp instance
-    // that is separate from the one patched above. Patch it defensively so that
-    // requests to /v1/messages/batches are also intercepted.
+    // The batches sub-client may use a separate OkHttp instance. Patch both the
+    // messages-level client (parent) and the batches sub-client so that requests
+    // to /v1/messages/batches are intercepted regardless of which instance is used.
+    try {
+        patchOpenAICompatibleClient(client = client.messages(), interceptor = interceptor)
+    } catch (e: Exception) {
+        logger.warn(e) { "Failed to patch Anthropic messages() HTTP client; batches tracing may be incomplete" }
+    }
     try {
         patchOpenAICompatibleClient(client = client.messages().batches(), interceptor = interceptor)
-    } catch (_: Exception) {
-        // no-op: batches service not accessible or its HTTP client is not patchable
+    } catch (e: Exception) {
+        logger.warn(e) { "Failed to patch Anthropic messages().batches() HTTP client; batches tracing may be incomplete" }
     }
 }

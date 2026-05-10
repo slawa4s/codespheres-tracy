@@ -28,6 +28,8 @@ internal class ResponsesOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
+        span.setAttribute("openai.api.type", "responses")
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
 
@@ -139,6 +141,8 @@ internal class ResponsesOpenAIApiEndpointHandler(
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonResponseAttributes(span, response)
+        // Override the `object` value written by setCommonResponseAttributes (e.g. "response") with the correct operation name.
+        span.setAttribute(GEN_AI_OPERATION_NAME, "generate_content")
 
         // we manually map `output` and `usage` attributes;
         // the rest of attributes get mapped by `populateUnmappedAttributes` below.
@@ -230,10 +234,27 @@ internal class ResponsesOpenAIApiEndpointHandler(
             }.getOrNull() ?: continue
 
             val type = event["type"]?.jsonPrimitive?.content
-            if (type == "response.output_text.done") {
-                event["text"]?.jsonPrimitive?.content?.let {
-                    span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
-                    span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+            when (type) {
+                "response.output_text.done" -> {
+                    event["text"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.completion.0.content", it.orRedactedOutput())
+                        span.setAttribute("gen_ai.completion.0.finish_reason", "stop")
+                    }
+                }
+                "response.created" -> {
+                    event["response"]?.jsonObject?.let { resp ->
+                        resp["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+                        resp["model"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+                        resp["object"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.object", it) }
+                        resp["created_at"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
+                    }
+                }
+                "response.completed" -> {
+                    event["response"]?.jsonObject?.let { resp ->
+                        resp["status"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.status", it) }
+                        resp["completed_at"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.completed_at", it) }
+                        resp["usage"]?.jsonObject?.let { usage -> setUsageAttributes(span, usage) }
+                    }
                 }
             }
         }

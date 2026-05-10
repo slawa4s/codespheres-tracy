@@ -325,6 +325,11 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     // https://platform.openai.com/docs/api-reference/chat/object
     private val mappedResponseAttributes: List<String> = listOf(
+        // parsed by `OpenAIApiUtils.setCommonResponseAttributes`
+        "id",
+        "object",
+        "model",
+
         "choices",
         "usage"
     )
