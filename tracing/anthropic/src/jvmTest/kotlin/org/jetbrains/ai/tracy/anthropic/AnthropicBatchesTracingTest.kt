@@ -73,6 +73,102 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
         }
     }
 
+    @Test
+    fun batchCreateResponseSetsBatchAttributes() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                            "id": "msgbatch_abc123",
+                            "type": "message_batch",
+                            "processing_status": "in_progress",
+                            "created_at": 1714404061,
+                            "expires_at": 1714490461,
+                            "request_counts": {
+                                "processing": 5,
+                                "succeeded": 2,
+                                "errored": 1,
+                                "canceled": 0,
+                                "expired": 0
+                            }
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val client = makeInstrumentedClient()
+            val body = """{"requests":[{"custom_id":"req1","params":{"model":"claude-3-haiku-20240307","max_tokens":100,"messages":[{"role":"user","content":"Hello"}]}}]}""".toRequestBody(JSON)
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .post(body)
+                    .header("x-api-key", MOCK_API_KEY)
+                    .header("anthropic-version", "2023-06-01")
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            val span = traces.firstOrNull()
+            assertNotNull(span, "Expected a span for the batches request")
+
+            assertEquals(
+                "msgbatch_abc123",
+                span!!.attributes[AttributeKey.stringKey("gen_ai.response.batch.id")],
+                "gen_ai.response.batch.id should be set from batch response id"
+            )
+            assertEquals(
+                "message_batch",
+                span.attributes[AttributeKey.stringKey("gen_ai.output.type")],
+                "gen_ai.output.type should be set from batch response type field"
+            )
+            assertEquals(
+                "in_progress",
+                span.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")],
+                "gen_ai.response.batch.processing_status should be set"
+            )
+            assertEquals(
+                1714404061L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.created_at")],
+                "gen_ai.response.batch.created_at should be set"
+            )
+            assertEquals(
+                1714490461L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.expires_at")],
+                "gen_ai.response.batch.expires_at should be set"
+            )
+            assertEquals(
+                5L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.processing")],
+                "gen_ai.response.batch.request_counts.processing should be set"
+            )
+            assertEquals(
+                2L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")],
+                "gen_ai.response.batch.request_counts.succeeded should be set"
+            )
+            assertEquals(
+                1L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.errored")],
+                "gen_ai.response.batch.request_counts.errored should be set"
+            )
+            assertEquals(
+                0L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.canceled")],
+                "gen_ai.response.batch.request_counts.canceled should be set"
+            )
+            assertEquals(
+                0L,
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.expired")],
+                "gen_ai.response.batch.request_counts.expired should be set"
+            )
+        }
+    }
+
     companion object {
         private const val MOCK_API_KEY = "mock-api-key"
     }

@@ -129,11 +129,39 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     }
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
+        val body = response.body.asJson()?.jsonObject ?: return
+
         if (response.url.pathSegments.contains("batches")) {
+            body["id"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.batch.id", it) }
+            body["type"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it) }
+            body["processing_status"]?.jsonPrimitive?.content?.let {
+                span.setAttribute("gen_ai.response.batch.processing_status", it)
+            }
+            body["created_at"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.created_at", it)
+            }
+            body["expires_at"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("gen_ai.response.batch.expires_at", it)
+            }
+            body["request_counts"]?.jsonObject?.let { counts ->
+                counts["processing"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.processing", it.toLong())
+                }
+                counts["succeeded"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it.toLong())
+                }
+                counts["errored"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.errored", it.toLong())
+                }
+                counts["canceled"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.canceled", it.toLong())
+                }
+                counts["expired"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.response.batch.request_counts.expired", it.toLong())
+                }
+            }
             return
         }
-
-        val body = response.body.asJson()?.jsonObject ?: return
 
         body["id"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["type"]?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it.jsonPrimitive.content) }
