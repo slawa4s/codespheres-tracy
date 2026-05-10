@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added OpenAI Audio Speech (`/v1/audio/speech`) tracing: new `AUDIO_SPEECH` dispatch entry and `AudioSpeechOpenAIApiEndpointHandler` set `gen_ai.operation.name = "audio.speech"`, `gen_ai.output.type = "speech"`, `gen_ai.request.model`, `tracy.request.voice`, `tracy.request.response_format`, and `tracy.request.speed` from the JSON request body; `/v1/audio/transcriptions` is unaffected.
+
 - Fixed Anthropic batch API tracing: `instrument(AnthropicClient)` now also patches the `OkHttpClient` held by `BatchServiceImpl`, so spans are correctly emitted for all `messages.batches.*` calls.
 - Renamed Anthropic batch span attributes: `anthropic.batch.requests.count` → `gen_ai.request.batch.size`, `anthropic.batch.id` → `gen_ai.response.batch.id`, `anthropic.batch.processing_status` → `gen_ai.response.batch.processing_status`, `anthropic.batch.created_at` → `gen_ai.response.batch.created_at`, `anthropic.batch.expires_at` → `gen_ai.response.batch.expires_at`, and `anthropic.batch.request_counts.*` → `gen_ai.response.batch.request_counts.*`; added `gen_ai.output.type = "message_batch"` on all batch responses.
 - Fixed OpenAI image edit handler: sets `gen_ai.operation.name = "generate_content"` and `gen_ai.output.type = "image"` on every span; records `tracy.request.image.{n}.size_bytes` for each uploaded image part; moves unknown form-data fields from `gen_ai.request.*` to `tracy.request.*` namespace.
