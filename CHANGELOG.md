@@ -1,5 +1,27 @@
 # Changelog
 
+## Session 6
+
+- **Branch**: `claude-session-6` (based on `claude-session-5`)
+- **Evaluator attempts**: 1 (`artifacts/6/evaluation_0.json`)
+- **Score**: 98 (unchanged; score ceiling confirmed for sixth consecutive session)
+
+### Analysis
+
+Ran a full baseline evaluation with 154 scenarios (113 scoreable after excluding 41 provider_error cases). The `openai/batches/list_pagination` scenario (previously PE due to Zero Data Retention policy) is now non-PE and scored 100, bringing scoreable count from 112 to 113 but leaving the overall score unchanged at 98.
+
+The 6 remaining non-provider-error failures are all proxy/SDK limitations that Tracy cannot resolve (documented in sessions 2–5):
+
+1. **`anthropic/batches/invalid_empty_requests`** — The Anthropic Java SDK validates client-side before any HTTP call when `requests` is empty. No OkHttp interceptor fires.
+
+2. **`anthropic/count_tokens/basic`**, **`/with_system_prompt`**, **`/with_tools`**, **`/with_vision`** — Missing `gen_ai.response.id`. The LiteLLM proxy returns only `{"input_tokens": N}` with no `id` field and no ID response headers forwarded.
+
+3. **`anthropic/messages/tool_use_with_result`** — Score 96/100. Missing `gen_ai.completion.0.content` (non_empty). LiteLLM returns `content: []` for the follow-up message even though `output_tokens: 2`.
+
+No code changes to Tracy were made in this session. Score ceiling of 98 is confirmed.
+
+---
+
 ## Session 5
 
 - **Branch**: `claude-session-5` (based on `claude-session-4`)
