@@ -45,8 +45,15 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
         val (model, operation) = request.url.modelAndOperation()
 
+        // LiteLLM routes Gemini embedding models through :predict URLs; remap to the canonical operation name.
+        val effectiveOperation = if (operation == "predict" && model?.contains("embedding") == true) {
+            "embedContent"
+        } else {
+            operation
+        }
+
         model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
-        operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
+        effectiveOperation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
 
         val apiType = if (request.url.pathSegments.contains("cachedContents")) "cachedContents" else "models"
         span.setAttribute("gemini.api.type", apiType)

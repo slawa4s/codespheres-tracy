@@ -1,5 +1,35 @@
 # Changelog
 
+## Session 4
+
+- **Branch**: `claude-session-4` (based on `claude-session-3`)
+- **Evaluator attempts**: 2 (`artifacts/4/evaluation_0.json`, `artifacts/4/evaluation_1.json`)
+- **Score**: 98 (unchanged; score ceiling confirmed)
+
+### Changes
+
+#### Gemini handler improvements (`tracing/gemini`)
+
+1. **Operation name remapping for embedding models** (`GeminiLLMTracingAdapter`): LiteLLM routes Gemini embedding models through `:predict` URLs. When the model name contains "embedding" and the operation is "predict", the adapter now remaps `gen_ai.operation.name` to "embedContent" for consistent naming.
+
+2. **Refactored response handling** (`GeminiContentGenHandler`): Extracted separate private methods for generate-content, countTokens, and embed responses. Dispatch is now via `when` on which top-level field is present in the response body.
+
+3. **Added missing span attributes**:
+   - `gen_ai.output.type = "message"` for generateContent responses
+   - `gen_ai.response.finish_reasons` list for generateContent responses
+   - `gen_ai.output.type = "embedding"`, `gen_ai.response.embedding.count`, `gen_ai.response.embedding.dimension` for embed responses
+   - `gen_ai.output.type = "image"`, `gen_ai.response.image.count`, `gen_ai.request.image.number_of_images` for Imagen responses (`GeminiImagenHandler`)
+
+4. **Removed duplicate attribute setting** (`GeminiContentGenHandler`): Removed `gen_ai.request.model` and `gen_ai.operation.name` assignment from the handler since `GeminiLLMTracingAdapter` already sets them with the corrected effective operation name.
+
+5. **MockWebServer tests** (`GeminiHandlerTest`): Added unit tests covering generateContent, countTokens, and embedContent response parsing using MockWebServer (no real API keys required). Added `okhttp-mockwebserver` dependency to the Gemini test build.
+
+### Analysis
+
+Baseline evaluation (113 scoreable scenarios) showed score=98. All 6 non-PE failures are the same proxy/SDK limitations documented in sessions 2–3. Gemini improvements increased partial scores in PE scenarios (e.g. embed and imagen) but those don't affect the overall score.
+
+---
+
 ## Session 3
 
 - **Branch**: `claude-session-3` (based on `claude-session-2`)

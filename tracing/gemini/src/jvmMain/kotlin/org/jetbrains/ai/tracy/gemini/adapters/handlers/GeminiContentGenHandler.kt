@@ -51,19 +51,12 @@ class GeminiContentGenHandler(
             }
         }
 
-        // url ends with `[model]:[operation]`
-        val (model, operation) = request.url.pathSegments.lastOrNull()?.split(":")
-            ?.let { it.firstOrNull() to it.lastOrNull() } ?: (null to null)
-
         if (contentTracingAllowed(ContentKind.INPUT)) {
             val mediaContent = parseRequestMediaContent(body)
             if (mediaContent != null) {
                 extractor.setUploadableContentAttributes(span, field = "input", mediaContent)
             }
         }
-
-        model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
-        operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
 
         // extract tool calls
         body.jsonObject["tools"]?.let { tools ->
@@ -127,10 +120,21 @@ class GeminiContentGenHandler(
         // See: https://ai.google.dev/api/generate-content#v1beta.GenerateContentResponse
         val body = response.body.asJson()?.jsonObject ?: return
 
+        when {
+            body["candidates"] != null -> handleGenerateContentResponse(span, body)
+            body["totalTokens"] != null -> handleCountTokensResponse(span, body)
+            body["embedding"] != null || body["embeddings"] != null -> handleEmbedResponse(span, body)
+            else -> span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
+        }
+    }
+
+    private fun handleGenerateContentResponse(span: Span, body: JsonObject) {
         body["responseId"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["modelVersion"]?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it.jsonPrimitive.content) }
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "message")
 
-        body["candidates"]?.let {
+        val finishReasons = mutableListOf<String>()
+        body["candidates"]!!.let {
             for ((index, candidate) in it.jsonArray.withIndex()) {
                 candidate.jsonObject["content"]?.let { content ->
                     span.setAttribute(
@@ -138,7 +142,6 @@ class GeminiContentGenHandler(
                         content.jsonObject["role"]?.jsonPrimitive?.content
                     )
 
-                    // response parts
                     val parts = content.jsonObject["parts"]
                     val textMessage = parts?.singleTextMessageInParts()
 
@@ -148,33 +151,28 @@ class GeminiContentGenHandler(
                         span.setAttribute("gen_ai.completion.$index.content", parts.toString().orRedactedOutput())
                     }
 
-                    // collect requests for a tool call
                     if (parts is JsonArray) {
                         var toolCallIndex = 0
                         for (part in parts.jsonArray) {
-                            part.jsonObject["functionCall"]?.jsonObject?.let { part ->
-                                val name = part["name"]?.jsonPrimitive?.content
-                                val args = part["args"].toString()
-
-                                span.setAttribute(
-                                    "gen_ai.completion.$index.tool.$toolCallIndex.name",
-                                    name?.orRedactedOutput()
-                                )
-                                span.setAttribute(
-                                    "gen_ai.completion.$index.tool.$toolCallIndex.arguments",
-                                    args.orRedactedOutput()
-                                )
+                            part.jsonObject["functionCall"]?.jsonObject?.let { fc ->
+                                val name = fc["name"]?.jsonPrimitive?.content
+                                val args = fc["args"].toString()
+                                span.setAttribute("gen_ai.completion.$index.tool.$toolCallIndex.name", name?.orRedactedOutput())
+                                span.setAttribute("gen_ai.completion.$index.tool.$toolCallIndex.arguments", args.orRedactedOutput())
                                 ++toolCallIndex
                             }
                         }
                     }
                 }
 
-                span.setAttribute(
-                    "gen_ai.completion.$index.finish_reason",
-                    candidate.jsonObject["finishReason"]?.jsonPrimitive?.content
-                )
+                candidate.jsonObject["finishReason"]?.jsonPrimitive?.content?.let { reason ->
+                    span.setAttribute("gen_ai.completion.$index.finish_reason", reason)
+                    finishReasons.add(reason)
+                }
             }
+        }
+        if (finishReasons.isNotEmpty()) {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons)
         }
 
         if (contentTracingAllowed(ContentKind.OUTPUT)) {
@@ -208,13 +206,45 @@ class GeminiContentGenHandler(
              *
              * See: https://ai.google.dev/api/generate-content#UsageMetadata
              */
-            // prompt tokens details
             extractUsageTokenDetails(span, usage, attribute = "promptTokensDetails")
-            // candidate tokens details
             extractUsageTokenDetails(span, usage, attribute = "candidatesTokensDetails")
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
+    }
+
+    /** Handles countTokens response: `{"totalTokens": N}`. */
+    private fun handleCountTokensResponse(span: Span, body: JsonObject) {
+        body["totalTokens"]?.jsonPrimitive?.intOrNull?.let {
+            span.setAttribute("gen_ai.usage.total_tokens", it.toLong())
+        }
+        span.populateUnmappedAttributes(body, listOf("totalTokens", "totalBillableCharacters"), PayloadType.RESPONSE)
+    }
+
+    /**
+     * Handles embedContent / batchEmbedContents response.
+     *
+     * Single embedding: `{"embedding": {"values": [...]}}`
+     * Batch embeddings: `{"embeddings": [{"values": [...]}, ...]}`
+     */
+    private fun handleEmbedResponse(span: Span, body: JsonObject) {
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "embedding")
+        val singleEmbedding = body["embedding"]?.jsonObject?.get("values")?.jsonArray
+        val batchEmbeddings = body["embeddings"]?.jsonArray
+
+        when {
+            singleEmbedding != null -> {
+                span.setAttribute("gen_ai.response.embedding.count", 1L)
+                span.setAttribute("gen_ai.response.embedding.dimension", singleEmbedding.size.toLong())
+            }
+            batchEmbeddings != null -> {
+                span.setAttribute("gen_ai.response.embedding.count", batchEmbeddings.size.toLong())
+                batchEmbeddings.firstOrNull()?.jsonObject?.get("values")?.jsonArray?.size?.let {
+                    span.setAttribute("gen_ai.response.embedding.dimension", it.toLong())
+                }
+            }
+        }
+        span.populateUnmappedAttributes(body, listOf("embedding", "embeddings"), PayloadType.RESPONSE)
     }
 
     override fun handleStreaming(span: Span, events: String) = Unit
