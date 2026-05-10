@@ -12,6 +12,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranscriptionOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
@@ -33,6 +34,11 @@ private enum class OpenAIApiType(val route: String) {
     // Must be checked before CHAT_COMPLETIONS so that "conversations" paths are not accidentally
     // matched by the shorter "completions" substring.
     CONVERSATIONS("conversations"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createTranscription
+    // Must be checked before CHAT_COMPLETIONS so that "audio/transcriptions" is not missed
+    // and the handler can parse multipart form-data rather than falling back to JSON.
+    AUDIO_TRANSCRIPTIONS("audio/transcriptions"),
 
     // See: https://platform.openai.com/docs/api-reference/completions
     CHAT_COMPLETIONS("completions"),
@@ -69,6 +75,7 @@ private enum class OpenAIApiType(val route: String) {
  * - **Chat Completions**: `/v1/chat/completions`
  * - **Responses API**: `/v1/responses`
  * - **Conversations API**: `/v1/conversations` and `/v1/conversations/{id}/items`
+ * - **Audio Transcriptions**: `/v1/audio/transcriptions`
  * - **Image Generation**: `/v1/images/generations`
  * - **Image Editing**: `/v1/images/edits`
  * - **Video Generation**: `/v1/videos`
@@ -143,6 +150,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         val handler = when (apiType) {
             OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
                 ConversationsOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.AUDIO_TRANSCRIPTIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSCRIPTIONS) {
+                AudioTranscriptionOpenAIApiEndpointHandler()
             }
 
             OpenAIApiType.CHAT_COMPLETIONS -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
