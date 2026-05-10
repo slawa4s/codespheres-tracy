@@ -59,6 +59,66 @@ class LLMTracingAdapterTest : BaseAITracingTest() {
     }
 
     @Test
+    fun `error type falls back to HTTP status code when body omits type field`() {
+        val errorBody = """{"error":{"message":"Service unavailable"}}"""
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(503)
+                .addHeader("Content-Type", "application/json")
+                .setBody(errorBody)
+        )
+        server.start()
+
+        try {
+            val client = instrument(OkHttpClient(), StubAdapter())
+            val request = Request.Builder()
+                .url(server.url("/v1/test"))
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use {}
+
+            val spans = analyzeSpans()
+            assertTracesCount(1, spans)
+            val span = spans.first()
+
+            assertEquals(503L, span.attributes[AttributeKey.longKey("http.response.status_code")])
+            assertEquals("503", span.attributes[AttributeKey.stringKey("error.type")])
+            assertEquals(StatusCode.ERROR, span.status.statusCode)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `error type falls back to HTTP status code when error response body is empty`() {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(429))
+        server.start()
+
+        try {
+            val client = instrument(OkHttpClient(), StubAdapter())
+            val request = Request.Builder()
+                .url(server.url("/v1/test"))
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use {}
+
+            val spans = analyzeSpans()
+            assertTracesCount(1, spans)
+            val span = spans.first()
+
+            assertEquals(429L, span.attributes[AttributeKey.longKey("http.response.status_code")])
+            assertEquals("429", span.attributes[AttributeKey.stringKey("error.type")])
+            assertEquals(StatusCode.ERROR, span.status.statusCode)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun `error type is emitted alongside gen_ai error type for JSON error responses`() {
         val errorBody = """{"error":{"type":"invalid_request_error","message":"Bad request","code":"400"}}"""
         val server = MockWebServer()

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added HTTP-status-code fallback for `error.type` in `LLMTracingAdapter.registerResponse`: when the error response body does not include a provider-level `type` field, `error.type` is now set to the HTTP status code string (e.g. `"429"`) so the attribute is always present for error responses, consistent with OTel conventions
+
 - Added `gen_ai.provider.name` span attribute (stable OTel GenAI registry name) to all LLM provider requests, emitting the same value as `gen_ai.system`
 - Added `server.address` and `server.port` span attributes to all LLM provider requests, extracted from the request URL
 - Changed HTTP status attribute key from deprecated `http.status_code` to stable `http.response.status_code`
