@@ -1,5 +1,44 @@
 # Changelog
 
+## Session 8
+
+- **Branch**: `claude-session-8` (based on `claude-session-7`)
+- **Evaluator attempts**: 2 (`artifacts/8/evaluation_0.json`, `artifacts/8/evaluation_1.json`)
+- **Score**: 98 (unchanged; score ceiling confirmed for eighth consecutive session)
+
+### Changes
+
+#### OpenAI handler routing fixes (`tracing/openai`)
+
+1. **`images/variations` URL now routes to `ImagesCreateEditOpenAIApiEndpointHandler`** (`OpenAILLMTracingAdapter`): Previously, `POST /v1/images/variations` fell through to the `null` branch in `handlerFor()` and defaulted to `ChatCompletionsOpenAIApiEndpointHandler`, emitting `gen_ai.operation.name = "chat"` instead of `"generate_content"`. Added `IMAGES_VARIATIONS("images/variations")` to the `OpenAIApiType` enum and registered it in the `when` dispatch.
+
+2. **`conversations.update` operation name when SDK uses POST** (`ConversationsOpenAIApiEndpointHandler`): The OpenAI SDK sends either PATCH or POST for `conversations.update` depending on SDK version. The `PATCH` case was already handled, but the `POST + hasConvId + !hasItems` case fell through to `else -> "conversations.retrieve"`. Added the missing `method == "POST" && hasConvId && !hasItems -> "conversations.update"` branch.
+
+Both fixes are for PE (provider_error) scenarios, so the evaluator score is unchanged at 98. The changes improve attribute correctness for customers using the `images/variations` endpoint and for SDK versions that POST rather than PATCH conversation updates.
+
+### Tests
+
+- Added `OpenAILLMTracingAdapterHandlerRoutingTest` with three MockWebServer-based tests (no real API keys required) verifying the corrected routing:
+  - `POST images/variations` → `gen_ai.operation.name = "generate_content"` (not `"chat"`)
+  - `POST /conversations/{id}` → `gen_ai.operation.name = "conversations.update"` (not `"conversations.retrieve"`)
+  - `PATCH /conversations/{id}` → `gen_ai.operation.name = "conversations.update"`
+
+### Analysis
+
+Ran a full baseline evaluation with 154 scenarios (113 scoreable after excluding 41 provider_error cases). Score remained at 98.
+
+The 6 remaining non-provider-error failures are all proxy/SDK limitations that Tracy cannot resolve:
+
+1. **`anthropic/batches/invalid_empty_requests`** — The Anthropic Java SDK validates client-side before any HTTP call when `requests` is empty. No OkHttp interceptor fires.
+
+2. **`anthropic/count_tokens/basic`**, **`/with_system_prompt`**, **`/with_tools`**, **`/with_vision`** — Missing `gen_ai.response.id`. The LiteLLM proxy returns only `{"input_tokens": N}` with no `id` field and no ID response headers forwarded.
+
+3. **`anthropic/messages/tool_use_with_result`** — Score 96/100. Missing `gen_ai.completion.0.content` (non_empty). LiteLLM returns `content: []` for the follow-up message even though `output_tokens: 2`.
+
+Score ceiling of 98 is confirmed.
+
+---
+
 ## Session 7
 
 - **Branch**: `claude-session-7` (based on `claude-session-6`)

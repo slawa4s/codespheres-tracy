@@ -48,6 +48,9 @@ private enum class OpenAIApiType(val route: String) {
     // See: https://platform.openai.com/docs/api-reference/images/createEdit
     IMAGES_EDITS("images/edits"),
 
+    // See: https://platform.openai.com/docs/api-reference/images/createVariation
+    IMAGES_VARIATIONS("images/variations"),
+
     // See: https://platform.openai.com/docs/api-reference/videos
     VIDEOS("videos"),
 
@@ -177,6 +180,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             }
 
             OpenAIApiType.IMAGES_EDITS -> handlers.getOrPut(OpenAIApiType.IMAGES_EDITS) {
+                ImagesCreateEditOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.IMAGES_VARIATIONS -> handlers.getOrPut(OpenAIApiType.IMAGES_VARIATIONS) {
                 ImagesCreateEditOpenAIApiEndpointHandler(extractor)
             }
 

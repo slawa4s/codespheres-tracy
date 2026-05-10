@@ -99,7 +99,9 @@ internal class ConversationsOpenAIApiEndpointHandler : EndpointApiHandler {
             method == "POST" && !hasConvId -> "conversations.create"
             method == "GET" && !hasConvId -> "conversations.list"
             method == "GET" && hasConvId && !hasItems -> "conversations.retrieve"
+            // The OpenAI SDK sends PATCH or POST for updates depending on SDK version
             method == "PATCH" && hasConvId && !hasItems -> "conversations.update"
+            method == "POST" && hasConvId && !hasItems -> "conversations.update"
             method == "DELETE" && hasConvId && !hasItems -> "conversations.delete"
             method == "POST" && hasItems -> "conversations.items.create"
             method == "GET" && hasItems && hasItemId -> "conversations.items.retrieve"
