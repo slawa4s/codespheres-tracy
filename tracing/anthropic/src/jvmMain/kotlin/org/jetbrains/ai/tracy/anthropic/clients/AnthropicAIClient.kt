@@ -117,8 +117,9 @@ private val logger = KotlinLogging.logger {}
  * ## Notes
  * - This function is **idempotent**: calling `instrument()` multiple times on the same client
  *   will not result in duplicate tracing.
- * - Both the top-level message service and the batch service (`BatchServiceImpl`) are patched,
- *   since they hold separate `OkHttpClient` instances internally.
+ * - The full client object graph is scanned for `OkHttpClient` instances, ensuring that all
+ *   service implementations (including `BatchServiceImpl`) share the patched interceptor
+ *   regardless of how they are instantiated internally.
  * - Tracing can be controlled globally via `TracingManager.isTracingEnabled`.
  * - Content capture policies can be configured via `TracingManager.withCapturingPolicy(policy)`
  *   to redact sensitive input/output data.
@@ -134,13 +135,9 @@ private val logger = KotlinLogging.logger {}
 fun instrument(client: AnthropicClient) {
     val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
     patchOpenAICompatibleClient(client = client, interceptor = interceptor)
-    // BatchServiceImpl holds a separate OkHttpClient instance that must also be patched.
-    try {
-        patchOpenAICompatibleClient(client = client.messages().batches(), interceptor = interceptor)
-    } catch (e: Exception) {
-        logger.warn(e) { "Standard patchOpenAICompatibleClient failed for BatchServiceImpl; trying direct scan" }
-        tryPatchAllOkHttpClients(client.messages().batches(), interceptor)
-    }
+    // Scan the full object graph so all service impls (including BatchServiceImpl) are covered,
+    // regardless of whether .batches() returns a factory-created instance per call.
+    tryPatchAllOkHttpClients(client, interceptor)
 }
 
 /**
