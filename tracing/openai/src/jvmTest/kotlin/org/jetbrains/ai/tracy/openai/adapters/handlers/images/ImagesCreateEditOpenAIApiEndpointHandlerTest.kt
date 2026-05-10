@@ -19,6 +19,15 @@ import com.openai.models.images.ImageModel
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import mu.KotlinLogging
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import org.jetbrains.ai.tracy.core.instrument
+import org.jetbrains.ai.tracy.openai.adapters.OpenAILLMTracingAdapter
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -403,6 +412,86 @@ class ImagesCreateEditOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         }
         verifyMediaContentUploadAttributes(trace, expected = mediaContentUploads)
     }
+
+    @Test
+    fun `image edit sets operation name, output type, and image size_bytes`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"data":[{"url":"https://example.com/result.png"}]}""")
+            )
+
+            val imageBytes = ByteArray(2048) { it.toByte() }
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("model", "dall-e-2")
+                .addFormDataPart("prompt", "Add a cat")
+                .addFormDataPart(
+                    "image", "source.png",
+                    imageBytes.toRequestBody("image/png".toMediaType())
+                )
+                .build()
+
+            buildMockClient().newCall(
+                Request.Builder()
+                    .url(server.url("/v1/images/edits"))
+                    .post(body)
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+            assertEquals(2048L, trace.attributes[AttributeKey.longKey("tracy.request.image.0.size_bytes")])
+        }
+    }
+
+    @Test
+    fun `image edit maps unknown form fields to tracy namespace`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"data":[{"url":"https://example.com/result.png"}]}""")
+            )
+
+            // Use explicit text/plain content type so the form parser can decode these fields.
+            // OkHttp's addFormDataPart(name, value) omits Content-Type, which Tracy skips.
+            val textPlain = "text/plain; charset=utf-8".toMediaType()
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("model", null, "dall-e-2".toRequestBody(textPlain))
+                .addFormDataPart("prompt", null, "Add a cat".toRequestBody(textPlain))
+                .addFormDataPart("n", null, "2".toRequestBody(textPlain))
+                .addFormDataPart("size", null, "512x512".toRequestBody(textPlain))
+                .addFormDataPart(
+                    "image", "source.png",
+                    ByteArray(64).toRequestBody("image/png".toMediaType())
+                )
+                .build()
+
+            buildMockClient().newCall(
+                Request.Builder()
+                    .url(server.url("/v1/images/edits"))
+                    .post(body)
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("2", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
+            assertEquals("512x512", trace.attributes[AttributeKey.stringKey("tracy.request.size")])
+            assertNull(
+                trace.attributes[AttributeKey.stringKey("gen_ai.request.n")],
+                "Unknown form fields must not use gen_ai.request.* namespace"
+            )
+        }
+    }
+
+    private fun buildMockClient(): OkHttpClient =
+        instrument(OkHttpClient(), OpenAILLMTracingAdapter())
 
     private fun image(filepath: String, contentType: String): MultipartField<ImageEditParams.Image> {
         val image = readResource(filepath)
