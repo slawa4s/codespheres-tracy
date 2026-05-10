@@ -14,7 +14,9 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranscriptionOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranslationOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.BatchesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
@@ -48,6 +50,12 @@ private enum class OpenAIApiType(val route: String) {
 
     // See: https://platform.openai.com/docs/api-reference/completions
     CHAT_COMPLETIONS("completions"),
+
+    // See: https://platform.openai.com/docs/api-reference/files
+    FILES("files"),
+
+    // See: https://platform.openai.com/docs/api-reference/batch
+    BATCHES("batches"),
 
     // See: https://platform.openai.com/docs/api-reference/responses
     RESPONSES_API("responses"),
@@ -83,6 +91,8 @@ private enum class OpenAIApiType(val route: String) {
  * - **Conversations API**: `/v1/conversations` and `/v1/conversations/{id}/items`
  * - **Audio Transcriptions**: `/v1/audio/transcriptions`
  * - **Audio Translations**: `/v1/audio/translations`
+ * - **Files API**: `/v1/files`
+ * - **Batch API**: `/v1/batches`
  * - **Image Generation**: `/v1/images/generations`
  * - **Image Editing**: `/v1/images/edits`
  * - **Video Generation**: `/v1/videos`
@@ -169,6 +179,14 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.CHAT_COMPLETIONS -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
                 ChatCompletionsOpenAIApiEndpointHandler(extractor)
+            }
+
+            OpenAIApiType.FILES -> handlers.getOrPut(OpenAIApiType.FILES) {
+                FilesOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.BATCHES -> handlers.getOrPut(OpenAIApiType.BATCHES) {
+                BatchesOpenAIApiEndpointHandler()
             }
 
             OpenAIApiType.RESPONSES_API -> handlers.getOrPut(OpenAIApiType.RESPONSES_API) {
