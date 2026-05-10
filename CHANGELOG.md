@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed OpenAI image generation handler (`/v1/images/generations`): now sets `gen_ai.operation.name = "generate_content"` and `gen_ai.output.type = "image"` on every span; `stream` field is recorded as a boolean `gen_ai.request.stream` instead of a string; unknown request fields (e.g. `size`, `n`, `quality`, `output_format`, `partial_images`) are now emitted under `tracy.request.*` instead of the non-registry `gen_ai.request.*` namespace.
+
 - Fixed silent exception swallow in `instrument(AnthropicClient)`: the `BatchServiceImpl` patch failure now logs a warning via `logger.warn` and falls back to `tryPatchAllOkHttpClients`, which walks the batch service's class hierarchy to find and patch every `OkHttpClient`-typed field directly, covering SDK versions where `BatchServiceImpl` does not expose `clientOptions`.
 - Added OpenAI Audio Speech (`/v1/audio/speech`) tracing: new `AUDIO_SPEECH` dispatch entry and `AudioSpeechOpenAIApiEndpointHandler` set `gen_ai.operation.name = "audio.speech"`, `gen_ai.output.type = "speech"`, `gen_ai.request.model`, `tracy.request.voice`, `tracy.request.response_format`, and `tracy.request.speed` from the JSON request body; `/v1/audio/transcriptions` is unaffected.
 - Enhanced non-JSON response handling in `OpenTelemetryOkHttpInterceptor`: binary responses (e.g., audio speech) now embed `tracy.response.body.size_bytes` in the JSON stub passed to `registerResponse`, enabling handlers such as the audio speech handler to report response size without interface changes.
