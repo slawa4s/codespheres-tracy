@@ -73,6 +73,47 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
         }
     }
 
+    @Test
+    fun batchCreateSetsRequestBatchSize() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"id":"msgbatch_01","type":"message_batch","processing_status":"in_progress","request_counts":{"processing":2,"succeeded":0,"errored":0,"canceled":0,"expired":0},"ended_at":null,"created_at":"2025-01-01T00:00:00Z","expires_at":"2025-01-02T00:00:00Z","archived_at":null,"cancel_initiated_at":null,"results_url":null}""")
+            )
+
+            val client = makeInstrumentedClient()
+            val body = """
+                {
+                  "requests": [
+                    {"custom_id":"req-1","params":{"model":"claude-3-5-haiku-20241022","max_tokens":10,"messages":[{"role":"user","content":"Hello"}]}},
+                    {"custom_id":"req-2","params":{"model":"claude-3-5-haiku-20241022","max_tokens":10,"messages":[{"role":"user","content":"World"}]}}
+                  ]
+                }
+            """.trimIndent().toRequestBody(JSON)
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches"))
+                    .post(body)
+                    .header("x-api-key", MOCK_API_KEY)
+                    .header("anthropic-version", "2023-06-01")
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            val trace = traces.firstOrNull()
+            assertNotNull(trace, "Expected a span for the batches create request")
+
+            assertEquals(
+                2L,
+                trace!!.attributes[AttributeKey.longKey("gen_ai.request.batch.size")],
+                "gen_ai.request.batch.size should equal the number of entries in the requests array"
+            )
+        }
+    }
+
     companion object {
         private const val MOCK_API_KEY = "mock-api-key"
     }
