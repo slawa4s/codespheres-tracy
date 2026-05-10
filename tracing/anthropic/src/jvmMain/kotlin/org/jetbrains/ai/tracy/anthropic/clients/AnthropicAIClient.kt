@@ -124,8 +124,14 @@ import com.anthropic.client.AnthropicClient
  * @see TracingManager.traceSensitiveContent
  */
 fun instrument(client: AnthropicClient) {
-    patchOpenAICompatibleClient(
-        client = client,
-        interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
-    )
+    val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+    patchOpenAICompatibleClient(client = client, interceptor = interceptor)
+    // The batches sub-client (client.messages().batches()) may use an OkHttp instance
+    // that is separate from the one patched above. Patch it defensively so that
+    // requests to /v1/messages/batches are also intercepted.
+    try {
+        patchOpenAICompatibleClient(client = client.messages().batches(), interceptor = interceptor)
+    } catch (_: Exception) {
+        // no-op: batches service not accessible or its HTTP client is not patchable
+    }
 }
