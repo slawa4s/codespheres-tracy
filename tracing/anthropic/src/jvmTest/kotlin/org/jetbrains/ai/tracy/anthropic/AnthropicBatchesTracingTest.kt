@@ -278,6 +278,39 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
         }
     }
 
+    @Test
+    fun batchDeleteSetsOperationName() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"id":"msgbatch_abc123","deleted":true}""")
+            )
+
+            val client = makeInstrumentedClient()
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches/msgbatch_abc123"))
+                    .delete()
+                    .header("x-api-key", MOCK_API_KEY)
+                    .header("anthropic-version", "2023-06-01")
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            val trace = traces.firstOrNull()
+            assertNotNull(trace, "Expected a span for the batch delete request")
+
+            assertEquals(
+                "delete_batch",
+                trace!!.attributes[AttributeKey.stringKey("gen_ai.operation.name")],
+                "gen_ai.operation.name should be 'delete_batch' for DELETE /v1/messages/batches/{id}"
+            )
+        }
+    }
+
     companion object {
         private const val MOCK_API_KEY = "mock-api-key"
     }

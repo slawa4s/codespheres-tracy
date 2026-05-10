@@ -54,6 +54,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         val operationName = when {
             segments.contains("cancel") -> "cancel_batch"
             segments.contains("batches") && request.method == "GET" -> "retrieve_batch"
+            segments.contains("batches") && request.method == "DELETE" -> "delete_batch"
             segments.contains("batches") -> "create_batch"
             segments.contains("models") -> "retrieve_model"
             else -> "chat"

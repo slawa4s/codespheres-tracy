@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Anthropic batch delete operation name: `DELETE /v1/messages/batches/{id}` now sets `gen_ai.operation.name = "delete_batch"` instead of the incorrect `"create_batch"`.
+
 - Added `patchClientByFieldScan` fallback in `instrument(AnthropicClient)`: when the standard `patchOpenAICompatibleClient` path fails for `messages().batches()`, a field-scan walk over the sub-client's object hierarchy patches any `OkHttpClient` instance found. Patching failure is now logged at ERROR (was WARN) when all strategies are exhausted.
 - Fixed Anthropic batch and model span attribute namespacing: moved non-registry `gen_ai.request.batch.size` → `anthropic.batch.request_size`; `gen_ai.response.batch.id`, `gen_ai.response.batch.processing_status`, `gen_ai.response.batch.created_at`, `gen_ai.response.batch.expires_at`, and all `gen_ai.response.batch.request_counts.*` → `anthropic.batch.*`; and `gen_ai.response.model.capabilities.vision` → `anthropic.model.capabilities.image_input`. Also fixed the capabilities lookup: `caps["vision"]` (undocumented key) is replaced by the documented path `caps["image_input"]["supported"]["enabled"]`.
 - Added OpenAI Moderations API tracing: `POST /v1/moderations` is now handled by `ModerationsOpenAIApiEndpointHandler`, setting `gen_ai.operation.name=moderations`, `openai.api.type=moderations`, `tracy.request.input.type` (`"string"` for plain-text input, `"multimodal"` for mixed content arrays), `tracy.response.results.count`, `tracy.response.results.flagged`, `tracy.response.results.categories`, `tracy.response.results.category_scores`, and (for multimodal requests) `tracy.response.results.category_applied_input_types`.
