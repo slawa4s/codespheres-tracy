@@ -9,6 +9,7 @@ import mu.KotlinLogging
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
 import org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.patchClientByFieldScan
 import org.jetbrains.ai.tracy.core.patchOpenAICompatibleClient
 import com.anthropic.client.AnthropicClient
 
@@ -142,6 +143,8 @@ fun instrument(client: AnthropicClient) {
     try {
         patchOpenAICompatibleClient(client = client.messages().batches(), interceptor = interceptor)
     } catch (e: Exception) {
-        logger.warn(e) { "Failed to patch Anthropic messages().batches() HTTP client; batches tracing may be missing" }
+        if (!patchClientByFieldScan(client.messages().batches(), interceptor)) {
+            logger.error(e) { "Failed to patch Anthropic messages().batches() HTTP client via all patching strategies; batches tracing will be missing" }
+        }
     }
 }

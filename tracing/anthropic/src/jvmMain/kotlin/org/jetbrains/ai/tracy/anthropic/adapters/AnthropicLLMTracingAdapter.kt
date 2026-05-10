@@ -72,7 +72,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         if (segments.contains("batches")) {
             span.setAttribute("anthropic.api.type", "batches")
             val batchBody = request.body.asJson()?.jsonObject
-            batchBody?.get("requests")?.jsonArray?.size?.let { span.setAttribute("gen_ai.request.batch.size", it.toLong()) }
+            batchBody?.get("requests")?.jsonArray?.size?.let { span.setAttribute("anthropic.batch.request_size", it.toLong()) }
             return
         }
 
@@ -156,32 +156,32 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         val body = response.body.asJson()?.jsonObject ?: return
 
         if (response.url.pathSegments.contains("batches")) {
-            body["id"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.batch.id", it) }
+            body["id"]?.jsonPrimitive?.content?.let { span.setAttribute("anthropic.batch.id", it) }
             body["type"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it) }
             body["processing_status"]?.jsonPrimitive?.content?.let {
-                span.setAttribute("gen_ai.response.batch.processing_status", it)
+                span.setAttribute("anthropic.batch.processing_status", it)
             }
             body["created_at"]?.jsonPrimitive?.longOrNull?.let {
-                span.setAttribute("gen_ai.response.batch.created_at", it)
+                span.setAttribute("anthropic.batch.created_at", it)
             }
             body["expires_at"]?.jsonPrimitive?.longOrNull?.let {
-                span.setAttribute("gen_ai.response.batch.expires_at", it)
+                span.setAttribute("anthropic.batch.expires_at", it)
             }
             body["request_counts"]?.jsonObject?.let { counts ->
                 counts["processing"]?.jsonPrimitive?.intOrNull?.let {
-                    span.setAttribute("gen_ai.response.batch.request_counts.processing", it.toLong())
+                    span.setAttribute("anthropic.batch.request_counts.processing", it.toLong())
                 }
                 counts["succeeded"]?.jsonPrimitive?.intOrNull?.let {
-                    span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it.toLong())
+                    span.setAttribute("anthropic.batch.request_counts.succeeded", it.toLong())
                 }
                 counts["errored"]?.jsonPrimitive?.intOrNull?.let {
-                    span.setAttribute("gen_ai.response.batch.request_counts.errored", it.toLong())
+                    span.setAttribute("anthropic.batch.request_counts.errored", it.toLong())
                 }
                 counts["canceled"]?.jsonPrimitive?.intOrNull?.let {
-                    span.setAttribute("gen_ai.response.batch.request_counts.canceled", it.toLong())
+                    span.setAttribute("anthropic.batch.request_counts.canceled", it.toLong())
                 }
                 counts["expired"]?.jsonPrimitive?.intOrNull?.let {
-                    span.setAttribute("gen_ai.response.batch.request_counts.expired", it.toLong())
+                    span.setAttribute("anthropic.batch.request_counts.expired", it.toLong())
                 }
             }
             return
@@ -210,7 +210,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
                     is JsonPrimitive -> element.booleanOrNull
                     else -> null
                 }
-                capFlag(caps["vision"])?.let { span.setAttribute("gen_ai.response.model.capabilities.vision", it) }
+                caps["image_input"]?.jsonObject?.let { capFlag(it["supported"]) }?.let { span.setAttribute("anthropic.model.capabilities.image_input", it) }
                 capFlag(caps["citations"])?.let { span.setAttribute("gen_ai.response.model.capabilities.citations", it) }
                 capFlag(caps["batch"])?.let { span.setAttribute("gen_ai.response.model.capabilities.batch", it) }
             }
