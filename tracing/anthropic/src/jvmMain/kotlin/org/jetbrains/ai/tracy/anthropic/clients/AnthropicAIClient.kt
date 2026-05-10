@@ -147,4 +147,7 @@ fun instrument(client: AnthropicClient) {
             logger.error(e) { "Failed to patch Anthropic messages().batches() HTTP client via all patching strategies; batches tracing will be missing" }
         }
     }
+    // Final catch-all: walk the full com.anthropic.* object graph from the root client and
+    // patch any OkHttpClient instance not reached by the targeted calls above.
+    patchClientByFieldScan(client, interceptor)
 }
