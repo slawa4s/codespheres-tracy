@@ -6,8 +6,10 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers
 
 import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
+import org.jetbrains.ai.tracy.openai.adapters.OpenAILLMTracingAdapter
 import org.jetbrains.ai.tracy.openai.adapters.containsToolCall
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.jetbrains.ai.tracy.test.utils.MediaSource
@@ -18,6 +20,11 @@ import com.openai.models.ChatModel
 import com.openai.models.responses.*
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -637,6 +644,36 @@ class ResponsesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         verifyMediaContentUploadAttributes(trace, expected = media.map {
             it.toMediaContentAttributeValues(field = "input")
         })
+    }
+
+    @Test
+    fun `responses API sets gen_ai operation name and openai api type`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """{"id":"resp_001","object":"response","model":"gpt-4o-mini","output":[],"usage":{"input_tokens":10,"output_tokens":5}}"""
+                    )
+            )
+
+            val client = instrument(OkHttpClient(), OpenAILLMTracingAdapter())
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/responses"))
+                    .addHeader("Authorization", "Bearer MOCK_API_KEY")
+                    .post(
+                        """{"model":"gpt-4o-mini","input":"Hello"}"""
+                            .toRequestBody("application/json".toMediaType())
+                    )
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("responses", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+        }
     }
 
     private fun inputWith(vararg content: ResponseInputContent) = ResponseCreateParams.Input
