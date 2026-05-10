@@ -18,6 +18,7 @@ import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiEmbedHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiImagenHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonObject
 
 /**
@@ -52,7 +53,12 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
         // Detect embed requests: Vertex AI uses "predict" for embed, remap to Gemini API name
         val isEmbed = model != null && model.contains("embedding") && rawOperation == "predict"
-        val isBatchEmbed = isEmbed && request.body.asJson()?.jsonObject?.containsKey("requests") == true
+        val bodyObj = request.body.asJson()?.jsonObject
+        // Detect batch embed for both Vertex AI (multiple "instances") and Gemini native ("requests" key)
+        val isBatchEmbed = isEmbed && (
+            bodyObj?.containsKey("requests") == true ||
+            (bodyObj?.get("instances") as? JsonArray)?.size?.let { it > 1 } == true
+        )
         val operation = when {
             isEmbed && isBatchEmbed -> "batchEmbedContents"
             isEmbed -> "embedContent"
@@ -67,10 +73,12 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             span.setAttribute("gemini.api.type", "models")
         }
 
-        // Set gen_ai.output.type based on operation
-        when (operation) {
-            "generateContent", "streamGenerateContent" -> span.setAttribute(GEN_AI_OUTPUT_TYPE, "message")
-            "embedContent", "batchEmbedContents" -> span.setAttribute(GEN_AI_OUTPUT_TYPE, "embedding")
+        // Set gen_ai.output.type based on operation/request type
+        val isImagen = request.url.isImagenUrl()
+        when {
+            isImagen -> span.setAttribute(GEN_AI_OUTPUT_TYPE, "image")
+            operation == "generateContent" || operation == "streamGenerateContent" -> span.setAttribute(GEN_AI_OUTPUT_TYPE, "message")
+            operation == "embedContent" || operation == "batchEmbedContents" -> span.setAttribute(GEN_AI_OUTPUT_TYPE, "embedding")
         }
 
         val handler = selectHandler(request.url, model, isEmbed)

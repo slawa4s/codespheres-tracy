@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased] – Session 5
+
+### Fixed
+
+- `GeminiLLMTracingAdapter`: Fixed batch embed detection for Vertex AI format — `isBatchEmbed` now also detects multiple `"instances"` entries in the request body (Vertex AI format) in addition to the existing `"requests"` key check (Gemini native format). Previously, batch embed via Vertex AI always resolved to `gen_ai.operation.name=embedContent` instead of `batchEmbedContents`.
+- `GeminiLLMTracingAdapter`: Added `gen_ai.output.type=image` for Imagen requests. Previously only `message` (generateContent) and `embedding` (embed) were set; Imagen requests had no output type.
+- `GeminiImagenHandler`: Replaced dead `gen_ai.completion.$index.content` attribute (read from `prediction["prompt"]` which doesn't exist in Imagen responses) with `gen_ai.response.image.count` (count of predictions). Imagen responses contain `mimeType` and `bytesBase64Encoded` fields, not `prompt`.
+- `GeminiImagenHandler`: Added `gen_ai.request.image.number_of_images` attribute from `parameters.sampleCount` in the Imagen request body.
+
+### Evaluation Results
+
+| Attempt | Score | Notes |
+|---------|-------|-------|
+| 0 (session baseline) | 100 | Inherited from session 4 |
+| 1 | 100 | After Gemini batch embed and Imagen fixes; Imagen scenario partial score improved 63→81 |
+
 ## [Unreleased] – Session 4
 
 ### Fixed
