@@ -104,6 +104,17 @@ class AnthropicMessagesEndpointHandlerTest {
     // ── Request attributes ────────────────────────────────────────────────────
 
     @Test
+    fun `sets anthropic api type, operation name, and output type unconditionally`() {
+        val attrs = capture(
+            requestJson = """{"model":"claude-3-5-haiku-latest","max_tokens":100,"messages":[{"role":"user","content":"Hello"}]}""",
+            responseJson = """{"id":"msg_01","type":"message","role":"assistant","model":"claude-3-5-haiku-latest","content":[],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":0}}"""
+        )
+        assertEquals("messages", attrs[AttributeKey.stringKey("anthropic.api.type")])
+        assertEquals("chat", attrs[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("message", attrs[AttributeKey.stringKey("gen_ai.output.type")])
+    }
+
+    @Test
     fun `extracts model from request`() {
         val attrs = capture(
             requestJson = """{"model":"claude-3-5-haiku-latest","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}""",
@@ -225,5 +236,60 @@ class AnthropicMessagesEndpointHandlerTest {
         )
         assertEquals(100L, attrs[AttributeKey.longKey("gen_ai.usage.cache_creation.input_tokens")])
         assertEquals(50L, attrs[AttributeKey.longKey("gen_ai.usage.cache_read.input_tokens")])
+    }
+
+    // ── Streaming attributes ──────────────────────────────────────────────────
+
+    private fun captureStreaming(sseEvents: String): Attributes {
+        val handler = AnthropicMessagesEndpointHandler(MediaContentExtractorImpl())
+        val span = tracer.spanBuilder("test").startSpan()
+        handler.handleStreaming(span, sseEvents)
+        span.end()
+        return spanExporter.finishedSpanItems.last().attributes
+    }
+
+    @Test
+    fun `streaming extracts response id and model from message_start`() {
+        val sse = """
+            data: {"type":"message_start","message":{"id":"msg_stream_01","type":"message","role":"assistant","model":"claude-3-5-haiku-20241022","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1}}}
+
+            data: {"type":"message_stop"}
+        """.trimIndent()
+        val attrs = captureStreaming(sse)
+        assertEquals("msg_stream_01", attrs[AttributeKey.stringKey("gen_ai.response.id")])
+        assertEquals("claude-3-5-haiku-20241022", attrs[AttributeKey.stringKey("gen_ai.response.model")])
+    }
+
+    @Test
+    fun `streaming extracts role and input tokens from message_start`() {
+        val sse = """
+            data: {"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-3-5-haiku-latest","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":25,"output_tokens":1}}}
+
+            data: {"type":"message_stop"}
+        """.trimIndent()
+        val attrs = captureStreaming(sse)
+        assertEquals("assistant", attrs[AttributeKey.stringKey("gen_ai.response.role")])
+        assertEquals(25L, attrs[AttributeKey.longKey("gen_ai.usage.input_tokens")])
+    }
+
+    @Test
+    fun `streaming accumulates content_block_delta text and sets on message_stop`() {
+        val sse = """
+            data: {"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-3-5-haiku-latest","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":5,"output_tokens":1}}}
+
+            data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+            data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", world!"}}
+
+            data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":15}}
+
+            data: {"type":"message_stop"}
+        """.trimIndent()
+        val attrs = captureStreaming(sse)
+        assertNotNull(attrs[AttributeKey.stringKey("gen_ai.completion.0.content")])
+        assertEquals(15L, attrs[AttributeKey.longKey("gen_ai.usage.output_tokens")])
+        val finishReasons = attrs[AttributeKey.stringArrayKey("gen_ai.response.finish_reasons")]
+        assertNotNull(finishReasons)
+        assertTrue(finishReasons.contains("end_turn"))
     }
 }

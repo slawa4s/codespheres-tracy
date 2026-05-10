@@ -19,6 +19,7 @@ import com.openai.models.images.ImageModel
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import mu.KotlinLogging
+import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -402,6 +403,54 @@ class ImagesCreateEditOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             }
         }
         verifyMediaContentUploadAttributes(trace, expected = mediaContentUploads)
+    }
+
+    @Test
+    fun `test operation name, output type, and image size_bytes attributes are set`() = runTest {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = "mock-api-key",
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "created": 1589478378,
+                          "data": [
+                            { "url": "https://example.com/edited.png" }
+                          ]
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val imageFile = MediaSource.File("cat-n-dog-2-alpha.png", "image/png")
+            val imageBytes = readResource(imageFile.filepath).readBytes()
+
+            val params = ImageEditParams.builder()
+                .body(
+                    ImageEditParams.Body.builder()
+                        .prompt("Remove cat")
+                        .model(ImageModel.DALL_E_2)
+                        .image(image(imageFile.filepath, imageFile.contentType))
+                        .responseFormat(ImageEditParams.ResponseFormat.URL)
+                        .build()
+                )
+                .build()
+
+            client.images().edit(params)
+
+            val trace = analyzeSpans().first()
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+            assertEquals(imageBytes.size.toLong(), trace.attributes[AttributeKey.longKey("tracy.request.image.size_bytes")])
+            assertEquals("https://example.com/edited.png", trace.attributes[AttributeKey.stringKey("tracy.response.image.url")])
+        }
     }
 
     private fun image(filepath: String, contentType: String): MultipartField<ImageEditParams.Image> {

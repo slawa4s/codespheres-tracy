@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added `anthropic.api.type = "messages"`, `gen_ai.operation.name = "chat"`, and `gen_ai.output.type = "message"` to every Anthropic Messages API span, set unconditionally before request-body parsing so they appear on all paths including streaming and error spans
+- Added Anthropic SSE streaming support: `AnthropicLLMTracingAdapter` now detects `stream: true` in the request body and delegates to `AnthropicMessagesEndpointHandler.handleStreaming`, which parses `message_start` / `content_block_delta` / `message_delta` / `message_stop` events to capture `gen_ai.response.id`, `gen_ai.response.model`, `gen_ai.response.role`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, and `gen_ai.completion.0.content`
+- Added `gen_ai.operation.name = "generate_content"` and `gen_ai.output.type = "image"` span attributes to `ImagesCreateEditOpenAIApiEndpointHandler`
+- Added `tracy.request.image.size_bytes` span attribute (byte length of the uploaded image) to the images/edit request handler
+- Added `tracy.response.image.url` span attribute for URL-format image edit responses
+- Renamed non-registry `gen_ai.request.*` and `gen_ai.response.*` catch-all attributes in OpenAI images handlers to `tracy.request.*` and `tracy.response.*`: fields such as `size`, `n`, `quality`, `style`, `response_format`, and `created` are not in the OTel GenAI registry and now use the `tracy.*` namespace
+- Fixed non-registry `gen_ai.*` attribute names in OpenAI images `setUsageAttributes`: renamed `gen_ai.usage.total_tokens` → `tracy.usage.total_tokens` (library-derived field) and `gen_ai.usage.input_tokens_details` → `openai.usage.input_tokens_details` (OpenAI-specific breakdown)
 - Added `gen_ai.provider.name` span attribute (stable OTel GenAI registry name) to all LLM provider requests, emitting the same value as `gen_ai.system`
 - Added `server.address` and `server.port` span attributes to all LLM provider requests, extracted from the request URL
 - Changed HTTP status attribute key from deprecated `http.status_code` to stable `http.response.status_code`

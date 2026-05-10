@@ -20,6 +20,7 @@ import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 import mu.KotlinLogging
@@ -40,6 +41,10 @@ internal class AnthropicMessagesEndpointHandler(
 ) : EndpointApiHandler {
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("anthropic.api.type", "messages")
+        span.setAttribute("gen_ai.operation.name", "chat")
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "message")
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
@@ -190,7 +195,57 @@ internal class AnthropicMessagesEndpointHandler(
         span.populateUnmappedAttributes(body, mappedResponseAttributes, PayloadType.RESPONSE)
     }
 
-    override fun handleStreaming(span: Span, events: String) = Unit
+    override fun handleStreaming(span: Span, events: String): Unit = runCatching {
+        val content = StringBuilder()
+
+        for (line in events.lineSequence()) {
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+
+            val event = runCatching {
+                Json.parseToJsonElement(data).jsonObject
+            }.getOrNull() ?: continue
+
+            when (event["type"]?.jsonPrimitive?.content) {
+                "message_start" -> {
+                    val message = event["message"]?.jsonObject ?: continue
+                    message["id"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_ID, it)
+                    }
+                    message["model"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+                    }
+                    message["role"]?.jsonPrimitive?.content?.let {
+                        span.setAttribute("gen_ai.response.role", it)
+                    }
+                    message["usage"]?.jsonObject?.get("input_tokens")?.jsonPrimitive?.intOrNull?.let {
+                        span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
+                    }
+                }
+                "content_block_delta" -> {
+                    event["delta"]?.jsonObject?.get("text")?.jsonPrimitive?.content?.let {
+                        content.append(it)
+                    }
+                }
+                "message_delta" -> {
+                    event["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.content?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, listOf(it))
+                    }
+                    event["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.intOrNull?.let {
+                        span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+                    }
+                }
+                "message_stop" -> {
+                    if (content.isNotEmpty()) {
+                        span.setAttribute("gen_ai.completion.0.content", content.toString().orRedactedOutput())
+                    }
+                }
+            }
+        }
+    }.getOrElse { exception ->
+        span.setStatus(StatusCode.ERROR)
+        span.recordException(exception)
+    }
 
     private fun parseMediaContent(body: JsonObject): MediaContent? {
         if (body["messages"] !is JsonArray) {

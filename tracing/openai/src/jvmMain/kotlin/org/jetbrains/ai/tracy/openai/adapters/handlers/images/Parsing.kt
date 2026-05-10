@@ -36,6 +36,7 @@ internal fun handleImageGenerationResponseAttributes(
         // collect AI response content
         for ((index, image) in data.withIndex()) {
             span.setAttribute("gen_ai.completion.$index.content", image.asString.orRedactedOutput())
+            image.jsonObject["url"]?.jsonPrimitive?.content?.let { span.setAttribute("tracy.response.image.url", it) }
         }
         // install media content for further upload
         val format = body["output_format"]?.jsonPrimitive?.content ?: defaultImageFormat
@@ -54,7 +55,7 @@ internal fun handleImageGenerationResponseAttributes(
         if (key in manuallyParsedKeys) {
             continue
         }
-        span.setAttribute("gen_ai.response.$key", value.asString)
+        span.setAttribute("tracy.response.$key", value.asString)
     }
 }
 
@@ -159,9 +160,9 @@ private fun setUsageAttributes(span: Span, usage: JsonObject) {
     }
 
     usage["input_tokens_details"]?.jsonObject?.let {
-        span.setAttribute("gen_ai.usage.input_tokens_details", it.asString)
+        span.setAttribute("openai.usage.input_tokens_details", it.asString)
     }
     usage["total_tokens"]?.jsonPrimitive?.intOrNull?.let {
-        span.setAttribute(AttributeKey.longKey("gen_ai.usage.total_tokens"), it)
+        span.setAttribute(AttributeKey.longKey("tracy.usage.total_tokens"), it)
     }
 }
