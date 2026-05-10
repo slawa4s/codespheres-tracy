@@ -91,7 +91,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             metadata["user_id"]?.jsonPrimitive?.let { span.setAttribute("gen_ai.metadata.user_id", it.content) }
         }
         body["service_tier"]?.jsonPrimitive?.let {
-            span.setAttribute("gen_ai.usage.service_tier", it.content)
+            span.setAttribute("anthropic.usage.service_tier", it.content)
         }
 
         // system prompt
@@ -173,13 +173,13 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
                 .firstOrNull()
             val modelIdValue = data["id"]?.jsonPrimitive?.content
             (modelAlias ?: modelIdValue)?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
-            modelIdValue?.let { span.setAttribute("gen_ai.response.model.id", it) }
+            modelIdValue?.let { span.setAttribute("anthropic.model.id", it) }
 
             data["display_name"]?.jsonPrimitive?.content?.let {
-                span.setAttribute("gen_ai.response.model.display_name", it)
+                span.setAttribute("anthropic.model.display_name", it)
             }
             data["created_at"]?.jsonPrimitive?.longOrNull?.let {
-                span.setAttribute("gen_ai.response.model.created_at", it)
+                span.setAttribute("anthropic.model.created_at", it)
             }
             data["context_window"]?.jsonPrimitive?.longOrNull?.let {
                 span.setAttribute("anthropic.model.context_window", it)
@@ -187,21 +187,21 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
             val maxInputTokens = data["max_tokens_in_context"]?.jsonPrimitive?.longOrNull
                 ?: data["max_input_tokens"]?.jsonPrimitive?.longOrNull
-            maxInputTokens?.let { span.setAttribute("gen_ai.response.model.max_input_tokens", it) }
+            maxInputTokens?.let { span.setAttribute("anthropic.model.max_input_tokens", it) }
 
             data["max_output_tokens"]?.jsonPrimitive?.longOrNull?.let {
-                span.setAttribute("gen_ai.response.model.max_output_tokens", it)
+                span.setAttribute("anthropic.model.max_output_tokens", it)
             }
 
             data["capabilities"]?.jsonObject?.let { caps ->
                 caps["batch"]?.jsonPrimitive?.booleanOrNull?.let {
-                    span.setAttribute("gen_ai.response.model.capabilities.batch", it)
+                    span.setAttribute("anthropic.model.capabilities.batch", it)
                 }
                 caps["citations"]?.jsonPrimitive?.booleanOrNull?.let {
-                    span.setAttribute("gen_ai.response.model.capabilities.citations", it)
+                    span.setAttribute("anthropic.model.capabilities.citations", it)
                 }
                 caps["image_input"]?.jsonObject?.get("supported")?.jsonPrimitive?.booleanOrNull?.let {
-                    span.setAttribute("gen_ai.response.model.capabilities.vision", it)
+                    span.setAttribute("anthropic.model.capabilities.vision", it)
                 }
             }
 
@@ -306,13 +306,13 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
                 span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
             }
             usage["cache_creation_input_tokens"]?.jsonPrimitive?.intOrNull?.let {
-                span.setAttribute("gen_ai.usage.cache_creation.input_tokens", it.toLong())
+                span.setAttribute("anthropic.usage.cache_creation.input_tokens", it.toLong())
             }
             usage["cache_read_input_tokens"]?.jsonPrimitive?.intOrNull?.let {
-                span.setAttribute("gen_ai.usage.cache_read.input_tokens", it.toLong())
+                span.setAttribute("anthropic.usage.cache_read.input_tokens", it.toLong())
             }
             usage["service_tier"]?.jsonPrimitive?.let {
-                span.setAttribute("gen_ai.usage.service_tier", it.content)
+                span.setAttribute("anthropic.usage.service_tier", it.content)
             }
         }
 

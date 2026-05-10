@@ -146,7 +146,7 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
 
             val trace = analyzeSpans().first()
             assertEquals("claude-haiku-4-5", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
-            assertEquals("claude-haiku-4-5-20251001", trace.attributes[AttributeKey.stringKey("gen_ai.response.model.id")])
+            assertEquals("claude-haiku-4-5-20251001", trace.attributes[AttributeKey.stringKey("anthropic.model.id")])
         }
     }
 
@@ -170,8 +170,8 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
 
             val trace = analyzeSpans().first()
             assertEquals("claude-3-5-sonnet-20241022", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
-            assertEquals("Claude 3.5 Sonnet", trace.attributes[AttributeKey.stringKey("gen_ai.response.model.display_name")])
-            assertEquals(1724534400L, trace.attributes[AttributeKey.longKey("gen_ai.response.model.created_at")])
+            assertEquals("Claude 3.5 Sonnet", trace.attributes[AttributeKey.stringKey("anthropic.model.display_name")])
+            assertEquals(1724534400L, trace.attributes[AttributeKey.longKey("anthropic.model.created_at")])
             assertEquals(200000L, trace.attributes[AttributeKey.longKey("anthropic.model.context_window")])
         }
     }
@@ -196,8 +196,8 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
 
             val trace = analyzeSpans().first()
             assertEquals("claude-opus-4-5", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
-            assertEquals("Claude Opus 4.5", trace.attributes[AttributeKey.stringKey("gen_ai.response.model.display_name")])
-            assertEquals(1736985600L, trace.attributes[AttributeKey.longKey("gen_ai.response.model.created_at")])
+            assertEquals("Claude Opus 4.5", trace.attributes[AttributeKey.stringKey("anthropic.model.display_name")])
+            assertEquals(1736985600L, trace.attributes[AttributeKey.longKey("anthropic.model.created_at")])
             assertEquals(200000L, trace.attributes[AttributeKey.longKey("anthropic.model.context_window")])
         }
     }
@@ -220,8 +220,8 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
             ).execute().use { it.body?.string() }
 
             val trace = analyzeSpans().first()
-            assertEquals(200000L, trace.attributes[AttributeKey.longKey("gen_ai.response.model.max_input_tokens")])
-            assertEquals(8192L, trace.attributes[AttributeKey.longKey("gen_ai.response.model.max_output_tokens")])
+            assertEquals(200000L, trace.attributes[AttributeKey.longKey("anthropic.model.max_input_tokens")])
+            assertEquals(8192L, trace.attributes[AttributeKey.longKey("anthropic.model.max_output_tokens")])
         }
     }
 
@@ -244,9 +244,9 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
             ).execute().use { it.body?.string() }
 
             val trace = analyzeSpans().first()
-            assertTrue(trace.attributes[AttributeKey.booleanKey("gen_ai.response.model.capabilities.batch")] == true)
-            assertTrue(trace.attributes[AttributeKey.booleanKey("gen_ai.response.model.capabilities.citations")] == true)
-            assertTrue(trace.attributes[AttributeKey.booleanKey("gen_ai.response.model.capabilities.vision")] == true)
+            assertTrue(trace.attributes[AttributeKey.booleanKey("anthropic.model.capabilities.batch")] == true)
+            assertTrue(trace.attributes[AttributeKey.booleanKey("anthropic.model.capabilities.citations")] == true)
+            assertTrue(trace.attributes[AttributeKey.booleanKey("anthropic.model.capabilities.vision")] == true)
         }
     }
 
