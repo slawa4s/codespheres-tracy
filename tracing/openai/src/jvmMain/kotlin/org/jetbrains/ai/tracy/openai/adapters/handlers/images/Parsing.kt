@@ -86,7 +86,7 @@ internal fun handleStreamedImage(
             val manuallyParsedKeys = listOf("b64_json", "usage")
             for ((key, value) in data.entries) {
                 if (key !in manuallyParsedKeys) {
-                    span.setAttribute("gen_ai.response.$key", value.asString)
+                    span.setAttribute("tracy.response.$key", value.asString)
                 }
             }
         }
@@ -164,6 +164,6 @@ private fun setUsageAttributes(span: Span, usage: JsonObject) {
         span.setAttribute("gen_ai.usage.input_tokens_details", it.asString)
     }
     usage["total_tokens"]?.jsonPrimitive?.intOrNull?.let {
-        span.setAttribute(AttributeKey.longKey("gen_ai.usage.total_tokens"), it)
+        span.setAttribute(AttributeKey.longKey("tracy.usage.total_tokens"), it)
     }
 }
