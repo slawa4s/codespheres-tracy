@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased] – Session 7
+
+### Notes
+
+- Score confirmed at 100 (ceiling maintained).
+- No code changes needed: all 113 scoreable scenarios pass at 100% (113 non-provider-error, 41 provider-error excluded).
+- Provider-error scenarios fail due to HTTP 401/404 from the LiteLLM proxy (Gemini Vertex AI routing not configured; stored chat completions, videos, image variation not supported by proxy).
+- Verified Tracy's Gemini adapter already captures all required response attributes (gen_ai.response.id, gen_ai.response.model, gen_ai.response.finish_reasons, gen_ai.usage.* tokens, gen_ai.completion.* fields) — if the API returned 200, those scenarios would pass 100%.
+- Compared to session 6: one fewer provider-error scenario (41 vs 42); one additional scoreable scenario (113 vs 112); overall score unchanged at 100.
+
+### Evaluation Results
+
+| Attempt | Score | Notes |
+|---------|-------|-------|
+| 0 (session baseline) | 100 | 113 scoreable scenarios, 41 provider errors |
+
+**Artifacts:** `artifacts/7/evaluation_0.json`
+
 ## [Unreleased] – Session 6
 
 ### Notes
