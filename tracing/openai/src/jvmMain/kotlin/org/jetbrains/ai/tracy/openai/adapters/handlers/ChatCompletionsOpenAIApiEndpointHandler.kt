@@ -21,8 +21,10 @@ import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedacted
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
+import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.Json
@@ -31,6 +33,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -46,6 +49,13 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
+        span.setAttribute("openai.api.type", "chat_completions")
+        span.setAttribute(
+            AttributeKey.booleanKey("gen_ai.request.stream"),
+            body["stream"]?.jsonPrimitive?.booleanOrNull ?: false
+        )
 
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -197,6 +207,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
     }
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
@@ -320,7 +331,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "model",
         "tools",
         "choices",
-        "temperature"
+        "temperature",
+        "stream"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
