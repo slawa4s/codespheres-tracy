@@ -75,6 +75,8 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             return
         }
 
+        span.setAttribute("anthropic.api.type", "messages")
+
         val body = request.body.asJson()?.jsonObject ?: return
 
         body["temperature"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
