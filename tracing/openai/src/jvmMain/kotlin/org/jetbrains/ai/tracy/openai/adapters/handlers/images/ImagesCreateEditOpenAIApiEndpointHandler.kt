@@ -20,8 +20,15 @@ import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import java.util.*
 
@@ -133,6 +140,7 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
     }
 
     override fun handleStreaming(span: Span, events: String) {
+        var foundAnyEvent = false
         for (line in events.lineSequence()) {
             if (!line.startsWith("data:")) {
                 continue
@@ -144,11 +152,44 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                 null
             } ?: continue
 
+            foundAnyEvent = true
             handleStreamedImage(
                 span, data, extractor,
                 completedType = "image_edit.completed",
                 partialImageType = "image_edit.partial_image",
             )
+        }
+
+        // Fallback: proxy returned a non-SSE JSON response body for a streaming request.
+        if (!foundAnyEvent && events.isNotBlank()) {
+            val body = try {
+                Json.parseToJsonElement(events.trim()) as? JsonObject
+            } catch (_: Exception) { null } ?: return
+
+            (body["usage"] as? JsonObject)?.let { usage ->
+                (usage["input_tokens"] as? JsonPrimitive)?.intOrNull?.let {
+                    span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
+                }
+                (usage["output_tokens"] as? JsonPrimitive)?.intOrNull?.let {
+                    span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+                }
+            }
+
+            ((body["created_at"] ?: body["created"]) as? JsonPrimitive)?.longOrNull?.let {
+                span.setAttribute("tracy.response.created_at", it)
+            }
+
+            (body["data"] as? JsonArray)?.firstOrNull()?.let { first ->
+                if (first is JsonObject) {
+                    (first["b64_json"] as? JsonPrimitive)?.content?.let { b64 ->
+                        val content = Json.parseToJsonElement("""{"b64_json": "$b64"}""")
+                        span.setAttribute("gen_ai.completion.0.content", content.toString())
+                    }
+                    (first["url"] as? JsonPrimitive)?.content?.let {
+                        span.setAttribute("tracy.response.image.url", it)
+                    }
+                }
+            }
         }
     }
 

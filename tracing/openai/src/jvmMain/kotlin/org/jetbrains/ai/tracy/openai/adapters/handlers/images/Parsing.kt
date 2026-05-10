@@ -73,19 +73,22 @@ internal fun handleStreamedImage(
 
     when (type) {
         completedType -> {
-            val base64 = data["b64_json"]?.jsonPrimitive?.content ?: return
-            // install image data as JSON object: `{ "b64_json": "data" }`
-            val content = Json.parseToJsonElement(
-                """
-                {"b64_json": "$base64"}
-            """.trimIndent()
-            )
-            span.setAttribute("gen_ai.completion.0.content", content.asString.orRedactedOutput())
+            // b64_json may be absent for partial-image-only responses — don't return early
+            val base64 = data["b64_json"]?.jsonPrimitive?.content
+            if (base64 != null) {
+                // install image data as JSON object: `{ "b64_json": "data" }`
+                val content = Json.parseToJsonElement("""{"b64_json": "$base64"}""".trimIndent())
+                span.setAttribute("gen_ai.completion.0.content", content.asString.orRedactedOutput())
+            }
 
             (data["usage"] as? JsonObject)?.let { setUsageAttributes(span, it) }
 
+            // "created_at" and "created" are two names for the same timestamp field across API versions
+            val createdAt = (data["created_at"] ?: data["created"]) as? JsonPrimitive
+            createdAt?.longOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
+
             // insert other attributes using tracy.response.* prefix
-            val manuallyParsedKeys = listOf("b64_json", "usage")
+            val manuallyParsedKeys = listOf("b64_json", "usage", "type", "created_at", "created")
             for ((key, value) in data.entries) {
                 if (key !in manuallyParsedKeys) {
                     span.setAttribute("tracy.response.$key", value.asString)

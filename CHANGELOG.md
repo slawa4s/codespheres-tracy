@@ -1,5 +1,21 @@
 # Changelog
 
+## Session 2
+
+### OpenAI adapter improvements
+- `ImagesCreateEditOpenAIApiEndpointHandler`: added non-SSE JSON fallback in `handleStreaming` to extract `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, and `tracy.response.created_at` when the proxy returns a non-streaming JSON body for a streaming image-edit request
+- `ImagesCreateEditOpenAIApiEndpointHandler`: `handleStreamedImage` now handles both `created_at` and `created` field names for timestamp extraction across API versions; `b64_json` is optional — usage and timestamp are extracted even when absent
+- `ResponsesOpenAIApiEndpointHandler`: `tracy.response.error.type` now falls back to the HTTP status code string when `error["type"]` is JSON null (not a `JsonPrimitive`)
+
+### Core interceptor improvements
+- Binary responses with chunked transfer encoding (no `Content-Length` header) now correctly report `_response_content_length` by falling back to `peekBody().bytes().size`
+
+### Anthropic adapter improvements
+- When the Anthropic `content` array is empty but `stop_reason` is set and `output_tokens > 0`, `gen_ai.completion.0.content` is now set to the stop reason value (handles proxy responses that omit the content block)
+
+### Audio streaming fix
+- `AudioOpenAIApiEndpointHandler`: `tracy.response.stream.events.count` is now set to 1 for binary audio streaming responses that carry no SSE `data:` lines but have non-empty content
+
 ## Session 1
 
 ### Anthropic adapter improvements

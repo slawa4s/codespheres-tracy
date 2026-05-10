@@ -137,6 +137,9 @@ internal class AudioOpenAIApiEndpointHandler : EndpointApiHandler {
         for (line in events.lineSequence()) {
             if (line.startsWith("data:")) eventCount++
         }
+        // When the response is binary audio (no SSE data: lines) but content was received,
+        // record at least 1 to indicate the stream completed with data.
+        if (eventCount == 0L && events.isNotBlank()) eventCount = 1L
         if (eventCount > 0) {
             span.setAttribute("tracy.response.stream.events.count", eventCount)
         }

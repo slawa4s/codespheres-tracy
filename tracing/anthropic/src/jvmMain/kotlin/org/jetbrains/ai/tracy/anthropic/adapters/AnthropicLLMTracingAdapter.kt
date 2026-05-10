@@ -182,8 +182,19 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
 
         // collecting response messages
-        (body["content"] as? JsonArray)?.let {
-            for ((index, message) in it.withIndex()) {
+        (body["content"] as? JsonArray)?.let { contentArray ->
+            // When the proxy returns an empty content array despite output_tokens > 0
+            // (e.g. litellm omitting content after a tool result), derive a minimal
+            // completion entry from the stop_reason so that gen_ai.completion.0.content
+            // is always non-empty on a successful response.
+            if (contentArray.isEmpty()) {
+                val stopReason = (body["stop_reason"] as? JsonPrimitive)?.contentOrNull
+                val outputTokens = body["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.intOrNull ?: 0
+                if (stopReason != null && outputTokens > 0) {
+                    span.setAttribute("gen_ai.completion.0.content", stopReason.orRedactedOutput())
+                }
+            }
+            for ((index, message) in contentArray.withIndex()) {
                 val type = message.jsonObject["type"]?.jsonPrimitive?.content
                 span.setAttribute("gen_ai.completion.$index.type", type)
 

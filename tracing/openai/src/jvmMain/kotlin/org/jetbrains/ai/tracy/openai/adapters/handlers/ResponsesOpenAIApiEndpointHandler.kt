@@ -199,9 +199,10 @@ internal class ResponsesOpenAIApiEndpointHandler(
             (error["message"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.response.error.message", it)
             }
-            (error["type"] as? JsonPrimitive)?.contentOrNull?.let {
-                span.setAttribute("tracy.response.error.type", it)
-            }
+            // error["type"] may be JsonNull when the proxy omits the field; fall back to HTTP status
+            val errorType = (error["type"] as? JsonPrimitive)?.contentOrNull
+                ?: response.code.toString()
+            span.setAttribute("tracy.response.error.type", errorType)
             (error["code"] as? JsonPrimitive)?.contentOrNull?.let {
                 span.setAttribute("tracy.response.error.code", it)
             }
