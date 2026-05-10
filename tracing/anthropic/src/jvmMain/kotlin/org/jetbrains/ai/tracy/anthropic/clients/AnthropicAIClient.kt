@@ -111,6 +111,8 @@ import com.anthropic.client.AnthropicClient
  * ## Notes
  * - This function is **idempotent**: calling `instrument()` multiple times on the same client
  *   will not result in duplicate tracing.
+ * - Both the top-level message service and the batch service (`BatchServiceImpl`) are patched,
+ *   since they hold separate `OkHttpClient` instances internally.
  * - Tracing can be controlled globally via `TracingManager.isTracingEnabled`.
  * - Content capture policies can be configured via `TracingManager.withCapturingPolicy(policy)`
  *   to redact sensitive input/output data.
@@ -124,8 +126,12 @@ import com.anthropic.client.AnthropicClient
  * @see TracingManager.traceSensitiveContent
  */
 fun instrument(client: AnthropicClient) {
-    patchOpenAICompatibleClient(
-        client = client,
-        interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
-    )
+    val interceptor = OpenTelemetryOkHttpInterceptor(adapter = AnthropicLLMTracingAdapter())
+    patchOpenAICompatibleClient(client = client, interceptor = interceptor)
+    // BatchServiceImpl holds a separate OkHttpClient instance that must also be patched.
+    try {
+        patchOpenAICompatibleClient(client = client.messages().batches(), interceptor = interceptor)
+    } catch (_: Exception) {
+        // Tolerate structural differences across SDK versions.
+    }
 }

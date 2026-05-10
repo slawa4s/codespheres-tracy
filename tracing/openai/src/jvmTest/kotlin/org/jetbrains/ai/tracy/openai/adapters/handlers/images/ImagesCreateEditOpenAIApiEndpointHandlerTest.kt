@@ -6,8 +6,10 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.images
 
 import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
+import org.jetbrains.ai.tracy.openai.adapters.OpenAILLMTracingAdapter
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.jetbrains.ai.tracy.test.utils.MediaContentAttributeValues
 import org.jetbrains.ai.tracy.test.utils.MediaSource
@@ -19,6 +21,13 @@ import com.openai.models.images.ImageModel
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import mu.KotlinLogging
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -402,6 +411,151 @@ class ImagesCreateEditOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             }
         }
         verifyMediaContentUploadAttributes(trace, expected = mediaContentUploads)
+    }
+
+    @Test
+    fun `image edit sets operation name, output type, and image size_bytes`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"data":[{"url":"https://example.com/result.png"}]}""")
+            )
+
+            val imageBytes = ByteArray(2048) { it.toByte() }
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("model", "dall-e-2")
+                .addFormDataPart("prompt", "Add a cat")
+                .addFormDataPart(
+                    "image", "source.png",
+                    imageBytes.toRequestBody("image/png".toMediaType())
+                )
+                .build()
+
+            buildRawClient().newCall(
+                Request.Builder()
+                    .url(server.url("/v1/images/edits"))
+                    .post(body)
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+            assertEquals(2048L, trace.attributes[AttributeKey.longKey("tracy.request.image.0.size_bytes")])
+        }
+    }
+
+    @Test
+    fun `image edit maps unknown form fields to tracy namespace`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"data":[{"url":"https://example.com/result.png"}]}""")
+            )
+
+            val textPlain = "text/plain; charset=utf-8".toMediaType()
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("model", null, "dall-e-2".toRequestBody(textPlain))
+                .addFormDataPart("prompt", null, "Add a cat".toRequestBody(textPlain))
+                .addFormDataPart("n", null, "2".toRequestBody(textPlain))
+                .addFormDataPart("size", null, "512x512".toRequestBody(textPlain))
+                .addFormDataPart(
+                    "image", "source.png",
+                    ByteArray(64).toRequestBody("image/png".toMediaType())
+                )
+                .build()
+
+            buildRawClient().newCall(
+                Request.Builder()
+                    .url(server.url("/v1/images/edits"))
+                    .post(body)
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("2", trace.attributes[AttributeKey.stringKey("tracy.request.n")])
+            assertEquals("512x512", trace.attributes[AttributeKey.stringKey("tracy.request.size")])
+            assertNull(
+                trace.attributes[AttributeKey.stringKey("gen_ai.request.n")],
+                "Unknown form fields must not use gen_ai.request.* namespace"
+            )
+        }
+    }
+
+    @Test
+    fun `image edit response sets tracy_response_created from top-level created field`() = runTest {
+        withMockServer { server ->
+            server.enqueueImageEditUrlResponse(created = 1700000042L, imageUrl = "https://example.com/img.png")
+
+            buildRawClient().newCall(
+                Request.Builder()
+                    .url(server.url("/v1/images/edits"))
+                    .post(buildImageEditMultipartBody())
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("1700000042", trace.attributes[AttributeKey.stringKey("tracy.response.created")])
+        }
+    }
+
+    @Test
+    fun `image edit response sets tracy_response_image_url for each URL-type image in data array`() = runTest {
+        withMockServer { server ->
+            val url0 = "https://example.com/img0.png"
+            val url1 = "https://example.com/img1.png"
+            server.enqueueImageEditUrlResponse(created = 1700000001L, imageUrl = url0, extraImageUrl = url1)
+
+            buildRawClient().newCall(
+                Request.Builder()
+                    .url(server.url("/v1/images/edits"))
+                    .post(buildImageEditMultipartBody())
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals(url0, trace.attributes[AttributeKey.stringKey("tracy.response.image.0.url")])
+            assertEquals(url1, trace.attributes[AttributeKey.stringKey("tracy.response.image.1.url")])
+        }
+    }
+
+    // ===== MockWebServer helpers =====
+
+    private fun buildRawClient(): OkHttpClient =
+        instrument(OkHttpClient(), OpenAILLMTracingAdapter())
+
+    private fun buildImageEditMultipartBody(): MultipartBody =
+        MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("model", "dall-e-2")
+            .addFormDataPart("prompt", "a cat")
+            .addFormDataPart(
+                "image", "image.png",
+                ByteArray(64).toRequestBody("image/png".toMediaType())
+            )
+            .build()
+
+    private fun MockWebServer.enqueueImageEditUrlResponse(
+        created: Long,
+        imageUrl: String,
+        extraImageUrl: String? = null,
+    ) {
+        val images = buildList {
+            add("""{"url":"$imageUrl"}""")
+            if (extraImageUrl != null) add("""{"url":"$extraImageUrl"}""")
+        }.joinToString(",")
+        enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"created":$created,"data":[$images]}""")
+        )
     }
 
     private fun image(filepath: String, contentType: String): MultipartField<ImageEditParams.Image> {
