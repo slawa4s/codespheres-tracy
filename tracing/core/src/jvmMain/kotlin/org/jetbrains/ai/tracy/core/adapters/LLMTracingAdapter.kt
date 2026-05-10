@@ -69,7 +69,17 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
 
     fun registerResponse(span: Span, response: TracyHttpResponse): Unit =
         runCatching {
-            val body = response.body.asJson()?.jsonObject ?: return
+            // Always capture HTTP status and error attributes, even if the body is empty or non-JSON.
+            span.setAttribute("http.response.status_code", response.code.toLong())
+
+            if (response.isError()) {
+                getResponseErrorBodyAttributes(span, response.body)
+                span.setStatus(StatusCode.ERROR)
+            } else {
+                span.setStatus(StatusCode.OK)
+            }
+
+            val body = response.body.asJson()?.jsonObject ?: return@runCatching
             val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
             val mimeType = response.contentType?.mimeType
 
@@ -87,15 +97,6 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
                         span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
                     }
                 }
-            }
-
-            span.setAttribute("http.response.status_code", response.code.toLong())
-
-            if (response.isError()) {
-                getResponseErrorBodyAttributes(span, response.body)
-                span.setStatus(StatusCode.ERROR)
-            } else {
-                span.setStatus(StatusCode.OK)
             }
 
             val spanData = (span as? ReadableSpan)?.toSpanData() ?: return@runCatching
