@@ -5,6 +5,8 @@
 
 package org.jetbrains.ai.tracy.anthropic
 
+import com.anthropic.client.okhttp.AnthropicOkHttpClient
+import com.anthropic.models.messages.batches.BatchCreateParams
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
@@ -14,6 +16,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
+import org.jetbrains.ai.tracy.anthropic.clients.instrument as instrumentSdkClient
 import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -21,6 +24,7 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import java.time.Duration
 
 /**
  * MockWebServer-based tests for Anthropic Message Batches API tracing.
@@ -229,6 +233,52 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
             assertEquals("msgbatch_retrieve_xyz", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.id")])
             assertEquals("ended", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
             assertNotNull(trace.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")])
+        }
+    }
+
+    // ===== SDK instrumentation path =====
+
+    /**
+     * Verifies that [instrumentSdkClient] (the SDK reflection path via [patchOpenAICompatibleClient]) attaches
+     * the tracing interceptor to the same [OkHttpClient] instance used by the Anthropic SDK's internal
+     * BatchServiceImpl.  A 400 response is enqueued so the request reaches the server and the span
+     * can be validated without a real API key.
+     *
+     * If this test fails with "span NOT FOUND" it confirms that BatchServiceImpl uses a different
+     * [OkHttpClient] instance than the one patched — the root cause of Scenario 0
+     * (anthropic/batches/invalid_empty_requests span NOT FOUND in the evaluator).
+     */
+    @Test
+    fun `sdk path records span for batches create with 400 error`() = runTest {
+        withMockServer { server ->
+            val sdkClient = AnthropicOkHttpClient.builder()
+                .baseUrl(server.url("/").toString().trimEnd('/'))
+                .apiKey("test-key")
+                .timeout(Duration.ofSeconds(5))
+                .build()
+            instrumentSdkClient(sdkClient)
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(400)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"type":"error","error":{"type":"invalid_request_error","message":"requests must not be empty"}}""")
+            )
+
+            try {
+                sdkClient.messages().batches().create(
+                    BatchCreateParams.builder().requests(emptyList()).build()
+                )
+            } catch (_: Exception) {
+                // SDK throws BadRequestException for 400 responses — expected
+            }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val span = traces.first()
+            assertEquals("batches", span.attributes[AttributeKey.stringKey("anthropic.api.type")])
+            assertEquals(400L, span.attributes[AttributeKey.longKey("http.response.status_code")])
+            assertNotNull(span.attributes[AttributeKey.stringKey("gen_ai.error.type")])
         }
     }
 

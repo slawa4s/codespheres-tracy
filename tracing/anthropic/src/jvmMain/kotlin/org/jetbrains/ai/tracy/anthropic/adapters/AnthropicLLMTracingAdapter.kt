@@ -24,14 +24,14 @@ import mu.KotlinLogging
 /**
  * Tracing adapter for Anthropic Claude API.
  *
- * Parses Anthropic Messages API and Message Batches API requests and responses to extract
- * telemetry data including model parameters, messages, tool definitions, tool calls, usage
+ * Parses Anthropic Messages API, Message Batches API, and Models API requests and responses to
+ * extract telemetry data including model parameters, messages, tool definitions, tool calls, usage
  * statistics, and media content. Supports both text and multimodal inputs (images, documents).
  *
- * Sets `anthropic.api.type` to `"messages"` or `"batches"` on every span, and sets
- * `gen_ai.operation.name` to `"chat"` for the Messages API or to the appropriate batch
- * operation name (`batches.create`, `batches.retrieve`, `batches.cancel`, `batches.results`)
- * for the Batches API.
+ * Sets `anthropic.api.type` to `"messages"`, `"batches"`, or `"models"` on every span, and sets
+ * `gen_ai.operation.name` to `"chat"` for the Messages API, to the appropriate batch operation
+ * name (`batches.create`, `batches.retrieve`, `batches.cancel`, `batches.results`) for the Batches
+ * API, or to `"models.list"` / `"models.retrieve"` for the Models API.
  *
  * ## Example Usage
  * ```kotlin
@@ -59,9 +59,18 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         span.setAttribute("anthropic.api.type", apiType)
         span.setAttribute(
             GEN_AI_OPERATION_NAME,
-            if (apiType == "batches") detectBatchOperationName(request.url, request.method)
-            else "chat"
+            when (apiType) {
+                "batches" -> detectBatchOperationName(request.url, request.method)
+                "models" -> detectModelsOperationName(request.url)
+                else -> "chat"
+            }
         )
+
+        if (apiType == "models") {
+            val modelId = request.url.pathSegments.dropWhile { it != "models" }.drop(1).firstOrNull()
+            modelId?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it) }
+            return
+        }
 
         val body = request.body.asJson()?.jsonObject ?: return
 
@@ -149,6 +158,16 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         val body = response.body.asJson()?.jsonObject ?: return
 
         val apiType = detectApiType(response.url)
+
+        if (apiType == "models") {
+            val data = body["data"]?.jsonArray?.firstOrNull()?.jsonObject ?: body
+            data["id"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+            data["display_name"]?.jsonPrimitive?.content?.let { span.setAttribute("anthropic.model.display_name", it) }
+            data["created_at"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("anthropic.model.created_at", it) }
+            data["context_window"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("anthropic.model.context_window", it) }
+            return
+        }
+
         if (apiType == "batches" || body["type"]?.jsonPrimitive?.contentOrNull == "message_batch") {
             body["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("gen_ai.response.batch.id", it) }
             body["processing_status"]?.jsonPrimitive?.contentOrNull?.let {
@@ -392,10 +411,27 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     /**
      * Returns `"batches"` when the URL targets the Message Batches API (path contains `"batches"`),
+     * `"models"` when the URL targets the Models API (path contains `"models"`),
      * or `"messages"` for the standard Messages API.
      */
-    private fun detectApiType(url: TracyHttpUrl): String =
-        if (url.pathSegments.contains("batches")) "batches" else "messages"
+    private fun detectApiType(url: TracyHttpUrl): String = when {
+        url.pathSegments.contains("batches") -> "batches"
+        url.pathSegments.contains("models") -> "models"
+        else -> "messages"
+    }
+
+    /**
+     * Determines the gen_ai.operation.name for a Models API URL.
+     *
+     * Anthropic models routes:
+     * - `GET /v1/models`            → `models.list`
+     * - `GET /v1/models/{model_id}` → `models.retrieve`
+     */
+    private fun detectModelsOperationName(url: TracyHttpUrl): String {
+        val modelsIdx = url.pathSegments.indexOf("models")
+        val after = url.pathSegments.drop(modelsIdx + 1).filter { it.isNotEmpty() }
+        return if (after.isEmpty()) "models.list" else "models.retrieve"
+    }
 
     /**
      * Determines the gen_ai.operation.name for a Batches API URL.

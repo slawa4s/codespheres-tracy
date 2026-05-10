@@ -8,6 +8,7 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
+import org.jetbrains.ai.tracy.openai.adapters.OpenAILLMTracingAdapter
 import org.jetbrains.ai.tracy.openai.adapters.containsToolCall
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.jetbrains.ai.tracy.test.utils.MediaSource
@@ -18,6 +19,12 @@ import com.openai.models.ChatModel
 import com.openai.models.responses.*
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -684,5 +691,115 @@ class ResponsesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         }.build()
 
         return ResponseInputContent.ofInputFile(file)
+    }
+
+    // ===== Mock-server-based attribute tests =====
+
+    @Test
+    fun `responses API sets gen_ai operation name and openai api type`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """{"id":"resp_001","object":"response","model":"gpt-4o-mini","output":[],"usage":{"input_tokens":10,"output_tokens":5}}"""
+                    )
+            )
+
+            val client = buildMockClient()
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/responses"))
+                    .addHeader("Authorization", "Bearer MOCK_API_KEY")
+                    .post(
+                        """{"model":"gpt-4o-mini","input":"Hello"}"""
+                            .toRequestBody("application/json".toMediaType())
+                    )
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("responses", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+        }
+    }
+
+    @Test
+    fun `response object field is emitted as tracy_response_object`() = runTest {
+        withMockServer { server ->
+            server.enqueueResponsesApiResponse(objectType = "response")
+
+            val client = buildMockClient()
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/responses"))
+                    .post("""{"model":"gpt-4o-mini","input":"hi"}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            // populateUnmappedAttributes stores JsonElement.toString(), so string values retain JSON quotes
+            assertEquals(
+                "\"response\"",
+                trace.attributes[AttributeKey.stringKey("tracy.response.object")],
+                "tracy.response.object must be emitted from the 'object' field in the Responses API response body"
+            )
+        }
+    }
+
+    @Test
+    fun `streaming response done event sets response id, model, status and usage attributes`() = runTest {
+        withMockServer { server ->
+            server.enqueueStreamingResponseDone()
+
+            val client = buildMockClient()
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/responses"))
+                    .post("""{"model":"gpt-4o-mini","stream":true,"input":"hello"}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("resp_abc", trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
+            assertEquals("gpt-4o-mini", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
+            assertEquals("completed", trace.attributes[AttributeKey.stringKey("tracy.response.status")])
+            assertEquals("response", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+            assertEquals(1700000000L, trace.attributes[AttributeKey.longKey("tracy.response.created_at")])
+            assertEquals(1700000010L, trace.attributes[AttributeKey.longKey("tracy.response.completed_at")])
+            assertEquals(10L, trace.attributes[AttributeKey.longKey("gen_ai.usage.input_tokens")])
+            assertEquals(5L, trace.attributes[AttributeKey.longKey("gen_ai.usage.output_tokens")])
+        }
+    }
+
+    private fun buildMockClient(): OkHttpClient =
+        org.jetbrains.ai.tracy.core.instrument(OkHttpClient(), OpenAILLMTracingAdapter())
+
+    private fun MockWebServer.enqueueResponsesApiResponse(objectType: String = "response") {
+        enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(
+                    """{"id":"resp_abc","object":"$objectType","created_at":1700000000,"model":"gpt-4o-mini","output":[{"type":"message","role":"assistant","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"Hello!","annotations":[]}]}],"usage":{"input_tokens":10,"output_tokens":5}}"""
+                )
+        )
+    }
+
+    private fun MockWebServer.enqueueStreamingResponseDone() {
+        val sseBody = buildString {
+            appendLine("""data: {"type":"response.output_text.done","text":"Hello!"}""")
+            appendLine()
+            appendLine("""data: {"type":"response.done","response":{"id":"resp_abc","model":"gpt-4o-mini","status":"completed","object":"response","created_at":1700000000,"completed_at":1700000010,"usage":{"input_tokens":10,"output_tokens":5}}}""")
+            appendLine()
+            appendLine("data: [DONE]")
+        }
+        enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody(sseBody)
+        )
     }
 }
