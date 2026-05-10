@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Anthropic batch span attribute namespace: moved `gen_ai.response.batch.id`, `gen_ai.response.batch.processing_status`, `gen_ai.response.batch.created_at`, `gen_ai.response.batch.expires_at`, `gen_ai.response.batch.request_counts.*`, and `gen_ai.request.batch.size` to the `anthropic.*` namespace (`anthropic.batch.id`, `anthropic.batch.processing_status`, `anthropic.batch.created_at`, `anthropic.batch.expires_at`, `anthropic.batch.request_counts.*`, `anthropic.batch.request.size`) as these are not registered OTel GenAI semantic convention attributes.
+
 - Fixed silent exception swallow in `instrument(AnthropicClient)`: the `BatchServiceImpl` patch failure now logs a warning via `logger.warn` and falls back to `tryPatchAllOkHttpClients`, which walks the batch service's class hierarchy to find and patch every `OkHttpClient`-typed field directly, covering SDK versions where `BatchServiceImpl` does not expose `clientOptions`.
 - Added OpenAI Audio Speech (`/v1/audio/speech`) tracing: new `AUDIO_SPEECH` dispatch entry and `AudioSpeechOpenAIApiEndpointHandler` set `gen_ai.operation.name = "audio.speech"`, `gen_ai.output.type = "speech"`, `gen_ai.request.model`, `tracy.request.voice`, `tracy.request.response_format`, and `tracy.request.speed` from the JSON request body; `/v1/audio/transcriptions` is unaffected.
 - Enhanced non-JSON response handling in `OpenTelemetryOkHttpInterceptor`: binary responses (e.g., audio speech) now embed `tracy.response.body.size_bytes` in the JSON stub passed to `registerResponse`, enabling handlers such as the audio speech handler to report response size without interface changes.
