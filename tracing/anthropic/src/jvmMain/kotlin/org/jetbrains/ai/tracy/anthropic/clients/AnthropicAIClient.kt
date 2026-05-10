@@ -137,13 +137,11 @@ fun instrument(client: AnthropicClient) {
     try {
         patchOpenAICompatibleClient(client = client.messages(), interceptor = interceptor)
     } catch (e: Exception) {
-        logger.error(e) { "Failed to patch Anthropic messages() HTTP client; batches tracing will be missing" }
-        throw e
+        logger.warn(e) { "Failed to patch Anthropic messages() HTTP client; batches tracing may be missing" }
     }
     try {
         patchOpenAICompatibleClient(client = client.messages().batches(), interceptor = interceptor)
     } catch (e: Exception) {
-        logger.error(e) { "Failed to patch Anthropic messages().batches() HTTP client; batches tracing will be missing" }
-        throw e
+        logger.warn(e) { "Failed to patch Anthropic messages().batches() HTTP client; batches tracing may be missing" }
     }
 }

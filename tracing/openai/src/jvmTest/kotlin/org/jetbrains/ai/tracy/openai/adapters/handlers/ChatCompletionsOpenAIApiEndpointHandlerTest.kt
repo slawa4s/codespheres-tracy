@@ -6,8 +6,10 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers
 
 import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
+import org.jetbrains.ai.tracy.openai.adapters.OpenAILLMTracingAdapter
 import org.jetbrains.ai.tracy.openai.adapters.containsToolCall
 import org.jetbrains.ai.tracy.openai.adapters.name
 import org.jetbrains.ai.tracy.openai.clients.instrument
@@ -22,7 +24,16 @@ import com.openai.models.embeddings.EmbeddingCreateParams
 import com.openai.models.embeddings.EmbeddingModel
 import com.openai.models.responses.ResponseCreateParams
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_FINISH_REASONS
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
 import kotlinx.coroutines.test.runTest
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -32,6 +43,8 @@ import org.junit.jupiter.params.provider.MethodSource
 import java.time.Duration
 import kotlin.jvm.optionals.getOrNull
 import kotlin.time.Duration.Companion.minutes
+
+private const val MOCK_API_KEY = "mock-api-key"
 
 @Tag("openai")
 class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
@@ -577,6 +590,84 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             .text(prompt)
             .build()
     )
+
+    // ---- MockWebServer-based unit tests (no real API key required) ----
+
+    private fun MockWebServer.makeInstrumentedClient(): OkHttpClient =
+        instrument(OkHttpClient(), OpenAILLMTracingAdapter()).newBuilder().build()
+
+    @Test
+    fun `streamingRequestSetsOperationNameApiTypeAndStreamFlag`() = runTest {
+        withMockServer { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """{"id":"chatcmpl-x","object":"chat.completion","model":"gpt-4o-mini","choices":[]}"""
+                    )
+            )
+
+            val client = server.makeInstrumentedClient()
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/chat/completions"))
+                    .post(
+                        """{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"stream":true}"""
+                            .toRequestBody("application/json".toMediaType())
+                    )
+                    .header("Authorization", "Bearer $MOCK_API_KEY")
+                    .build()
+            ).execute().close()
+
+            val trace = analyzeSpans().first()
+            assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("chat_completions", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+            assertEquals(true, trace.attributes[AttributeKey.booleanKey("gen_ai.request.stream")])
+        }
+    }
+
+    @Test
+    fun `streamingResponseSetsResponseIdModelAndFinishReasons`() = runTest {
+        withMockServer { server ->
+            val sseBody = buildString {
+                appendLine("""data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}""")
+                appendLine()
+                appendLine("""data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}""")
+                appendLine()
+                appendLine("""data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}""")
+                appendLine()
+                appendLine("data: [DONE]")
+            }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody(sseBody)
+            )
+
+            val client = instrument(OkHttpClient(), OpenAILLMTracingAdapter())
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/chat/completions"))
+                    .post(
+                        """{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"hi"}]}"""
+                            .toRequestBody("application/json".toMediaType())
+                    )
+                    .header("Authorization", "Bearer $MOCK_API_KEY")
+                    .build()
+            ).execute().use { response ->
+                response.body?.string()
+            }
+
+            val trace = analyzeSpans().first()
+            assertEquals("chatcmpl-test123", trace.attributes[GEN_AI_RESPONSE_ID])
+            assertEquals("gpt-4o-mini", trace.attributes[GEN_AI_RESPONSE_MODEL])
+            assertEquals(listOf("stop"), trace.attributes[GEN_AI_RESPONSE_FINISH_REASONS])
+        }
+    }
 
     private fun partImage(media: MediaSource): ChatCompletionContentPart {
         val url = when (media) {

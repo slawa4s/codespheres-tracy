@@ -186,8 +186,8 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
 
             assertEquals(
                 "msgbatch_abc123",
-                span!!.attributes[AttributeKey.stringKey("anthropic.batch.id")],
-                "anthropic.batch.id should be set from batch response id"
+                span!!.attributes[AttributeKey.stringKey("gen_ai.response.batch.id")],
+                "gen_ai.response.batch.id should be set from batch response id"
             )
             assertEquals(
                 "message_batch",
@@ -196,43 +196,43 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             )
             assertEquals(
                 "in_progress",
-                span.attributes[AttributeKey.stringKey("anthropic.batch.processing_status")],
-                "anthropic.batch.processing_status should be set"
+                span.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")],
+                "gen_ai.response.batch.processing_status should be set"
             )
             assertEquals(
                 1714404061L,
-                span.attributes[AttributeKey.longKey("anthropic.batch.created_at")],
-                "anthropic.batch.created_at should be set"
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.created_at")],
+                "gen_ai.response.batch.created_at should be set"
             )
             assertEquals(
                 1714490461L,
-                span.attributes[AttributeKey.longKey("anthropic.batch.expires_at")],
-                "anthropic.batch.expires_at should be set"
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.expires_at")],
+                "gen_ai.response.batch.expires_at should be set"
             )
             assertEquals(
                 5L,
-                span.attributes[AttributeKey.longKey("anthropic.batch.request_counts.processing")],
-                "anthropic.batch.request_counts.processing should be set"
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.processing")],
+                "gen_ai.response.batch.request_counts.processing should be set"
             )
             assertEquals(
                 2L,
-                span.attributes[AttributeKey.longKey("anthropic.batch.request_counts.succeeded")],
-                "anthropic.batch.request_counts.succeeded should be set"
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")],
+                "gen_ai.response.batch.request_counts.succeeded should be set"
             )
             assertEquals(
                 1L,
-                span.attributes[AttributeKey.longKey("anthropic.batch.request_counts.errored")],
-                "anthropic.batch.request_counts.errored should be set"
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.errored")],
+                "gen_ai.response.batch.request_counts.errored should be set"
             )
             assertEquals(
                 0L,
-                span.attributes[AttributeKey.longKey("anthropic.batch.request_counts.canceled")],
-                "anthropic.batch.request_counts.canceled should be set"
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.canceled")],
+                "gen_ai.response.batch.request_counts.canceled should be set"
             )
             assertEquals(
                 0L,
-                span.attributes[AttributeKey.longKey("anthropic.batch.request_counts.expired")],
-                "anthropic.batch.request_counts.expired should be set"
+                span.attributes[AttributeKey.longKey("gen_ai.response.batch.request_counts.expired")],
+                "gen_ai.response.batch.request_counts.expired should be set"
             )
         }
     }
@@ -272,8 +272,8 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
 
             assertEquals(
                 2L,
-                trace!!.attributes[AttributeKey.longKey("anthropic.batch.size")],
-                "anthropic.batch.size should equal the number of entries in the requests array"
+                trace!!.attributes[AttributeKey.longKey("gen_ai.request.batch.size")],
+                "gen_ai.request.batch.size should equal the number of entries in the requests array"
             )
         }
     }
