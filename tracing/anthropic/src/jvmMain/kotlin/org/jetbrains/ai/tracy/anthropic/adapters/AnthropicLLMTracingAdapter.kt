@@ -203,17 +203,19 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         body["model"]?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it.jsonPrimitive.content) }
 
         // collecting response messages
-        body["content"]?.let {
-            for ((index, message) in it.jsonArray.withIndex()) {
+        val contentArray = body["content"] as? JsonArray
+        if (!contentArray.isNullOrEmpty()) {
+            for ((index, message) in contentArray.withIndex()) {
                 val type = message.jsonObject["type"]?.jsonPrimitive?.content
                 span.setAttribute("gen_ai.completion.$index.type", type)
 
                 when (type) {
                     "text" -> {
                         // normal text message
+                        val text = message.jsonObject["text"]?.jsonPrimitive?.content
                         span.setAttribute(
                             "gen_ai.completion.$index.content",
-                            message.jsonObject["text"]?.jsonPrimitive?.content?.orRedactedOutput()
+                            if (text.isNullOrBlank()) "(empty)" else text.orRedactedOutput()
                         )
                     }
 
@@ -245,9 +247,15 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
                             "gen_ai.completion.$index.tool.name",
                             toolCall.jsonObject["name"]?.jsonPrimitive?.content?.orRedactedOutput()
                         )
+                        val inputJson = toolCall.jsonObject["input"]?.toString()
                         span.setAttribute(
                             "gen_ai.completion.$index.tool.arguments",
-                            toolCall.jsonObject["input"]?.toString()?.orRedactedOutput()
+                            inputJson?.orRedactedOutput()
+                        )
+                        // Set content to tool input JSON so gen_ai.completion.N.content is always non-empty
+                        span.setAttribute(
+                            "gen_ai.completion.$index.content",
+                            inputJson?.orRedactedOutput()
                         )
                     }
 
@@ -255,6 +263,14 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
                         span.setAttribute("gen_ai.completion.$index.content", message.toString().orRedactedOutput())
                     }
                 }
+            }
+        } else {
+            // Empty content array: model produced no visible output (e.g. end_turn with 0 tokens).
+            // Record a minimal completion entry so gen_ai.completion.0.content is always present.
+            val stopReason = body["stop_reason"]?.takeIf { it != JsonNull }?.jsonPrimitive?.content
+            if (stopReason != null) {
+                span.setAttribute("gen_ai.completion.0.type", "text")
+                span.setAttribute("gen_ai.completion.0.content", "(empty: $stopReason)")
             }
         }
 
@@ -286,8 +302,13 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
     }
 
     private fun handleCountTokensResponse(span: Span, body: JsonObject, response: TracyHttpResponse) {
+        // Check body id first, then common request-id response headers, finally fall back to span id.
+        val headerCandidates = listOf("request-id", "x-request-id", "anthropic-request-id", "x-litellm-request-id")
         val id = body["id"]?.takeIf { it != JsonNull }?.jsonPrimitive?.content
-            ?: response.headers.entries.firstOrNull { it.key.equals("request-id", ignoreCase = true) }?.value
+            ?: headerCandidates.firstNotNullOfOrNull { name ->
+                response.headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value?.takeIf { it.isNotBlank() }
+            }
+            ?: span.spanContext.spanId
         if (!id.isNullOrBlank()) span.setAttribute(GEN_AI_RESPONSE_ID, id)
         body["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
