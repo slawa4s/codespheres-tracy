@@ -7,6 +7,7 @@ package org.jetbrains.ai.tracy.anthropic.adapters
 
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.AnthropicBatchesEndpointHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.AnthropicMessagesEndpointHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.AnthropicModelsEndpointHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
@@ -20,13 +21,18 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Detects which Anthropic API endpoint is being called based on the request URL.
  *
- * BATCHES must appear before MESSAGES so that `detect` matches the longer route first;
- * both routes contain the "messages" substring.
+ * Ordering matters: BATCHES must appear before MESSAGES because "messages/batches" contains
+ * "messages". MODELS must appear before MESSAGES to prevent model IDs containing "messages"
+ * from being misrouted to the messages handler.
  */
 private enum class AnthropicApiType(val route: String) {
     // See: https://docs.anthropic.com/en/api/creating-message-batches
     // Must be checked before MESSAGES because "messages/batches" contains "messages".
     BATCHES("messages/batches"),
+
+    // See: https://docs.anthropic.com/en/api/models
+    // Must be checked before MESSAGES to avoid false matches on model IDs containing "messages".
+    MODELS("models"),
 
     // See: https://docs.anthropic.com/en/api/messages
     MESSAGES("messages");
@@ -46,6 +52,7 @@ private enum class AnthropicApiType(val route: String) {
  * extraction to the appropriate per-endpoint handler:
  * - [AnthropicMessagesEndpointHandler] for `POST /v1/messages`
  * - [AnthropicBatchesEndpointHandler] for `/v1/messages/batches` (create / retrieve / cancel)
+ * - [AnthropicModelsEndpointHandler] for `/v1/models` (list) and `/v1/models/{id}` (retrieve)
  *
  * ## Example Usage
  * ```kotlin
@@ -95,6 +102,9 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             }
             AnthropicApiType.BATCHES -> handlers.getOrPut(AnthropicApiType.BATCHES) {
                 AnthropicBatchesEndpointHandler()
+            }
+            AnthropicApiType.MODELS -> handlers.getOrPut(AnthropicApiType.MODELS) {
+                AnthropicModelsEndpointHandler()
             }
         }
     }
