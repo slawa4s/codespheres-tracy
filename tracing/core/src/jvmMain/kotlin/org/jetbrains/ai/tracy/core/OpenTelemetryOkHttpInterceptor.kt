@@ -147,6 +147,10 @@ fun instrument(client: OkHttpClient, adapter: LLMTracingAdapter): OkHttpClient {
  * The patch is idempotent: if an interceptor of the same class is already registered on the
  * current [OkHttpClient], the holder is left unchanged.
  *
+ * The HTTP-client holder field is looked up by name in the order `"originalHttpClient"` →
+ * `"httpClient"` → `"client"`, so sub-clients that use a different internal field name (e.g.
+ * the Anthropic batches sub-client) are patched correctly without requiring separate code paths.
+ *
  * Supports OpenAI-compatible (**in terms of internal class structure**) clients.
  *
  * @param client The instance of the OpenAI-compatible client to patch.
@@ -159,7 +163,15 @@ fun <T> patchOpenAICompatibleClient(client: T, interceptor: Interceptor) {
         // Some SDK sub-clients store their options under "options" rather than "clientOptions".
         getFieldValue(client as Any, "options")
     }
-    val originalHttpClient = getFieldValue(clientOptions, "originalHttpClient")
+    val originalHttpClient = try {
+        getFieldValue(clientOptions, "originalHttpClient")
+    } catch (_: NoSuchFieldException) {
+        try {
+            getFieldValue(clientOptions, "httpClient")
+        } catch (_: NoSuchFieldException) {
+            getFieldValue(clientOptions, "client")
+        }
+    }
 
     val okHttpHolder = if (originalHttpClient::class.simpleName == "OkHttpClient") {
         originalHttpClient
