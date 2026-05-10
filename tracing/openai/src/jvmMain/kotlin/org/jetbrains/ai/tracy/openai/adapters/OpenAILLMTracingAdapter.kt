@@ -13,6 +13,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiE
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranscriptionOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranslationOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.ConversationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
@@ -34,6 +35,11 @@ private enum class OpenAIApiType(val route: String) {
     // Must be checked before CHAT_COMPLETIONS so that "conversations" paths are not accidentally
     // matched by the shorter "completions" substring.
     CONVERSATIONS("conversations"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createTranslation
+    // Must be checked before AUDIO_TRANSCRIPTIONS so that "audio/translations" is not accidentally
+    // matched by the shorter "audio/transcriptions" substring check order.
+    AUDIO_TRANSLATIONS("audio/translations"),
 
     // See: https://platform.openai.com/docs/api-reference/audio/createTranscription
     // Must be checked before CHAT_COMPLETIONS so that "audio/transcriptions" is not missed
@@ -76,6 +82,7 @@ private enum class OpenAIApiType(val route: String) {
  * - **Responses API**: `/v1/responses`
  * - **Conversations API**: `/v1/conversations` and `/v1/conversations/{id}/items`
  * - **Audio Transcriptions**: `/v1/audio/transcriptions`
+ * - **Audio Translations**: `/v1/audio/translations`
  * - **Image Generation**: `/v1/images/generations`
  * - **Image Editing**: `/v1/images/edits`
  * - **Video Generation**: `/v1/videos`
@@ -150,6 +157,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         val handler = when (apiType) {
             OpenAIApiType.CONVERSATIONS -> handlers.getOrPut(OpenAIApiType.CONVERSATIONS) {
                 ConversationsOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.AUDIO_TRANSLATIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSLATIONS) {
+                AudioTranslationOpenAIApiEndpointHandler()
             }
 
             OpenAIApiType.AUDIO_TRANSCRIPTIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSCRIPTIONS) {

@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.core.adapters
 
 import org.jetbrains.ai.tracy.core.http.protocol.*
+import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.sdk.trace.ReadableSpan
@@ -54,12 +55,14 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
         // Pre-allocate in case the span reaches the limit
         span.setAttribute(DROPPED_ATTRIBUTES_COUNT_ATTRIBUTE_KEY, 0L)
 
-        getRequestBodyAttributes(span, request)
+        // Set cross-cutting attributes before handler parsing so they survive any handler exception
         span.setAttribute("gen_ai.api_base", "${request.url.scheme}://${request.url.host}")
         span.setAttribute(GEN_AI_SYSTEM, genAISystem)
         span.setAttribute("gen_ai.provider.name", genAISystem)
         span.setAttribute("server.address", request.url.host)
         span.setAttribute("server.port", request.url.port.toLong())
+
+        getRequestBodyAttributes(span, request)
 
         return@runCatching
     }.getOrElse { exception ->
@@ -73,6 +76,11 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
 
             if (response.isError()) {
                 getResponseErrorBodyAttributes(span, response.body)
+                // Fallback: if provider body parsing did not set error.type, use the HTTP status code
+                val errorTypeKey = AttributeKey.stringKey("error.type")
+                if ((span as? ReadableSpan)?.toSpanData()?.attributes?.get(errorTypeKey) == null) {
+                    span.setAttribute("error.type", response.code.toString())
+                }
                 span.setStatus(StatusCode.ERROR)
             } else {
                 span.setStatus(StatusCode.OK)
