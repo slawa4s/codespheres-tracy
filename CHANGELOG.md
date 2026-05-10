@@ -1,5 +1,29 @@
 # Changelog
 
+## Session 5
+
+- **Branch**: `claude-session-5` (based on `claude-session-4`)
+- **Evaluator attempts**: 1 (`artifacts/5/evaluation_0.json`)
+- **Score**: 98 (unchanged; score ceiling confirmed)
+
+### Analysis
+
+Ran a full baseline evaluation with 154 scenarios (112 scoreable after excluding 42 provider_error cases). Score remained at 98.
+
+One previously-passing scenario (`openai/batches/list_pagination`, score=100) became a provider_error (score=86) due to a LiteLLM proxy change (Zero Data Retention policy enforcement). This reduces scoreable scenarios from 113 to 112, but the overall score is unaffected because PE scenarios are excluded.
+
+The 6 remaining non-provider-error failures are all proxy/SDK limitations that Tracy cannot resolve (documented in sessions 2–4):
+
+1. **`anthropic/batches/invalid_empty_requests`** — The Anthropic Java SDK validates client-side before any HTTP call when `requests` is empty. No OkHttp interceptor fires.
+
+2. **`anthropic/count_tokens/basic`**, **`/with_system_prompt`**, **`/with_tools`**, **`/with_vision`** — Missing `gen_ai.response.id`. The LiteLLM proxy returns only `{"input_tokens": N}` with no `id` field and no ID response headers forwarded.
+
+3. **`anthropic/messages/tool_use_with_result`** — Score 24/25. Missing `gen_ai.completion.0.content` (non_empty). LiteLLM returns `content: []` for the follow-up message even though `output_tokens: 2`.
+
+No code changes to Tracy were made in this session. Score ceiling of 98 is confirmed.
+
+---
+
 ## Session 4
 
 - **Branch**: `claude-session-4` (based on `claude-session-3`)
