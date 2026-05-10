@@ -17,6 +17,7 @@ import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 import mu.KotlinLogging
@@ -294,9 +295,80 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
 
     override fun getSpanName(request: TracyHttpRequest) = "Anthropic-generation"
 
-    // streaming is not supported
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
-    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+    override fun isStreamingRequest(request: TracyHttpRequest): Boolean =
+        request.body.asJson()?.jsonObject?.get("stream")?.jsonPrimitive?.booleanOrNull == true
+
+    /**
+     * Parses Anthropic SSE events accumulated from a streaming Messages API response.
+     *
+     * Dispatches on the `type` field of each `data:` line:
+     * - `message_start` → extracts response id, output type, role, model, and input token count
+     * - `content_block_delta` (text_delta) → accumulates assistant text
+     * - `message_delta` → extracts stop reason and output token count
+     *
+     * All seven OTel GenAI attributes are written to the span after processing completes:
+     * `gen_ai.response.id`, `gen_ai.output.type`, `gen_ai.response.role`, `gen_ai.response.model`,
+     * `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, and `gen_ai.completion.0.content`.
+     */
+    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String): Unit = runCatching {
+        var responseId: String? = null
+        var outputType: String? = null
+        var responseRole: String? = null
+        var responseModel: String? = null
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
+        val textBuilder = StringBuilder()
+
+        for (line in events.lineSequence()) {
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+
+            val event = runCatching {
+                Json.parseToJsonElement(data).jsonObject
+            }.getOrNull() ?: continue
+
+            when (event["type"]?.jsonPrimitive?.contentOrNull) {
+                "message_start" -> {
+                    val message = event["message"]?.jsonObject ?: continue
+                    responseId = message["id"]?.jsonPrimitive?.contentOrNull
+                    outputType = message["type"]?.jsonPrimitive?.contentOrNull
+                    responseRole = message["role"]?.jsonPrimitive?.contentOrNull
+                    responseModel = message["model"]?.jsonPrimitive?.contentOrNull
+                    message["usage"]?.jsonObject?.get("input_tokens")?.jsonPrimitive?.intOrNull
+                        ?.let { inputTokens = it }
+                }
+                "content_block_delta" -> {
+                    val delta = event["delta"]?.jsonObject ?: continue
+                    if (delta["type"]?.jsonPrimitive?.contentOrNull == "text_delta") {
+                        delta["text"]?.jsonPrimitive?.contentOrNull?.let { textBuilder.append(it) }
+                    }
+                }
+                "message_delta" -> {
+                    val delta = event["delta"]?.jsonObject ?: continue
+                    delta["stop_reason"]?.jsonPrimitive?.contentOrNull?.let {
+                        span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, listOf(it))
+                    }
+                    event["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.intOrNull
+                        ?.let { outputTokens = it }
+                }
+            }
+        }
+
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        outputType?.let { span.setAttribute(GEN_AI_OUTPUT_TYPE, it) }
+        responseRole?.let { span.setAttribute("gen_ai.response.role", it) }
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        inputTokens?.let { span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it) }
+        outputTokens?.let { span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it) }
+
+        val text = textBuilder.toString()
+        if (text.isNotEmpty()) {
+            span.setAttribute("gen_ai.completion.0.content", text.orRedactedOutput())
+        }
+    }.getOrElse { exception ->
+        span.setStatus(StatusCode.ERROR)
+        span.recordException(exception)
+    }
 
     /**
      * Parses content of the `messages` field when its type is
