@@ -412,7 +412,7 @@ internal class ResponsesOpenAIApiEndpointHandler(
                     responseObj["completed_at"]?.jsonPrimitive?.longOrNull?.let {
                         span.setAttribute("tracy.response.completed_at", it)
                     }
-                    val usageObj = responseObj["usage"]?.jsonObject ?: event["usage"]?.jsonObject
+                    val usageObj = responseObj["usage"] as? JsonObject ?: event["usage"] as? JsonObject
                     usageObj?.let { usage ->
                         usage["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
                             span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)

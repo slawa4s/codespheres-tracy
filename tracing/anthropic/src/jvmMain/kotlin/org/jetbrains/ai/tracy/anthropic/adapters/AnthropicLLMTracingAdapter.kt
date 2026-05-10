@@ -188,7 +188,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         val apiType = detectApiType(response.url)
 
         when (apiType) {
-            "count_tokens" -> handleCountTokensResponse(span, body)
+            "count_tokens" -> handleCountTokensResponse(span, body, response)
             "batches" -> handleBatchesResponse(span, body)
             "files" -> handleFilesResponse(span, body)
             "models" -> handleModelsResponse(span, body)
@@ -285,10 +285,10 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         span.populateUnmappedAttributes(body, mappedMessagesResponseAttributes, PayloadType.RESPONSE)
     }
 
-    private fun handleCountTokensResponse(span: Span, body: JsonObject) {
-        body["id"]?.takeIf { it != JsonNull }?.jsonPrimitive?.let {
-            span.setAttribute(GEN_AI_RESPONSE_ID, it.content)
-        }
+    private fun handleCountTokensResponse(span: Span, body: JsonObject, response: TracyHttpResponse) {
+        val id = body["id"]?.takeIf { it != JsonNull }?.jsonPrimitive?.content
+            ?: response.headers.entries.firstOrNull { it.key.equals("request-id", ignoreCase = true) }?.value
+        if (!id.isNullOrBlank()) span.setAttribute(GEN_AI_RESPONSE_ID, id)
         body["input_tokens"]?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
         }

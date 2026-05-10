@@ -27,6 +27,7 @@ interface TracyHttpResponse {
     val body: TracyHttpResponseBody
     val url: TracyHttpUrl
     val requestMethod: String
+    val headers: Map<String, String> get() = emptyMap()
 
     fun isError(): Boolean
 }

@@ -108,6 +108,7 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             is TracyHttpRequestBody.Json -> {
                 val body = request.body.asJson()?.jsonObject ?: return false
                 body["stream"]?.jsonPrimitive?.boolean ?: false
+                    || body["stream_format"]?.jsonPrimitive?.content == "sse"
             }
             is TracyHttpRequestBody.Empty -> false
         }
