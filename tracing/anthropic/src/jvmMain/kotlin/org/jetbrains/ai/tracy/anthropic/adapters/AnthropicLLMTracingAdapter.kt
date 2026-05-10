@@ -209,7 +209,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         }
 
         if (apiType == "batches" || body["type"]?.jsonPrimitive?.contentOrNull == "message_batch") {
-            span.setAttribute(GEN_AI_OUTPUT_TYPE, "message_batch")
+            span.setAttribute(GEN_AI_OUTPUT_TYPE, body["type"]?.jsonPrimitive?.contentOrNull ?: "message_batch")
             body["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("anthropic.batch.id", it) }
             body["processing_status"]?.jsonPrimitive?.contentOrNull?.let {
                 span.setAttribute("anthropic.batch.processing_status", it)
@@ -478,11 +478,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
      * Determines the gen_ai.operation.name for a Batches API URL.
      *
      * Anthropic batch routes:
-     * - `GET  /v1/messages/batches`              → `batches.list`
-     * - `POST /v1/messages/batches`              → `batches.create`
-     * - `GET  /v1/messages/batches/{id}`         → `batches.retrieve`
-     * - `POST /v1/messages/batches/{id}/cancel`  → `batches.cancel`
-     * - `GET  /v1/messages/batches/{id}/results` → `batches.results`
+     * - `GET    /v1/messages/batches`              → `batches.list`
+     * - `POST   /v1/messages/batches`              → `batches.create`
+     * - `GET    /v1/messages/batches/{id}`         → `batches.retrieve`
+     * - `DELETE /v1/messages/batches/{id}`         → `batches.delete`
+     * - `POST   /v1/messages/batches/{id}/cancel`  → `batches.cancel`
+     * - `GET    /v1/messages/batches/{id}/results` → `batches.results`
      */
     private fun detectBatchOperationName(url: TracyHttpUrl, method: String): String {
         val segments = url.pathSegments
@@ -494,6 +495,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
             after.isEmpty() -> "batches.create"
             after.contains("cancel") -> "batches.cancel"
             after.contains("results") -> "batches.results"
+            after.isNotEmpty() && method == "DELETE" -> "batches.delete"
             else -> "batches.retrieve"
         }
     }

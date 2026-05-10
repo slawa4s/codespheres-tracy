@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed Anthropic batch DELETE tracing: `gen_ai.output.type` is now read dynamically from `body["type"]` (e.g. `"message_batch_deleted"` for DELETE responses) instead of being hardcoded to `"message_batch"`; added `batches.delete` branch to `detectBatchOperationName` so `DELETE /v1/messages/batches/{id}` emits `gen_ai.operation.name = "batches.delete"` instead of the incorrect `"batches.retrieve"`.
 - Fixed silent exception swallow in `instrument(AnthropicClient)`: the `BatchServiceImpl` patch failure now logs a warning via `logger.warn` and falls back to `tryPatchAllOkHttpClients`, which walks the batch service's class hierarchy to find and patch every `OkHttpClient`-typed field directly, covering SDK versions where `BatchServiceImpl` does not expose `clientOptions`.
 - Added OpenAI Audio Speech (`/v1/audio/speech`) tracing: new `AUDIO_SPEECH` dispatch entry and `AudioSpeechOpenAIApiEndpointHandler` set `gen_ai.operation.name = "audio.speech"`, `gen_ai.output.type = "speech"`, `gen_ai.request.model`, `tracy.request.voice`, `tracy.request.response_format`, and `tracy.request.speed` from the JSON request body; `/v1/audio/transcriptions` is unaffected.
 - Enhanced non-JSON response handling in `OpenTelemetryOkHttpInterceptor`: binary responses (e.g., audio speech) now embed `tracy.response.body.size_bytes` in the JSON stub passed to `registerResponse`, enabling handlers such as the audio speech handler to report response size without interface changes.

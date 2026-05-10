@@ -122,6 +122,54 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
     }
 
     @Test
+    fun `batches delete sets operation name to batches delete`() = runTest {
+        withMockServer { server ->
+            val client = buildClient()
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"id":"msgbatch_abc123","type":"message_batch_deleted","deleted":true}""")
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches/msgbatch_abc123"))
+                    .delete()
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("batches", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
+            assertEquals("batches.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        }
+    }
+
+    @Test
+    fun `batches delete sets output type to message batch deleted`() = runTest {
+        withMockServer { server ->
+            val client = buildClient()
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"id":"msgbatch_abc123","type":"message_batch_deleted","deleted":true}""")
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/batches/msgbatch_abc123"))
+                    .delete()
+                    .build()
+            ).execute().use { it.body?.string() }
+
+            val trace = analyzeSpans().first()
+            assertEquals("message_batch_deleted", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("anthropic.batch.id")])
+        }
+    }
+
+    @Test
     fun `batches results sets anthropic api type and operation name`() = runTest {
         withMockServer { server ->
             val client = buildClient()
