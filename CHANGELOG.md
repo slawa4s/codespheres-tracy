@@ -1,5 +1,14 @@
 # Changelog
 
+## Session 3
+
+### Gemini adapter improvements
+- `GeminiContentGenHandler`: added `gen_ai.output.type = "message"` for `generateContent`/`streamGenerateContent` and `"embedding"` for `embedContent`/`batchEmbedContents`, set from the operation name in `handleRequestAttributes`
+- `GeminiContentGenHandler`: added operation-specific response handling — `embedContent` extracts `gen_ai.response.embedding.dimension` and sets `gen_ai.response.embedding.count = 1`; `batchEmbedContents` extracts embedding count and dimension from the first embedding; `countTokens` extracts `gen_ai.usage.total_tokens` directly from `body["totalTokens"]` (previously it fell through to the `generateContent` case which looked inside `usageMetadata`)
+- `GeminiContentGenHandler`: added embed-specific request attributes: `gen_ai.request.task_type` and `gen_ai.request.output_dimensionality` for `embedContent`/`batchEmbedContents`
+- Added `GeminiContentHandlerTest`: MockWebServer-based unit tests for `generateContent`, `embedContent` (via `batchEmbedContents` HTTP endpoint), and `countTokens` operations — no real API key required
+- Added `okhttp.mockwebserver` test dependency to the Gemini module
+
 ## Session 2
 
 ### OpenAI adapter improvements
