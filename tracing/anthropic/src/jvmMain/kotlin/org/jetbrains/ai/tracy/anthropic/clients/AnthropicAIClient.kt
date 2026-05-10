@@ -132,14 +132,18 @@ fun instrument(client: AnthropicClient) {
     // The batches sub-client may use a separate OkHttp instance. Patch both the
     // messages-level client (parent) and the batches sub-client so that requests
     // to /v1/messages/batches are intercepted regardless of which instance is used.
+    // If sub-client patching is architecturally impossible with this SDK version,
+    // use instrument(OkHttpClient(), AnthropicLLMTracingAdapter()) instead.
     try {
         patchOpenAICompatibleClient(client = client.messages(), interceptor = interceptor)
     } catch (e: Exception) {
-        logger.warn(e) { "Failed to patch Anthropic messages() HTTP client; batches tracing may be incomplete" }
+        logger.error(e) { "Failed to patch Anthropic messages() HTTP client; batches tracing will be missing" }
+        throw e
     }
     try {
         patchOpenAICompatibleClient(client = client.messages().batches(), interceptor = interceptor)
     } catch (e: Exception) {
-        logger.warn(e) { "Failed to patch Anthropic messages().batches() HTTP client; batches tracing may be incomplete" }
+        logger.error(e) { "Failed to patch Anthropic messages().batches() HTTP client; batches tracing will be missing" }
+        throw e
     }
 }
