@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed `ResponsesOpenAIApiEndpointHandler` to emit `gen_ai.operation.name = "generate_content"` and `openai.api.type = "responses"` on every Responses API span (both streaming and non-streaming). Extended streaming handling to parse `response.created` SSE events for `gen_ai.response.id`, `gen_ai.response.model`, `tracy.response.object`, and `tracy.response.created_at`, and `response.completed` events for `tracy.response.status`, `tracy.response.completed_at`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens`.
+
 - Renamed `http.status_code` to `http.response.status_code` in `LLMTracingAdapter.registerResponse` and moved it before the early-return guard so it is always emitted, even when the response body is empty or non-JSON.
 - Added `gen_ai.provider.name` attribute alongside `gen_ai.system` in `LLMTracingAdapter.registerRequest` so every span carries the provider name under both keys.
 - Added OpenAI Audio API tracing: `POST /v1/audio/transcriptions` and `POST /v1/audio/translations` are now handled by `AudioOpenAIApiEndpointHandler`, setting `openai.api.type=audio`, `gen_ai.operation.name` (`audio.transcription` or `audio.translation`), `gen_ai.request.model`, `tracy.request.response_format`, `gen_ai.output.type` (set to `"json"` when response format is `json` or `verbose_json`), `tracy.request.timestamp_granularities`, `tracy.request.temperature`, `tracy.request.prompt.present`, `tracy.request.audio.size_bytes`, `tracy.request.audio.format`, and verbose-json response fields (`tracy.response.transcription.duration_seconds`, `tracy.response.transcription.language`, `tracy.response.transcription.words.count`, `tracy.response.translation.duration_seconds`).
