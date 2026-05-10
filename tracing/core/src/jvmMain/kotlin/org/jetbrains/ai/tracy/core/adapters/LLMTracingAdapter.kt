@@ -69,11 +69,11 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
 
     fun registerResponse(span: Span, response: TracyHttpResponse): Unit =
         runCatching {
+            span.setAttribute("http.response.status_code", response.code.toLong())
+
             val body = response.body.asJson()?.jsonObject ?: return
             val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
             val mimeType = response.contentType?.mimeType
-
-            span.setAttribute("http.status_code", response.code.toLong())
 
             if (mimeType != null) {
                 when {
