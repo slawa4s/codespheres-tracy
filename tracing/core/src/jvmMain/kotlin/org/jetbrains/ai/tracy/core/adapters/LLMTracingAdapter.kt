@@ -11,9 +11,13 @@ import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_SYSTEM
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 
 /**
@@ -146,7 +150,17 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             body.entries.forEach { (key, value) ->
                 if (key !in (mappedAttributes)) {
                     val attributeKey = "tracy.${payloadType.value}.$key"
-                    setAttribute(attributeKey, value.toString())
+                    if (value is JsonPrimitive) {
+                        when {
+                            value.isString -> setAttribute(attributeKey, value.content)
+                            value.booleanOrNull != null -> setAttribute(attributeKey, value.boolean)
+                            value.longOrNull != null -> setAttribute(attributeKey, value.longOrNull!!)
+                            value.doubleOrNull != null -> setAttribute(attributeKey, value.doubleOrNull!!)
+                            else -> setAttribute(attributeKey, value.content)
+                        }
+                    } else {
+                        setAttribute(attributeKey, value.toString())
+                    }
                 }
             }
         }

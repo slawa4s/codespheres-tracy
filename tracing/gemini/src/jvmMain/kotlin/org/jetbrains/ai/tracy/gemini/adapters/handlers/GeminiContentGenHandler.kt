@@ -51,19 +51,12 @@ class GeminiContentGenHandler(
             }
         }
 
-        // url ends with `[model]:[operation]`
-        val (model, operation) = request.url.pathSegments.lastOrNull()?.split(":")
-            ?.let { it.firstOrNull() to it.lastOrNull() } ?: (null to null)
-
         if (contentTracingAllowed(ContentKind.INPUT)) {
             val mediaContent = parseRequestMediaContent(body)
             if (mediaContent != null) {
                 extractor.setUploadableContentAttributes(span, field = "input", mediaContent)
             }
         }
-
-        model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
-        operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
 
         // extract tool calls
         body.jsonObject["tools"]?.let { tools ->
@@ -118,9 +111,15 @@ class GeminiContentGenHandler(
             }
             config.jsonObject["topP"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_P, it) }
             config.jsonObject["topK"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_K, it) }
+            config.jsonObject["stopSequences"]?.let { stops ->
+                if (stops is JsonArray) {
+                    val stopList = stops.map { it.jsonPrimitive.content }
+                    span.setAttribute(GEN_AI_REQUEST_STOP_SEQUENCES, stopList)
+                }
+            }
         }
 
-        span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.REQUEST)
+        span.populateUnmappedAttributes(body, mappedRequestAttributes, PayloadType.REQUEST)
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
@@ -131,6 +130,7 @@ class GeminiContentGenHandler(
         body["modelVersion"]?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it.jsonPrimitive.content) }
 
         body["candidates"]?.let {
+            val finishReasons = mutableListOf<String>()
             for ((index, candidate) in it.jsonArray.withIndex()) {
                 candidate.jsonObject["content"]?.let { content ->
                     span.setAttribute(
@@ -170,10 +170,12 @@ class GeminiContentGenHandler(
                     }
                 }
 
-                span.setAttribute(
-                    "gen_ai.completion.$index.finish_reason",
-                    candidate.jsonObject["finishReason"]?.jsonPrimitive?.content
-                )
+                val finishReason = candidate.jsonObject["finishReason"]?.jsonPrimitive?.content
+                span.setAttribute("gen_ai.completion.$index.finish_reason", finishReason)
+                finishReason?.let { finishReasons.add(it) }
+            }
+            if (finishReasons.isNotEmpty()) {
+                span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons)
             }
         }
 
@@ -214,7 +216,7 @@ class GeminiContentGenHandler(
             extractUsageTokenDetails(span, usage, attribute = "candidatesTokensDetails")
         }
 
-        span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
+        span.populateUnmappedAttributes(body, mappedResponseAttributes, PayloadType.RESPONSE)
     }
 
     override fun handleStreaming(span: Span, events: String) = Unit
@@ -339,6 +341,4 @@ class GeminiContentGenHandler(
         "candidates",
         "usageMetadata"
     )
-
-    private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
 }

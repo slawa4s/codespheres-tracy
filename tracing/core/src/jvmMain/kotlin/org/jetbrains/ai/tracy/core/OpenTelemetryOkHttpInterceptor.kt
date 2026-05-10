@@ -262,7 +262,14 @@ class OpenTelemetryOkHttpInterceptor(
                             JsonObject(emptyMap())
                         }
                         else -> {
-                            JsonObject(emptyMap())
+                            // For binary responses (audio, images, etc.) pass content-length
+                            // so handlers can record response size attributes.
+                            val contentLength = response.body?.contentLength() ?: -1L
+                            if (contentLength >= 0) {
+                                JsonObject(mapOf("response_content_length" to JsonPrimitive(contentLength)))
+                            } else {
+                                JsonObject(emptyMap())
+                            }
                         }
                     }
 
