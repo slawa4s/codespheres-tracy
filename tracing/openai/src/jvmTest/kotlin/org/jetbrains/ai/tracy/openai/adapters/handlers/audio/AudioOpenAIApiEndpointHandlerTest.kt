@@ -14,6 +14,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okio.Buffer
 import org.jetbrains.ai.tracy.core.instrument
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
 import org.jetbrains.ai.tracy.openai.adapters.OpenAILLMTracingAdapter
@@ -157,6 +158,42 @@ class AudioOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals(256L, trace.attributes[AttributeKey.longKey("tracy.request.audio.size_bytes")])
             assertEquals("mpeg", trace.attributes[AttributeKey.stringKey("tracy.request.audio.format")])
             assertEquals(8.76, trace.attributes[AttributeKey.doubleKey("tracy.response.translation.duration_seconds")])
+        }
+    }
+
+    // ============ POST /audio/speech ============
+
+    @Test
+    fun `speechRequestAttributesAreSet`() = runTest {
+        withMockServer { server ->
+            val audioBytes = ByteArray(2048) { it.toByte() }
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "audio/mpeg")
+                    .setBody(Buffer().write(audioBytes))
+            )
+
+            val requestBody = """{"model":"tts-1","voice":"alloy","response_format":"mp3","speed":1.1,"input":"hello"}"""
+            val client = server.makeInstrumentedClient()
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/audio/speech"))
+                    .post(requestBody.toRequestBody("application/json".toMediaType()))
+                    .header("Authorization", "Bearer $MOCK_API_KEY")
+                    .build()
+            ).execute().close()
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("audio.speech", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("audio", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+            assertEquals("tts-1", trace.attributes[AttributeKey.stringKey("gen_ai.request.model")])
+            assertEquals("speech", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+            assertEquals("alloy", trace.attributes[AttributeKey.stringKey("tracy.request.voice")])
+            assertEquals("mp3", trace.attributes[AttributeKey.stringKey("tracy.request.response_format")])
+            assertEquals(1.1, trace.attributes[AttributeKey.doubleKey("tracy.request.speed")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.response.audio.size_bytes")])
         }
     }
 

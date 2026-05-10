@@ -72,22 +72,24 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
         runCatching {
             span.setAttribute("http.response.status_code", response.code.toLong())
 
-            val body = response.body.asJson()?.jsonObject ?: return
-            val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
-            val mimeType = response.contentType?.mimeType
+            val body = response.body.asJson() as? JsonObject
+            if (body != null) {
+                val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
+                val mimeType = response.contentType?.mimeType
 
-            if (mimeType != null) {
-                when {
-                    isStreamingRequest && mimeType == TracyContentType.Text.EventStream.mimeType -> {
-                        span.setAttribute("gen_ai.response.streaming", true)
-                        span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
-                    }
-                    mimeType != TracyContentType.Text.EventStream.mimeType -> {
-                        // mime type can be application/json, video/mp4 (for OpenAI Video API), etc.
-                        getResponseBodyAttributes(span, response)
-                    }
-                    else -> {
-                        span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
+                if (mimeType != null) {
+                    when {
+                        isStreamingRequest && mimeType == TracyContentType.Text.EventStream.mimeType -> {
+                            span.setAttribute("gen_ai.response.streaming", true)
+                            span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
+                        }
+                        mimeType != TracyContentType.Text.EventStream.mimeType -> {
+                            // mime type can be application/json, video/mp4 (for OpenAI Video API), etc.
+                            getResponseBodyAttributes(span, response)
+                        }
+                        else -> {
+                            span.setAttribute("gen_ai.completion.content.type", response.contentType?.asString())
+                        }
                     }
                 }
             }

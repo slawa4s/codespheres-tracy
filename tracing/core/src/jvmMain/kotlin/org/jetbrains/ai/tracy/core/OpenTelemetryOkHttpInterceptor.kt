@@ -147,7 +147,12 @@ fun instrument(client: OkHttpClient, adapter: LLMTracingAdapter): OkHttpClient {
  * @param interceptor The interceptor to be injected into the internal HTTP client of the OpenAI-compatible client.
  */
 fun <T> patchOpenAICompatibleClient(client: T, interceptor: Interceptor) {
-    val clientOptions = getFieldValue(client as Any, "clientOptions")
+    val clientOptions = try {
+        getFieldValue(client as Any, "clientOptions")
+    } catch (_: NoSuchFieldException) {
+        // Some SDK sub-clients store their options under "options" rather than "clientOptions".
+        getFieldValue(client as Any, "options")
+    }
     val originalHttpClient = getFieldValue(clientOptions, "originalHttpClient")
 
     val okHttpHolder = if (originalHttpClient::class.simpleName == "OkHttpClient") {
@@ -262,7 +267,12 @@ class OpenTelemetryOkHttpInterceptor(
                             JsonObject(emptyMap())
                         }
                         else -> {
-                            JsonObject(emptyMap())
+                            val sizeBytes = response.body?.contentLength()?.takeIf { it >= 0 }
+                            if (sizeBytes != null) {
+                                JsonObject(mapOf("_response_size_bytes" to JsonPrimitive(sizeBytes)))
+                            } else {
+                                JsonObject(emptyMap())
+                            }
                         }
                     }
 
