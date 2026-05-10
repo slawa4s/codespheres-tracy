@@ -71,6 +71,11 @@ class GeminiContentGenHandler(
             }
         }
 
+        // Cached content reference
+        body["cachedContent"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("gen_ai.request.cached_content", it)
+        }
+
         // Embed-specific request attributes
         if (operation == "embedContent" || operation == "batchEmbedContents") {
             body["taskType"]?.jsonPrimitive?.contentOrNull?.let {
@@ -245,6 +250,9 @@ class GeminiContentGenHandler(
                     usage.jsonObject["totalTokenCount"]?.jsonPrimitive?.intOrNull?.let {
                         span.setAttribute("gen_ai.usage.total_tokens", it.toLong())
                     }
+                    usage.jsonObject["cachedContentTokenCount"]?.jsonPrimitive?.intOrNull?.let {
+                        span.setAttribute("gen_ai.usage.cached_content_token_count", it.toLong())
+                    }
 
                     /**
                      * The following two properties (`promptTokensDetails`, `candidatesTokensDetails`)
@@ -383,7 +391,8 @@ class GeminiContentGenHandler(
         "tools",
         "generationConfig",
         "taskType",
-        "outputDimensionality"
+        "outputDimensionality",
+        "cachedContent"
     )
 
     private val mappedGenerateContentResponseAttributes: List<String> = listOf(

@@ -12,6 +12,7 @@ import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiCachedContentHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiContentGenHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiImagenHandler
 import io.opentelemetry.api.trace.Span
@@ -43,11 +44,14 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
  */
 class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.GEMINI) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
-        val (model, operation) = request.url.modelAndOperation()
-
-        model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
-        operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
-        span.setAttribute("gemini.api.type", "models")
+        if (request.url.isCachedContentsUrl()) {
+            span.setAttribute("gemini.api.type", "cachedContents")
+        } else {
+            val (model, operation) = request.url.modelAndOperation()
+            model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
+            operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
+            span.setAttribute("gemini.api.type", "models")
+        }
 
         val handler = selectHandler(request.url)
         handler.handleRequestAttributes(span, request)
@@ -69,6 +73,7 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
     private fun selectHandler(url: TracyHttpUrl): EndpointApiHandler = when {
         url.isImagenUrl() -> GeminiImagenHandler(extractor)
+        url.isCachedContentsUrl() -> GeminiCachedContentHandler()
         else -> GeminiContentGenHandler(extractor)
     }
 
@@ -82,6 +87,8 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         val (model, operation) = this.modelAndOperation()
         return (model?.startsWith("imagen") == true) && (operation == "predict")
     }
+
+    private fun TracyHttpUrl.isCachedContentsUrl(): Boolean = "cachedContents" in pathSegments
 
     private companion object {
         private val extractor: MediaContentExtractor = MediaContentExtractorImpl()
