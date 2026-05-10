@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added OpenAI Speech API tracing: `POST /v1/audio/speech` is now handled by `AudioOpenAIApiEndpointHandler`, setting `gen_ai.operation.name=audio.speech`, `gen_ai.output.type=speech`, `gen_ai.request.model`, `tracy.request.voice`, `tracy.request.response_format`, and `tracy.request.speed` from the JSON request body. Response spans include `tracy.response.audio.size_bytes` (byte length of the returned audio). The OkHttp interceptor now includes `_response_size_bytes` in the virtual JSON object passed to handlers for non-JSON responses, enabling audio size reporting.
+
 - Renamed `http.status_code` to `http.response.status_code` in `LLMTracingAdapter.registerResponse` and moved it before the early-return guard so it is always emitted, even when the response body is empty or non-JSON.
 - Added `gen_ai.provider.name` attribute alongside `gen_ai.system` in `LLMTracingAdapter.registerRequest` so every span carries the provider name under both keys.
 - Added OpenAI Audio API tracing: `POST /v1/audio/transcriptions` and `POST /v1/audio/translations` are now handled by `AudioOpenAIApiEndpointHandler`, setting `openai.api.type=audio`, `gen_ai.operation.name` (`audio.transcription` or `audio.translation`), `gen_ai.request.model`, `tracy.request.response_format`, `gen_ai.output.type` (set to `"json"` when response format is `json` or `verbose_json`), `tracy.request.timestamp_granularities`, `tracy.request.temperature`, `tracy.request.prompt.present`, `tracy.request.audio.size_bytes`, `tracy.request.audio.format`, and verbose-json response fields (`tracy.response.transcription.duration_seconds`, `tracy.response.transcription.language`, `tracy.response.transcription.words.count`, `tracy.response.translation.duration_seconds`).

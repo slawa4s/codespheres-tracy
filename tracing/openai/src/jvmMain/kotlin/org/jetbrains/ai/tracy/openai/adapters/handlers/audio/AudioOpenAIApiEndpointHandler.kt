@@ -13,6 +13,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
@@ -24,11 +25,12 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 /**
  * Handler for OpenAI Audio API endpoints.
  *
- * Extracts span attributes from multipart FormData requests sent to:
- * - `POST /v1/audio/transcriptions` — sets `gen_ai.operation.name` = `"audio.transcription"`
- * - `POST /v1/audio/translations` — sets `gen_ai.operation.name` = `"audio.translation"`
+ * Extracts span attributes from requests sent to:
+ * - `POST /v1/audio/transcriptions` — sets `gen_ai.operation.name` = `"audio.transcription"` (multipart FormData)
+ * - `POST /v1/audio/translations` — sets `gen_ai.operation.name` = `"audio.translation"` (multipart FormData)
+ * - `POST /v1/audio/speech` — sets `gen_ai.operation.name` = `"audio.speech"` (JSON body)
  *
- * ## Request attributes extracted (from multipart FormData)
+ * ## Request attributes extracted (transcriptions/translations — multipart FormData)
  * - `gen_ai.request.model` — from the `model` field
  * - `tracy.request.response_format` — from the `response_format` field
  * - `gen_ai.output.type` — set to `"json"` when `response_format` is `"json"` or `"verbose_json"`
@@ -38,11 +40,19 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  * - `tracy.request.audio.size_bytes` — byte length of the uploaded `file` part
  * - `tracy.request.audio.format` — audio format derived from the `file` part's content-type subtype or filename extension
  *
+ * ## Request attributes extracted (speech — JSON body)
+ * - `gen_ai.request.model` — from the `model` field
+ * - `tracy.request.voice` — from the `voice` field
+ * - `tracy.request.response_format` — from the `response_format` field
+ * - `tracy.request.speed` — from the `speed` field
+ * - `gen_ai.output.type` — set to `"speech"`
+ *
  * ## Response attributes extracted (from verbose_json or plain json body)
  * - `tracy.response.transcription.duration_seconds` — for transcription requests
  * - `tracy.response.transcription.language` — for transcription requests
  * - `tracy.response.transcription.words.count` — length of `words` array (verbose_json only)
  * - `tracy.response.translation.duration_seconds` — for translation requests
+ * - `tracy.response.audio.size_bytes` — byte length of the speech audio response
  *
  * See [Audio API Reference](https://platform.openai.com/docs/api-reference/audio)
  */
@@ -51,6 +61,11 @@ internal class AudioOpenAIApiEndpointHandler : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         span.setAttribute("openai.api.type", "audio")
         span.setAttribute(GEN_AI_OPERATION_NAME, detectOperationName(request.url))
+
+        if (request.url.pathSegments.contains("speech")) {
+            handleSpeechRequest(span, request)
+            return
+        }
 
         val body = request.body.asFormData() ?: return
 
@@ -99,6 +114,14 @@ internal class AudioOpenAIApiEndpointHandler : EndpointApiHandler {
         span.setAttribute("openai.api.type", "audio")
 
         val body = response.body.asJson()?.jsonObject ?: return
+
+        if (response.url.pathSegments.contains("speech")) {
+            body["_response_size_bytes"]?.jsonPrimitive?.longOrNull?.let {
+                span.setAttribute("tracy.response.audio.size_bytes", it)
+            }
+            return
+        }
+
         val isTranscription = response.url.pathSegments.contains("transcriptions")
 
         body["duration"]?.jsonPrimitive?.doubleOrNull?.let { duration ->
@@ -126,11 +149,24 @@ internal class AudioOpenAIApiEndpointHandler : EndpointApiHandler {
         return when {
             segments.contains("transcriptions") -> "audio.transcription"
             segments.contains("translations") -> "audio.translation"
+            segments.contains("speech") -> "audio.speech"
             else -> {
                 logger.warn { "Unknown audio endpoint path: ${segments.joinToString("/")} — defaulting to audio.transcription" }
                 "audio.transcription"
             }
         }
+    }
+
+    /**
+     * Reads JSON body fields for `POST /v1/audio/speech` and sets the corresponding span attributes.
+     */
+    private fun handleSpeechRequest(span: Span, request: TracyHttpRequest) {
+        val body = request.body.asJson()?.jsonObject ?: return
+        body["model"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it) }
+        body["voice"]?.jsonPrimitive?.content?.let { span.setAttribute("tracy.request.voice", it) }
+        body["response_format"]?.jsonPrimitive?.content?.let { span.setAttribute("tracy.request.response_format", it) }
+        body["speed"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute("tracy.request.speed", it) }
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "speech")
     }
 
     /**
