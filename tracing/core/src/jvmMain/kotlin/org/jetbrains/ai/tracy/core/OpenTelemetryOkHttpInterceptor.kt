@@ -136,11 +136,17 @@ fun instrument(client: OkHttpClient, adapter: LLMTracingAdapter): OkHttpClient {
 }
 
 /**
- * Patches the OpenAI-compatible client by injecting a custom interceptor into its internal HTTP client
- * **in-place**.
+ * Patches the OpenAI-compatible client by injecting a custom interceptor into its internal HTTP client.
  *
- * This method modifies the internal structure of the provided OpenAI-like client to replace its HTTP client interceptors
- * with the specified interceptor.
+ * Builds a new [OkHttpClient] via the official builder API and writes it back to the holder field
+ * in the SDK's internal options object. This avoids the unreliability of mutating the existing
+ * client's interceptor list, which is an immutable snapshot created at construction time — any
+ * lazily-initialised sub-client (e.g. the Anthropic batches sub-client) would discard the mutation
+ * when it builds its own fresh [OkHttpClient] from the holder reference.
+ *
+ * The patch is idempotent: if an interceptor of the same class is already registered on the
+ * current [OkHttpClient], the holder is left unchanged.
+ *
  * Supports OpenAI-compatible (**in terms of internal class structure**) clients.
  *
  * @param client The instance of the OpenAI-compatible client to patch.
@@ -163,9 +169,16 @@ fun <T> patchOpenAICompatibleClient(client: T, interceptor: Interceptor) {
 
     val okHttpClient = getFieldValue(okHttpHolder, "okHttpClient") as OkHttpClient
 
-    // add a given interceptor if the current list of interceptors doesn't contain it already
-    val updatedInterceptors = patchInterceptors(okHttpClient.interceptors, interceptor)
-    setFieldValue(okHttpClient, "interceptors", updatedInterceptors)
+    // Build a new OkHttpClient with the interceptor wired in via the official builder API,
+    // then replace the reference stored in okHttpHolder so every subsequent newCall() on any
+    // sub-client that reads from this holder picks up the interceptor.
+    // Mutating the existing client's interceptors list is unreliable: OkHttpClient stores them
+    // as an immutable snapshot at build time, so the mutation is silently discarded whenever the
+    // SDK lazily constructs a fresh sub-client (e.g. the Anthropic batches client).
+    if (okHttpClient.interceptors.none { it.javaClass.name == interceptor.javaClass.name }) {
+        val newClient = okHttpClient.newBuilder().addInterceptor(interceptor).build()
+        setFieldValue(okHttpHolder, "okHttpClient", newClient)
+    }
 }
 
 internal fun getFieldValue(instance: Any, fieldName: String): Any {
