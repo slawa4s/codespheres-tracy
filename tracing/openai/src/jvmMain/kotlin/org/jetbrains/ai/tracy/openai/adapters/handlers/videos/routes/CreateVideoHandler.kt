@@ -8,6 +8,8 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContent
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
@@ -67,10 +69,10 @@ internal class CreateVideoHandler(private val extractor: MediaContentExtractor) 
                     span.setAttribute(GEN_AI_REQUEST_MODEL, content)
                 }
                 "seconds" -> {
-                    span.setAttribute("gen_ai.request.seconds", content.orRedactedInput())
+                    content.toLongOrNull()?.let { span.setAttribute("tracy.request.seconds", it) }
                 }
                 "size" -> {
-                    span.setAttribute("gen_ai.request.size", content.orRedactedInput())
+                    span.setAttribute("tracy.request.size", content.orRedactedInput())
                 }
                 "input_reference" -> {
                     if (contentType != null) {
@@ -111,7 +113,12 @@ internal class CreateVideoHandler(private val extractor: MediaContentExtractor) 
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceVideoModel(body, "gen_ai.response.video")
+        body["id"]?.let { span.setAttribute("gen_ai.response.id", it.jsonPrimitive.content) }
+        body["model"]?.let { span.setAttribute("gen_ai.response.model", it.jsonPrimitive.content) }
+        body["object"]?.let { span.setAttribute("tracy.response.object", it.jsonPrimitive.content) }
+        body["status"]?.let { span.setAttribute("tracy.response.status", it.jsonPrimitive.content) }
+        body["created_at"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
+        body["progress"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.progress", it) }
     }
 }
 

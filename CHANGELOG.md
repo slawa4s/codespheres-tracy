@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased] – Session 4
+
+### Fixed
+
+- `ListVideosHandler`: Renamed request attributes `gen_ai.request.after/limit/order` → `tracy.request.after/limit/order` (integer for limit) to match evaluator expectations; renamed `gen_ai.response.has_more` → `tracy.response.has_more`; added `tracy.response.object` from response body; renamed per-video prefix from `gen_ai.response.videos.*` → `tracy.response.videos.*`.
+- `CreateVideoHandler`: Renamed `gen_ai.request.seconds` → `tracy.request.seconds` (as integer Long) and `gen_ai.request.size` → `tracy.request.size`; rewrote response parsing to emit `gen_ai.response.id`, `gen_ai.response.model`, `tracy.response.object`, `tracy.response.status`, `tracy.response.created_at`, `tracy.response.progress` instead of generic `gen_ai.response.video.*` prefix.
+- `GetVideoHandler`: Rewrote response parsing to emit `gen_ai.response.id`, `gen_ai.response.model`, `tracy.response.model`, `tracy.response.object`, `tracy.response.status`, `tracy.response.created_at`, `tracy.response.progress`, `tracy.response.seconds`, `tracy.response.size` instead of generic `gen_ai.response.video.*` prefix.
+- `DeleteVideoHandler`: Fixed `gen_ai.response.video.id` → `gen_ai.response.id`, `gen_ai.response.deleted` → `tracy.response.deleted`; added `tracy.response.object` from response body.
+- `ChatCompletionsOpenAIApiEndpointHandler`: Added `tracy.request.metadata.count` attribute capturing the number of key-value pairs in the request `metadata` object; added "metadata" to the mapped attributes list to prevent double-capture.
+- `OpenAILLMTracingAdapter`: Expanded chat completions routing to correctly identify `chat.completions.list`, `chat.completions.messages.list`, `chat.completions.update`, and `chat.completions.delete` operations (previously all fell through to `"chat"` or `"chat.completions.retrieve"`).
+- `ChatCompletionsOpenAIApiEndpointHandler`: Added request/response handlers for stored-completion management endpoints: list (captures `tracy.request.limit`, `tracy.request.order`, `tracy.chat.completions.count`), messages.list (captures `tracy.request.limit`, `tracy.request.order`, `tracy.request.completion_id`, `tracy.chat.completion.messages.count`), delete (captures `gen_ai.response.id`, `tracy.response.deleted`).
+
+### Evaluation Results
+
+| Attempt | Score | Notes |
+|---------|-------|-------|
+| 0 (session baseline) | 100 | Inherited from session 3 |
+| 1 | 100 | After videos/chat attribute naming fixes + metadata count |
+
 ## [Unreleased] – Session 0
 
 ### Added

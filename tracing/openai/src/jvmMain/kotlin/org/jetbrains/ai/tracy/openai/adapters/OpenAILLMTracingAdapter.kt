@@ -168,12 +168,7 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             path.contains("responses") -> detectResponsesRouting(segments, method)
 
             // Chat completions
-            path.contains("completions") -> {
-                val idx = segments.indexOf("completions")
-                val hasId = segments.size > idx + 1 && segments[idx + 1].isNotBlank()
-                if (hasId && method == "GET") "chat.completions.retrieve" to "chat_completions"
-                else "chat" to "chat_completions"
-            }
+            path.contains("completions") -> detectChatCompletionsRouting(segments, method)
 
             else -> null to null
         }
@@ -203,6 +198,20 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             method == "GET" && hasId -> "batches.retrieve" to "batches"
             method == "POST" && hasCancel -> "batches.cancel" to "batches"
             else -> "batches.create" to "batches"
+        }
+    }
+
+    private fun detectChatCompletionsRouting(segments: List<String>, method: String): Pair<String, String> {
+        val idx = segments.indexOf("completions")
+        val hasId = idx >= 0 && segments.size > idx + 1 && segments[idx + 1].isNotBlank()
+        val hasMessages = segments.contains("messages")
+        return when {
+            method == "GET" && hasId && hasMessages -> "chat.completions.messages.list" to "chat_completions"
+            method == "GET" && hasId -> "chat.completions.retrieve" to "chat_completions"
+            method == "GET" && !hasId -> "chat.completions.list" to "chat_completions"
+            method == "DELETE" && hasId -> "chat.completions.delete" to "chat_completions"
+            method == "POST" && hasId -> "chat.completions.update" to "chat_completions"
+            else -> "chat" to "chat_completions"
         }
     }
 

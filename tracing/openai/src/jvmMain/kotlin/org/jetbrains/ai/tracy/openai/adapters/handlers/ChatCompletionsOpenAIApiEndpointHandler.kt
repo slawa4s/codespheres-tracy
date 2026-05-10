@@ -47,6 +47,37 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        val segments = request.url.pathSegments
+        val method = request.method.uppercase()
+        val completionsIdx = segments.indexOf("completions")
+        val hasId = completionsIdx >= 0 && segments.size > completionsIdx + 1
+                && segments[completionsIdx + 1].isNotBlank()
+        val hasMessages = segments.contains("messages")
+
+        // GET /chat/completions — list stored completions
+        if (method == "GET" && !hasId) {
+            request.url.parameters.queryParameter("limit")?.toLongOrNull()
+                ?.let { span.setAttribute("tracy.request.limit", it) }
+            request.url.parameters.queryParameter("order")
+                ?.let { span.setAttribute("tracy.request.order", it) }
+            return
+        }
+
+        // GET /chat/completions/{id}/messages — list messages of a stored completion
+        if (method == "GET" && hasId && hasMessages) {
+            request.url.parameters.queryParameter("limit")?.toLongOrNull()
+                ?.let { span.setAttribute("tracy.request.limit", it) }
+            request.url.parameters.queryParameter("order")
+                ?.let { span.setAttribute("tracy.request.order", it) }
+            if (completionsIdx >= 0 && segments.size > completionsIdx + 1) {
+                span.setAttribute("tracy.request.completion_id", segments[completionsIdx + 1])
+            }
+            return
+        }
+
+        // DELETE /chat/completions/{id} — no body attributes
+        if (method == "DELETE" && hasId) return
+
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
 
@@ -127,6 +158,12 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.request.stream", it)
         }
 
+        body["metadata"]?.let { metadata ->
+            if (metadata is JsonObject) {
+                span.setAttribute("tracy.request.metadata.count", metadata.size.toLong())
+            }
+        }
+
         span.populateUnmappedAttributes(body, mappedRequestAttributes, PayloadType.REQUEST)
     }
 
@@ -171,6 +208,39 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        val segments = response.url.pathSegments
+        val method = response.requestMethod.uppercase()
+        val completionsIdx = segments.indexOf("completions")
+        val hasId = completionsIdx >= 0 && segments.size > completionsIdx + 1
+                && segments[completionsIdx + 1].isNotBlank()
+        val hasMessages = segments.contains("messages")
+
+        // DELETE /chat/completions/{id} — deleted confirmation response
+        if (method == "DELETE" && hasId) {
+            val deleteBody = response.body.asJson()?.jsonObject ?: return
+            deleteBody["id"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.id", it) }
+            deleteBody["deleted"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("tracy.response.deleted", it) }
+            return
+        }
+
+        // GET /chat/completions — list response
+        if (method == "GET" && !hasId) {
+            val listBody = response.body.asJson()?.jsonObject ?: return
+            (listBody["data"] as? JsonArray)?.let {
+                span.setAttribute("tracy.chat.completions.count", it.size.toLong())
+            }
+            return
+        }
+
+        // GET /chat/completions/{id}/messages — messages list response
+        if (method == "GET" && hasId && hasMessages) {
+            val msgBody = response.body.asJson()?.jsonObject ?: return
+            (msgBody["data"] as? JsonArray)?.let {
+                span.setAttribute("tracy.chat.completion.messages.count", it.size.toLong())
+            }
+            return
+        }
+
         val body = response.body.asJson()?.jsonObject ?: return
 
         body["service_tier"]?.jsonPrimitive?.content?.let {
@@ -408,7 +478,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "max_tokens",
         "max_completion_tokens",
         "stream",
-        "tool_choice"
+        "tool_choice",
+        "metadata"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
