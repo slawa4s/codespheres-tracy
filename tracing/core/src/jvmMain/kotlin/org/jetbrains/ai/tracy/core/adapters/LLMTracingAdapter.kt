@@ -54,9 +54,12 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
         // Pre-allocate in case the span reaches the limit
         span.setAttribute(DROPPED_ATTRIBUTES_COUNT_ATTRIBUTE_KEY, 0L)
 
-        getRequestBodyAttributes(span, request)
-        span.setAttribute("gen_ai.api_base", "${request.url.scheme}://${request.url.host}")
         span.setAttribute(GEN_AI_SYSTEM, genAISystem)
+        span.setAttribute("gen_ai.api_base", "${request.url.scheme}://${request.url.host}")
+        span.setAttribute("server.address", request.url.host)
+        span.setAttribute("server.port", request.url.port.toLong())
+
+        getRequestBodyAttributes(span, request)
 
         return@runCatching
     }.getOrElse { exception ->
@@ -69,6 +72,8 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             val body = response.body.asJson()?.jsonObject ?: return
             val isStreamingRequest = body["stream"]?.jsonPrimitive?.boolean == true
             val mimeType = response.contentType?.mimeType
+
+            span.setAttribute("http.status_code", response.code.toLong())
 
             if (mimeType != null) {
                 when {
@@ -85,8 +90,6 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
                     }
                 }
             }
-
-            span.setAttribute("http.status_code", response.code.toLong())
 
             if (response.isError()) {
                 getResponseErrorBodyAttributes(span, response.body)
