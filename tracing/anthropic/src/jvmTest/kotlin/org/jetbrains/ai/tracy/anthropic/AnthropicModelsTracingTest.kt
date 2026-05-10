@@ -48,7 +48,7 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
                           "max_input_tokens": 200000,
                           "max_output_tokens": 8192,
                           "capabilities": {
-                            "vision": { "enabled": true },
+                            "image_input": { "supported": { "enabled": true } },
                             "citations": { "enabled": true },
                             "batch": { "enabled": true }
                           }
@@ -94,8 +94,8 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
             )
             assertEquals(
                 true,
-                trace.attributes[AttributeKey.booleanKey("gen_ai.response.model.capabilities.vision")],
-                "gen_ai.response.model.capabilities.vision should be true"
+                trace.attributes[AttributeKey.booleanKey("anthropic.model.capabilities.image_input")],
+                "anthropic.model.capabilities.image_input should be true"
             )
             assertEquals(
                 200000L,

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Anthropic batch and model span attribute namespacing: moved non-registry `gen_ai.request.batch.size` → `anthropic.batch.request_size`; `gen_ai.response.batch.id`, `gen_ai.response.batch.processing_status`, `gen_ai.response.batch.created_at`, `gen_ai.response.batch.expires_at`, and all `gen_ai.response.batch.request_counts.*` → `anthropic.batch.*`; and `gen_ai.response.model.capabilities.vision` → `anthropic.model.capabilities.image_input`. Also fixed the capabilities lookup: `caps["vision"]` (undocumented key) is replaced by the documented path `caps["image_input"]["supported"]["enabled"]`.
+
 - Added Anthropic Messages streaming support: `isStreamingRequest()` now detects `"stream": true` in the request body; `handleStreaming()` parses Anthropic SSE events (`message_start`, `content_block_delta`, `message_delta`) to populate `gen_ai.response.id`, `gen_ai.output.type`, `gen_ai.response.role`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, and `gen_ai.completion.0.content` on the span.
 - Fixed `anthropic.api.type` never being set on Anthropic Messages spans: the default messages endpoint branch now sets `anthropic.api.type = "messages"`, consistent with `"batches"` and `"models"` on their respective paths.
 - Fixed Anthropic batches sub-client not being instrumented when its internal options class names the HTTP-client holder field `"httpClient"` or `"client"` instead of `"originalHttpClient"`: `patchOpenAICompatibleClient` now tries all three field names in order before re-throwing.
