@@ -217,7 +217,59 @@ class GeminiContentGenHandler(
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
 
-    override fun handleStreaming(span: Span, events: String) = Unit
+    /**
+     * Parses Gemini SSE streaming events (`streamGenerateContent`).
+     *
+     * Each `data: ` line is a complete `GenerateContentResponse` JSON. Text from all events is
+     * accumulated into `gen_ai.completion.0.content`; metadata (response ID, model, usage, finish
+     * reason) is taken from the last event that carries it.
+     *
+     * See: [GenerateContentResponse](https://ai.google.dev/api/generate-content#v1beta.GenerateContentResponse)
+     */
+    override fun handleStreaming(span: Span, events: String) {
+        var lastResponseId: String? = null
+        var lastModelVersion: String? = null
+        var lastFinishReason: String? = null
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
+        val contentBuilder = StringBuilder()
+
+        for (line in events.lines()) {
+            val jsonStr = if (line.startsWith("data: ")) line.removePrefix("data: ").trim() else continue
+            if (jsonStr.isEmpty()) continue
+
+            val event = try {
+                Json.parseToJsonElement(jsonStr).jsonObject
+            } catch (_: Exception) {
+                continue
+            }
+
+            event["responseId"]?.jsonPrimitive?.contentOrNull?.let { lastResponseId = it }
+            event["modelVersion"]?.jsonPrimitive?.contentOrNull?.let { lastModelVersion = it }
+
+            event["usageMetadata"]?.jsonObject?.let { usage ->
+                usage["promptTokenCount"]?.jsonPrimitive?.intOrNull?.let { inputTokens = it }
+                usage["candidatesTokenCount"]?.jsonPrimitive?.intOrNull?.let { outputTokens = it }
+            }
+
+            event["candidates"]?.jsonArray?.firstOrNull()?.jsonObject?.let { candidate ->
+                candidate["finishReason"]?.jsonPrimitive?.contentOrNull?.let { lastFinishReason = it }
+                candidate["content"]?.jsonObject?.get("parts")?.jsonArray?.forEach { part ->
+                    part.jsonObject["text"]?.jsonPrimitive?.contentOrNull?.let { contentBuilder.append(it) }
+                }
+            }
+        }
+
+        lastResponseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        lastModelVersion?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        inputTokens?.let { span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it) }
+        outputTokens?.let { span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it) }
+        lastFinishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+        val content = contentBuilder.toString()
+        if (content.isNotEmpty()) {
+            span.setAttribute("gen_ai.completion.0.content", content.orRedactedOutput())
+        }
+    }
 
     private fun parseRequestMediaContent(body: JsonObject): MediaContent? {
         val contents = body["contents"]
