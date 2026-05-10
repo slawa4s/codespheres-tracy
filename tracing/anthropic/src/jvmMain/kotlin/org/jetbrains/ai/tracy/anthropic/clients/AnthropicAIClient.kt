@@ -144,11 +144,37 @@ fun instrument(client: AnthropicClient) {
 }
 
 /**
- * Walks [obj]'s class hierarchy scanning for fields of type [OkHttpClient] and patches each
- * one's interceptors with [interceptor]. Used as a fallback when [patchOpenAICompatibleClient]
- * fails for [BatchServiceImpl] due to SDK version differences in the class structure.
+ * Patches [okHttpClient]'s interceptor list in-place by inserting [interceptor] (idempotent).
  */
-private fun tryPatchAllOkHttpClients(obj: Any, interceptor: Interceptor) {
+private fun patchOkHttpClient(okHttpClient: OkHttpClient, interceptor: Interceptor) {
+    val updated = patchInterceptors(okHttpClient.interceptors, interceptor)
+    var targetCls: Class<*>? = okHttpClient.javaClass
+    while (targetCls != null) {
+        try {
+            val interceptorsField = targetCls.getDeclaredField("interceptors")
+            interceptorsField.isAccessible = true
+            interceptorsField.set(okHttpClient, updated)
+            break
+        } catch (_: NoSuchFieldException) {
+            targetCls = targetCls.superclass
+        }
+    }
+}
+
+/**
+ * Recursively walks [obj]'s object graph (depth ≤ 5, identity-hash visited-set to break cycles),
+ * scanning declared fields at each level. Fields assignable to [OkHttpClient] are patched with
+ * [interceptor]; other non-primitive, non-array, non-JDK/Kotlin fields are recursed into.
+ * Used as a fallback when [patchOpenAICompatibleClient] fails for [BatchServiceImpl] due to SDK
+ * version differences where the [OkHttpClient] is nested inside a holder (e.g. `ClientOptions`).
+ */
+private fun tryPatchAllOkHttpClients(
+    obj: Any,
+    interceptor: Interceptor,
+    depth: Int = 0,
+    visited: MutableSet<Int> = mutableSetOf(),
+) {
+    if (!visited.add(System.identityHashCode(obj))) return
     var cls: Class<*>? = obj.javaClass
     while (cls != null) {
         for (field in cls.declaredFields) {
@@ -156,20 +182,19 @@ private fun tryPatchAllOkHttpClients(obj: Any, interceptor: Interceptor) {
                 try {
                     field.isAccessible = true
                     val okHttpClient = field.get(obj) as? OkHttpClient ?: continue
-                    val updated = patchInterceptors(okHttpClient.interceptors, interceptor)
-                    var targetCls: Class<*>? = okHttpClient.javaClass
-                    while (targetCls != null) {
-                        try {
-                            val interceptorsField = targetCls.getDeclaredField("interceptors")
-                            interceptorsField.isAccessible = true
-                            interceptorsField.set(okHttpClient, updated)
-                            break
-                        } catch (_: NoSuchFieldException) {
-                            targetCls = targetCls.superclass
-                        }
-                    }
+                    patchOkHttpClient(okHttpClient, interceptor)
                 } catch (e: Exception) {
                     logger.warn(e) { "Failed to patch OkHttpClient field '${field.name}' in ${cls?.name}" }
+                }
+            } else if (depth < 5 && !field.type.isPrimitive && !field.type.isArray &&
+                !field.type.name.startsWith("java.") && !field.type.name.startsWith("kotlin.")
+            ) {
+                try {
+                    field.isAccessible = true
+                    val nested = field.get(obj) ?: continue
+                    tryPatchAllOkHttpClients(nested, interceptor, depth + 1, visited)
+                } catch (e: Exception) {
+                    logger.warn(e) { "Failed to recurse into field '${field.name}' in ${cls?.name}" }
                 }
             }
         }
