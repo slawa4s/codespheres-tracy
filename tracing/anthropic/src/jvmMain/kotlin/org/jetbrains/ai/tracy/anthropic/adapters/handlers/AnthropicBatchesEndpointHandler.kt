@@ -38,7 +38,7 @@ internal class AnthropicBatchesEndpointHandler : EndpointApiHandler {
             runCatching {
                 val body = request.body.asJson()?.jsonObject ?: return@runCatching
                 body["requests"]?.jsonArray?.size?.let { count ->
-                    span.setAttribute("anthropic.request.batch.size", count.toLong())
+                    span.setAttribute("gen_ai.request.batch.size", count.toLong())
                 }
             }
         }
