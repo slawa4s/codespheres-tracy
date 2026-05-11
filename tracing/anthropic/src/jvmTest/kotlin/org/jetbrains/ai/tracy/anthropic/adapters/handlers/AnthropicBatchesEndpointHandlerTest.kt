@@ -125,6 +125,21 @@ class AnthropicBatchesEndpointHandlerTest {
         assertEquals("batches.results", attrs[AttributeKey.stringKey("gen_ai.operation.name")])
     }
 
+    @Test
+    fun `batches delete sets operation name`() {
+        val attrs = capture("/v1/messages/batches/msgbatch_abc", "DELETE")
+        assertEquals("batches.delete", attrs[AttributeKey.stringKey("gen_ai.operation.name")])
+    }
+
+    @Test
+    fun `batches delete sets output type to message_batch_deleted`() {
+        val attrs = capture(
+            "/v1/messages/batches/msgbatch_abc", "DELETE",
+            responseJson = """{"id":"msgbatch_abc","deleted":true,"type":"message_batch_deleted"}"""
+        )
+        assertEquals("message_batch_deleted", attrs[AttributeKey.stringKey("gen_ai.output.type")])
+    }
+
     // ── anthropic.api.type ────────────────────────────────────────────────────
 
     @Test
@@ -216,19 +231,20 @@ class AnthropicBatchesEndpointHandlerTest {
     // ── Distinct operation names (no collisions) ──────────────────────────────
 
     @Test
-    fun `all four routes produce distinct operation names`() {
+    fun `all five routes produce distinct operation names`() {
         val ops = mutableSetOf<String>()
         val cases = listOf(
-            Triple("/v1/messages/batches",                      "POST", """{"requests":[]}"""),
-            Triple("/v1/messages/batches/msgbatch_abc",         "GET",  null),
-            Triple("/v1/messages/batches/msgbatch_abc/cancel",  "POST", null),
-            Triple("/v1/messages/batches/msgbatch_abc/results", "GET",  null),
+            Triple("/v1/messages/batches",                      "POST",   """{"requests":[]}"""),
+            Triple("/v1/messages/batches/msgbatch_abc",         "GET",    null),
+            Triple("/v1/messages/batches/msgbatch_abc",         "DELETE", null),
+            Triple("/v1/messages/batches/msgbatch_abc/cancel",  "POST",   null),
+            Triple("/v1/messages/batches/msgbatch_abc/results", "GET",    null),
         )
         for ((path, method, reqBody) in cases) {
             val name = capture(path, method, requestJson = reqBody)[AttributeKey.stringKey("gen_ai.operation.name")]!!
             ops.add(name)
             spanExporter.reset()
         }
-        assertEquals(4, ops.size, "All four batch routes must produce distinct operation names: $ops")
+        assertEquals(5, ops.size, "All five batch routes must produce distinct operation names: $ops")
     }
 }

@@ -18,11 +18,12 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 /**
  * Endpoint handler for the Anthropic Message Batches API.
  *
- * Covers four operations detected from the HTTP method and URL path:
- * - `batches.create`   — POST /v1/messages/batches
- * - `batches.retrieve` — GET  /v1/messages/batches/{id}
- * - `batches.cancel`   — POST /v1/messages/batches/{id}/cancel
- * - `batches.results`  — GET  /v1/messages/batches/{id}/results
+ * Covers five operations detected from the HTTP method and URL path:
+ * - `batches.create`   — POST   /v1/messages/batches
+ * - `batches.retrieve` — GET    /v1/messages/batches/{id}
+ * - `batches.delete`   — DELETE /v1/messages/batches/{id}
+ * - `batches.cancel`   — POST   /v1/messages/batches/{id}/cancel
+ * - `batches.results`  — GET    /v1/messages/batches/{id}/results
  *
  * See: [Anthropic Message Batches API](https://docs.anthropic.com/en/api/creating-message-batches)
  */
@@ -42,8 +43,8 @@ internal class AnthropicBatchesEndpointHandler : EndpointApiHandler {
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
-        span.setAttribute("gen_ai.output.type", "message_batch")
         val body = response.body.asJson()?.jsonObject ?: return
+        span.setAttribute("gen_ai.output.type", body["type"]?.jsonPrimitive?.content ?: "message_batch")
 
         body["id"]?.jsonPrimitive?.content?.let {
             span.setAttribute("anthropic.batch.id", it)
@@ -85,6 +86,7 @@ internal class AnthropicBatchesEndpointHandler : EndpointApiHandler {
             afterBatches.lastOrNull() == "cancel" -> "batches.cancel"
             afterBatches.lastOrNull() == "results" -> "batches.results"
             method.uppercase() == "POST" && afterBatches.isEmpty() -> "batches.create"
+            method.uppercase() == "DELETE" && afterBatches.isNotEmpty() -> "batches.delete"
             else -> "batches.retrieve"
         }
     }
