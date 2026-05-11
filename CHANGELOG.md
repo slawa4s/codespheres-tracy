@@ -1,5 +1,24 @@
 # Changelog
 
+## Session 8
+
+**Session:** 8 | **Branch:** `claude-session-8` | **Base:** `claude-session-7`
+**Evaluator attempts:** 2 | **Artifacts:** `artifacts/8/evaluation_0.json` (baseline, score 100, 113 scoreable/41 provider_error), `artifacts/8/evaluation_1.json` (after changes, score 100, 113 scoreable/41 provider_error)
+
+### Gemini adapter improvements
+- `GeminiContentGenHandler`: fixed Vertex AI embed operation name — the evaluator's Kotlin runner uses `vertexAI(true)` which sends embed requests to `:predict` URL with `{"instances":[...]}` body; now detects this and maps to `"embedContent"` (single instance) or `"batchEmbedContents"` (multiple instances) in both `handleRequestAttributes` and `handleResponseAttributes`
+- `GeminiContentGenHandler`: added Vertex AI predict embed response attribute extraction — reads `predictions[0].embeddings.values` to set `gen_ai.response.embedding.dimension` and `gen_ai.response.embedding.count`
+- `GeminiContentGenHandler`: added `gen_ai.request.seed` from `generationConfig.seed`
+- `GeminiContentGenHandler`: added `gen_ai.request.stop_sequences` from `generationConfig.stopSequences`
+- `GeminiContentGenHandler`: added `gen_ai.request.response_mime_type` from `generationConfig.responseMimeType`
+- `GeminiContentGenHandler`: added `gen_ai.request.response_schema` from `generationConfig.responseSchema`
+- `GeminiContentGenHandler`: added `gen_ai.request.thinking_config.include_thoughts` and `gen_ai.request.thinking_config.thinking_budget` from `generationConfig.thinkingConfig`
+- `GeminiContentGenHandler`: added `gen_ai.request.system_instruction` from top-level `systemInstruction` body field
+- `GeminiContentGenHandler`: added `gen_ai.request.safety_settings` from top-level `safetySettings` body field
+- `GeminiContentGenHandler`: added `gen_ai.usage.thoughts_token_count` from `usageMetadata.thoughtsTokenCount` in generateContent responses
+- `GeminiContentGenHandler`: added Vertex AI task_type extraction from `instances[0].task_type` and `outputDimensionality` from `parameters.outputDimensionality`
+- Extended `GeminiContentHandlerTest`: added 6 new MockWebServer-based tests covering seed, stop_sequences, response_mime_type, thoughtsTokenCount, Vertex AI single-embed predict, and Vertex AI multi-embed predict operations
+
 ## Session 7
 
 **Session:** 7 | **Branch:** `claude-session-7` | **Base:** `claude-session-6`

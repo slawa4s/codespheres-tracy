@@ -36,17 +36,27 @@ class GeminiContentGenHandler(
         val (model, operation) = request.url.pathSegments.lastOrNull()?.split(":")
             ?.let { it.firstOrNull() to it.lastOrNull() } ?: (null to null)
 
-        // Set output type from the operation before processing the body
-        when (operation) {
+        // Read body first so we can detect Vertex AI embed calls (operation=predict, body has "instances")
+        val body = request.body.asJson()?.jsonObject
+
+        // Vertex AI SDK sends embedContent as model:predict with {"instances":[...]} body.
+        // Remap to the standard Gemini API operation name so span attribution is consistent.
+        val effectiveOperation = if (operation == "predict" && body?.containsKey("instances") == true) {
+            val instanceCount = (body["instances"] as? JsonArray)?.size ?: 0
+            if (instanceCount > 1) "batchEmbedContents" else "embedContent"
+        } else operation
+
+        // Set output type from the effective operation before processing the body
+        when (effectiveOperation) {
             "generateContent", "streamGenerateContent" -> span.setAttribute(GEN_AI_OUTPUT_TYPE, "message")
             "embedContent", "batchEmbedContents" -> span.setAttribute(GEN_AI_OUTPUT_TYPE, "embedding")
         }
 
         model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
-        operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
+        effectiveOperation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
 
         // See: https://ai.google.dev/api/caching#Content
-        val body = request.body.asJson()?.jsonObject ?: return
+        body ?: return
 
         body["contents"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -76,12 +86,21 @@ class GeminiContentGenHandler(
             span.setAttribute("gen_ai.request.cached_content", it)
         }
 
-        // Embed-specific request attributes
-        if (operation == "embedContent" || operation == "batchEmbedContents") {
+        // Embed-specific request attributes (standard Gemini API and Vertex AI formats)
+        if (effectiveOperation == "embedContent" || effectiveOperation == "batchEmbedContents") {
+            // Standard Gemini API format: taskType and outputDimensionality at top level
             body["taskType"]?.jsonPrimitive?.contentOrNull?.let {
                 span.setAttribute("gen_ai.request.task_type", it)
             }
             body["outputDimensionality"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.request.output_dimensionality", it.toLong())
+            }
+            // Vertex AI format: task_type inside instances[0], outputDimensionality inside parameters
+            (body["instances"] as? JsonArray)?.firstOrNull()?.jsonObject
+                ?.get("task_type")?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.request.task_type", it)
+                }
+            body["parameters"]?.jsonObject?.get("outputDimensionality")?.jsonPrimitive?.intOrNull?.let {
                 span.setAttribute("gen_ai.request.output_dimensionality", it.toLong())
             }
         }
@@ -139,6 +158,40 @@ class GeminiContentGenHandler(
             }
             config.jsonObject["topP"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_P, it) }
             config.jsonObject["topK"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_K, it) }
+            config.jsonObject["seed"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.request.seed", it.toLong())
+            }
+            config.jsonObject["stopSequences"]?.let { seqs ->
+                if (seqs is JsonArray) span.setAttribute("gen_ai.request.stop_sequences", seqs.toString())
+            }
+            config.jsonObject["responseMimeType"]?.jsonPrimitive?.contentOrNull?.let {
+                span.setAttribute("gen_ai.request.response_mime_type", it)
+            }
+            config.jsonObject["responseSchema"]?.let {
+                span.setAttribute("gen_ai.request.response_schema", it.toString())
+            }
+            // See: https://ai.google.dev/api/generate-content#ThinkingConfig
+            config.jsonObject["thinkingConfig"]?.jsonObject?.let { tc ->
+                tc["includeThoughts"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.request.thinking_config.include_thoughts", it.toString())
+                }
+                tc["thinkingBudget"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("gen_ai.request.thinking_config.thinking_budget", it.toLong())
+                }
+            }
+        }
+
+        // System instruction (top-level, outside generationConfig)
+        body["systemInstruction"]?.let { si ->
+            val text = (si as? JsonObject)?.get("parts")?.jsonArray
+                ?.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.contentOrNull
+                ?: si.toString()
+            span.setAttribute("gen_ai.request.system_instruction", text.orRedactedInput())
+        }
+
+        // Safety settings (top-level array)
+        body["safetySettings"]?.let { ss ->
+            if (ss is JsonArray) span.setAttribute("gen_ai.request.safety_settings", ss.toString())
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.REQUEST)
@@ -146,13 +199,30 @@ class GeminiContentGenHandler(
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        val operation = response.url.pathSegments.lastOrNull()?.split(":")?.lastOrNull()
+        val urlOperation = response.url.pathSegments.lastOrNull()?.split(":")?.lastOrNull()
 
-        when (operation) {
+        // Vertex AI SDK sends embed as model:predict; remap when response has "predictions" with "embeddings"
+        val predictions = body["predictions"] as? JsonArray
+        val effectiveOperation = if (urlOperation == "predict" && predictions != null
+            && predictions.firstOrNull()?.jsonObject?.containsKey("embeddings") == true
+        ) {
+            if (predictions.size > 1) "batchEmbedContents" else "embedContent"
+        } else urlOperation
+
+        when (effectiveOperation) {
             "embedContent" -> {
-                // See: https://ai.google.dev/api/embeddings#v1beta.EmbedContentResponse
+                // Standard Gemini API format: {"embedding":{"values":[...]}}
                 body["embedding"]?.jsonObject?.let { embedding ->
                     embedding["values"]?.let { values ->
+                        if (values is JsonArray) {
+                            span.setAttribute("gen_ai.response.embedding.dimension", values.size.toLong())
+                        }
+                    }
+                    span.setAttribute("gen_ai.response.embedding.count", 1L)
+                }
+                // Vertex AI predict format: {"predictions":[{"embeddings":{"values":[...]}}]}
+                predictions?.firstOrNull()?.jsonObject?.get("embeddings")?.jsonObject?.let { emb ->
+                    emb["values"]?.let { values ->
                         if (values is JsonArray) {
                             span.setAttribute("gen_ai.response.embedding.dimension", values.size.toLong())
                         }
@@ -162,7 +232,7 @@ class GeminiContentGenHandler(
                 span.populateUnmappedAttributes(body, mappedEmbedResponseAttributes, PayloadType.RESPONSE)
             }
             "batchEmbedContents" -> {
-                // See: https://ai.google.dev/api/embeddings#v1beta.BatchEmbedContentsResponse
+                // Standard Gemini API format: {"embeddings":[{"values":[...]},...]}
                 body["embeddings"]?.let { embeddings ->
                     if (embeddings is JsonArray) {
                         span.setAttribute("gen_ai.response.embedding.count", embeddings.size.toLong())
@@ -170,6 +240,15 @@ class GeminiContentGenHandler(
                             if (values is JsonArray) {
                                 span.setAttribute("gen_ai.response.embedding.dimension", values.size.toLong())
                             }
+                        }
+                    }
+                }
+                // Vertex AI predict format: {"predictions":[{"embeddings":{"values":[...]}},...]}
+                predictions?.let {
+                    span.setAttribute("gen_ai.response.embedding.count", it.size.toLong())
+                    it.firstOrNull()?.jsonObject?.get("embeddings")?.jsonObject?.get("values")?.let { values ->
+                        if (values is JsonArray) {
+                            span.setAttribute("gen_ai.response.embedding.dimension", values.size.toLong())
                         }
                     }
                 }
@@ -252,6 +331,10 @@ class GeminiContentGenHandler(
                     }
                     usage.jsonObject["cachedContentTokenCount"]?.jsonPrimitive?.intOrNull?.let {
                         span.setAttribute("gen_ai.usage.cached_content_token_count", it.toLong())
+                    }
+                    // Thinking token count for extended-thinking models (Gemini 2.5)
+                    usage.jsonObject["thoughtsTokenCount"]?.jsonPrimitive?.intOrNull?.let {
+                        span.setAttribute("gen_ai.usage.thoughts_token_count", it.toLong())
                     }
 
                     /**
@@ -392,7 +475,11 @@ class GeminiContentGenHandler(
         "generationConfig",
         "taskType",
         "outputDimensionality",
-        "cachedContent"
+        "cachedContent",
+        "systemInstruction",
+        "safetySettings",
+        "instances",
+        "parameters",
     )
 
     private val mappedGenerateContentResponseAttributes: List<String> = listOf(
@@ -403,11 +490,13 @@ class GeminiContentGenHandler(
     )
 
     private val mappedEmbedResponseAttributes: List<String> = listOf(
-        "embedding"
+        "embedding",
+        "predictions",
     )
 
     private val mappedBatchEmbedResponseAttributes: List<String> = listOf(
-        "embeddings"
+        "embeddings",
+        "predictions",
     )
 
     private val mappedCountTokensResponseAttributes: List<String> = listOf(
