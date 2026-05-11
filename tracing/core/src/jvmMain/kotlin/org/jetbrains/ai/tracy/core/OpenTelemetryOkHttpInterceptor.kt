@@ -10,6 +10,7 @@ import io.opentelemetry.api.trace.StatusCode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.OkHttpClient
@@ -261,8 +262,9 @@ class OpenTelemetryOkHttpInterceptor(
                         } catch (_: Exception) {
                             JsonObject(emptyMap())
                         }
-                        else -> {
-                            JsonObject(emptyMap())
+                        else -> buildJsonObject {
+                            val size = response.body?.contentLength() ?: -1L
+                            if (size >= 0L) put("_tracy_binary_size_bytes", JsonPrimitive(size))
                         }
                     }
 
