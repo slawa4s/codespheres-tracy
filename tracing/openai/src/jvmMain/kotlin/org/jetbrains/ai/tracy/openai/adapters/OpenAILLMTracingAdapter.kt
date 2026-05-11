@@ -20,6 +20,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.Conversatio
 import org.jetbrains.ai.tracy.openai.adapters.handlers.files.FilesOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateEditOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.images.ImagesCreateOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.moderations.ModerationsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GenAiSystemIncubatingValues
@@ -51,6 +52,11 @@ private enum class OpenAIApiType(val route: String) {
     // Must be checked before CHAT_COMPLETIONS so that "audio/transcriptions" is not missed
     // and the handler can parse multipart form-data rather than falling back to JSON.
     AUDIO_TRANSCRIPTIONS("audio/transcriptions"),
+
+    // See: https://platform.openai.com/docs/api-reference/moderations
+    // Must be checked before CHAT_COMPLETIONS so that "moderations" is not mismatched
+    // by the fallback null branch and silently routed to ChatCompletionsOpenAIApiEndpointHandler.
+    MODERATIONS("moderations"),
 
     // See: https://platform.openai.com/docs/api-reference/completions
     CHAT_COMPLETIONS("completions"),
@@ -101,6 +107,7 @@ private enum class OpenAIApiType(val route: String) {
  * - **Image Generation**: `/v1/images/generations`
  * - **Image Editing**: `/v1/images/edits`
  * - **Video Generation**: `/v1/videos`
+ * - **Moderations API**: `/v1/moderations`
  *
  * ## Example Usage
  * ```kotlin
@@ -184,6 +191,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.AUDIO_TRANSCRIPTIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSCRIPTIONS) {
                 AudioTranscriptionOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.MODERATIONS -> handlers.getOrPut(OpenAIApiType.MODERATIONS) {
+                ModerationsOpenAIApiEndpointHandler()
             }
 
             OpenAIApiType.CHAT_COMPLETIONS -> handlers.getOrPut(OpenAIApiType.CHAT_COMPLETIONS) {
