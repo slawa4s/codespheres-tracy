@@ -23,6 +23,8 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MAX_TOKENS
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_FINISH_REASONS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.Json
@@ -31,10 +33,13 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 
 /**
@@ -44,8 +49,40 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        val operationName = when {
+            request.method == "DELETE" -> "chat.completions.delete"
+            request.method == "PATCH" -> "chat.completions.update"
+            request.method == "GET" && request.url.pathSegments.contains("messages") -> "chat.completions.messages.list"
+            request.method == "GET" && request.url.pathSegments.any { it.matches(Regex("[a-zA-Z0-9_-]{10,}")) } -> "chat.completions.retrieve"
+            request.method == "GET" -> "chat.completions.list"
+            else -> "chat"
+        }
+        span.setAttribute("gen_ai.operation.name", operationName)
+        span.setAttribute("openai.api.type", "chat_completions")
+
+        // Handle list/retrieve/delete GET query params
+        if (request.method == "GET" || request.method == "DELETE") {
+            val params = request.url.parameters
+            params.queryParameter("limit")?.toLongOrNull()?.let { span.setAttribute("tracy.request.limit", it) }
+            params.queryParameter("order")?.let { span.setAttribute("tracy.request.order", it) }
+            params.queryParameter("after")?.let { span.setAttribute("tracy.request.after", it) }
+            // For messages.list: extract completion_id from path
+            if (operationName == "chat.completions.messages.list") {
+                val segments = request.url.pathSegments
+                val completionsIdx = segments.indexOf("completions")
+                if (completionsIdx >= 0 && segments.size > completionsIdx + 1) {
+                    span.setAttribute("tracy.request.completion_id", segments[completionsIdx + 1])
+                }
+            }
+        }
+
         val body = request.body.asJson()?.jsonObject ?: return
+
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
+
+        body["stream"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("gen_ai.request.stream", it)
+        }
 
         body["messages"]?.let {
             for ((index, message) in it.jsonArray.withIndex()) {
@@ -71,6 +108,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         // See: https://platform.openai.com/docs/api-reference/chat/create
         body["tools"]?.let { tools ->
             if (tools is JsonArray) {
+                span.setAttribute("gen_ai.tool.definitions", tools.toString())
                 for ((index, tool) in tools.jsonArray.withIndex()) {
                     val toolType = tool.jsonObject["type"]?.jsonPrimitive?.content
                     span.setAttribute("gen_ai.tool.$index.type", toolType)
@@ -85,10 +123,42 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                         span.setAttribute("gen_ai.tool.$index.description", toolDescription?.orRedactedInput())
                         span.setAttribute("gen_ai.tool.$index.parameters", toolParameters?.orRedactedInput())
                         span.setAttribute("gen_ai.tool.$index.strict", strict)
+
+                        if (index == 0) {
+                            toolName?.let { name -> span.setAttribute("gen_ai.tool.name", name.orRedactedInput()) }
+                        }
                     }
                 }
             }
         }
+
+        // tool_choice: string primitive or object with function.name
+        body["tool_choice"]?.let { toolChoice ->
+            val toolChoiceValue = when (toolChoice) {
+                is JsonPrimitive -> toolChoice.content
+                is JsonObject -> toolChoice["function"]?.jsonObject?.get("name")?.jsonPrimitive?.content
+                else -> null
+            }
+            toolChoiceValue?.let { span.setAttribute("tracy.request.tool_choice", it) }
+        }
+
+        (body["max_tokens"] ?: body["max_completion_tokens"])?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it)
+        }
+
+        body["logprobs"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("tracy.request.logprobs", it) }
+
+        body["top_logprobs"]?.jsonPrimitive?.intOrNull?.let { span.setAttribute("tracy.request.top_logprobs", it.toLong()) }
+
+        body["store"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("tracy.request.store", it) }
+
+        (body["messages"] as? JsonArray)?.size?.let { span.setAttribute("tracy.request.messages.count", it.toLong()) }
+
+        (body["messages"] as? JsonArray)?.count { (it as? JsonObject)?.get("role")?.jsonPrimitive?.content == "system" }?.let {
+            if (it > 0) span.setAttribute("tracy.request.system_messages.count", it.toLong())
+        }
+
+        (body["metadata"] as? JsonObject)?.size?.let { if (it > 0) span.setAttribute("tracy.request.metadata.count", it.toLong()) }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.REQUEST)
     }
@@ -157,15 +227,20 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                         // sometimes, this prop is explicitly set to null, hence, being JsonNull.
                         // therefore, we check for the required array type
                         if (toolCalls is JsonArray) {
+                            span.setAttribute("tracy.response.tool_call.count", toolCalls.size.toLong())
                             for ((toolCallIndex, toolCall) in toolCalls.jsonArray.withIndex()) {
+                                val callId = toolCall.jsonObject["id"]?.jsonPrimitive?.content
                                 span.setAttribute(
                                     "gen_ai.completion.$index.tool.$toolCallIndex.call.id",
-                                    toolCall.jsonObject["id"]?.jsonPrimitive?.content
+                                    callId
                                 )
                                 span.setAttribute(
                                     "gen_ai.completion.$index.tool.$toolCallIndex.call.type",
                                     toolCall.jsonObject["type"]?.jsonPrimitive?.content
                                 )
+                                if (toolCallIndex == 0) {
+                                    callId?.let { span.setAttribute("gen_ai.tool.call.id", it) }
+                                }
 
                                 toolCall.jsonObject["function"]?.jsonObject?.let {
                                     val name = it["name"]?.jsonPrimitive?.content
@@ -179,6 +254,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                                         "gen_ai.completion.$index.tool.$toolCallIndex.arguments",
                                         arguments?.orRedactedOutput()
                                     )
+                                    if (toolCallIndex == 0) {
+                                        arguments?.let { args -> span.setAttribute("gen_ai.tool.call.arguments", args.orRedactedOutput()) }
+                                    }
                                 }
                             }
                         }
@@ -192,8 +270,46 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             }
         }
 
-        body["usage"]?.let { usage ->
-            setUsageAttributes(span, usage.jsonObject)
+        (body["usage"] as? JsonObject)?.let { usage ->
+            setUsageAttributes(span, usage)
+        }
+
+        // logprobs token count from first choice
+        ((body["choices"] as? JsonArray)?.firstOrNull()?.let { it as? JsonObject }?.get("logprobs") as? JsonObject)
+            ?.get("content")?.let { it as? JsonArray }?.size?.let {
+                span.setAttribute("tracy.response.logprobs.token.count", it.toLong())
+            }
+
+        val finishReasons = (body["choices"] as? JsonArray)
+            ?.mapNotNull { (it as? JsonObject)?.get("finish_reason")?.jsonPrimitive?.contentOrNull }
+            ?: emptyList()
+        if (finishReasons.isNotEmpty()) {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons)
+        }
+
+        body["service_tier"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("openai.response.service_tier", it)
+        }
+        body["system_fingerprint"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("openai.response.system_fingerprint", it)
+        }
+
+        // Delete response: record deleted flag and response id
+        body["deleted"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("tracy.response.deleted", it) }
+        body["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("gen_ai.response.id", it) }
+
+        // Messages list response (chat.completions.messages.list)
+        val dataArray = body["data"] as? JsonArray
+        if (dataArray != null) {
+            val firstObject = dataArray.firstOrNull()?.let { it as? JsonObject }
+            if (firstObject != null && firstObject.containsKey("role")) {
+                // data contains message objects
+                dataArray.size.let { span.setAttribute("tracy.chat.completion.messages.count", it.toLong()) }
+            } else {
+                // data contains chat completion objects (list response)
+                dataArray.size.let { span.setAttribute("tracy.chat.completions.count", it.toLong()) }
+            }
+            body["has_more"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("tracy.response.has_more", it) }
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
@@ -201,6 +317,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
 
     override fun handleStreaming(span: Span, events: String): Unit = runCatching {
         var role: String? = null
+        var finishReason: String? = null
+        var responseId: String? = null
+        var responseModel: String? = null
         val out = buildString {
             for (line in events.lineSequence()) {
                 if (!line.startsWith("data:")) {
@@ -212,6 +331,13 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     Json.parseToJsonElement(data).jsonObject
                 }.getOrNull() ?: continue
 
+                if (responseId == null) {
+                    responseId = event["id"]?.jsonPrimitive?.contentOrNull
+                }
+                if (responseModel == null) {
+                    responseModel = event["model"]?.jsonPrimitive?.contentOrNull
+                }
+
                 val choice = event["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
                 val delta = choice["delta"]?.jsonObject ?: continue
 
@@ -219,6 +345,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
                     role = delta["role"]?.jsonPrimitive?.content
                 }
                 delta["content"]?.jsonPrimitive?.content?.let { append(it) }
+                choice["finish_reason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it }
             }
         }
 
@@ -227,6 +354,9 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             span.setAttribute("gen_ai.completion.0.content", out.orRedacted(kind))
         }
         role?.let { span.setAttribute("gen_ai.completion.0.role", it) }
+        finishReason?.let { span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, listOf(it)) }
+        responseId?.let { span.setAttribute("gen_ai.response.id", it) }
+        responseModel?.let { span.setAttribute("gen_ai.response.model", it) }
 
         return@runCatching
     }.getOrElse { exception ->
@@ -319,6 +449,7 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "messages",
         "model",
         "tools",
+        "tool_choice",
         "choices",
         "temperature"
     )

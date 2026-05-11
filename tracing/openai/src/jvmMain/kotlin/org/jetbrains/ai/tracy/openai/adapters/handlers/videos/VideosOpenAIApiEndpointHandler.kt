@@ -6,12 +6,20 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.videos
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes.*
 
 /**
@@ -48,12 +56,47 @@ internal class VideosOpenAIApiEndpointHandler(
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val route = detectRoute(request.url, request.method)
+        span.setAttribute(GEN_AI_OPERATION_NAME, operationNameFor(route))
         routeHandlers[route]?.handleRequest(span, request)
+
+        if (request.method == "GET") {
+            val params = request.url.parameters
+            params.queryParameter("limit")?.toLongOrNull()?.let { span.setAttribute("tracy.request.limit", it) }
+            params.queryParameter("order")?.let { span.setAttribute("tracy.request.order", it) }
+            params.queryParameter("after")?.let { span.setAttribute("tracy.request.after", it) }
+        }
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val route = detectRoute(response.url, response.requestMethod)
         routeHandlers[route]?.handleResponse(span, response)
+
+        val body = response.body.asJson()?.jsonObject ?: return
+
+        val objectType = body["object"]?.jsonPrimitive?.contentOrNull
+        objectType?.let { span.setAttribute("tracy.response.object", it) }
+
+        when (objectType) {
+            "video", "video.deleted" -> {
+                body["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("gen_ai.response.id", it) }
+                body["status"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.status", it) }
+                body["model"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.model", it) }
+                body["created_at"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
+                body["progress"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.progress", it) }
+                body["seconds"]?.jsonPrimitive?.intOrNull?.let { span.setAttribute("tracy.response.seconds", it.toLong()) }
+                body["size"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.size", it) }
+                body["deleted"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("tracy.response.deleted", it) }
+            }
+            "list" -> {
+                val data = body["data"]?.jsonArray
+                span.setAttribute("tracy.response.list.count", (data?.size ?: 0).toLong())
+                body["has_more"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("tracy.response.has_more", it) }
+            }
+            else -> {
+                // fallback: try to extract id and status
+                body["id"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("gen_ai.response.id", it) }
+            }
+        }
     }
 
     override fun handleStreaming(span: Span, events: String) {
@@ -103,6 +146,15 @@ internal class VideosOpenAIApiEndpointHandler(
         LIST,     // GET /videos
         VIDEO_CONTENT,  // GET /videos/{video_id}/content
         REMIX     // POST /videos/{video_id}/remix
+    }
+
+    private fun operationNameFor(route: VideoRoute): String = when (route) {
+        VideoRoute.CREATE -> "videos.create"
+        VideoRoute.GET_VIDEO -> "videos.retrieve"
+        VideoRoute.DELETE -> "videos.delete"
+        VideoRoute.LIST -> "videos.list"
+        VideoRoute.VIDEO_CONTENT -> "videos.content"
+        VideoRoute.REMIX -> "videos.remix"
     }
 
     companion object {

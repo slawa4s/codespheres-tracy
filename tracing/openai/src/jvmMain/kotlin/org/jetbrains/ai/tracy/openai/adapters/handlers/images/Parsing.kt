@@ -77,11 +77,13 @@ internal fun handleStreamedImage(
             """.trimIndent()
             )
             span.setAttribute("gen_ai.completion.0.content", content.asString.orRedactedOutput())
+            span.setAttribute("gen_ai.output.type", "image")
 
             data["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
+            data["created_at"]?.jsonPrimitive?.contentOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
 
             // insert other attributes
-            val manuallyParsedKeys = listOf("b64_json", "usage")
+            val manuallyParsedKeys = listOf("b64_json", "usage", "created_at")
             for ((key, value) in data.entries) {
                 if (key !in manuallyParsedKeys) {
                     span.setAttribute("gen_ai.response.$key", value.asString)
