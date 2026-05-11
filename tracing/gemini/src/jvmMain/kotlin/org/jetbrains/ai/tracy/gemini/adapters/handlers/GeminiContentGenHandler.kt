@@ -20,6 +20,7 @@ import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 
@@ -32,6 +33,7 @@ class GeminiContentGenHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        span.setAttribute("gemini.api.type", "models")
         // See: https://ai.google.dev/api/caching#Content
         val body = request.body.asJson()?.jsonObject ?: return
 
@@ -192,7 +194,7 @@ class GeminiContentGenHandler(
                 span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
             }
             usage.jsonObject["totalTokenCount"]?.jsonPrimitive?.intOrNull?.let {
-                span.setAttribute("gen_ai.usage.total_tokens", it.toLong())
+                span.setAttribute("gemini.usage.total_tokens", it.toLong())
             }
 
             /**
@@ -217,7 +219,67 @@ class GeminiContentGenHandler(
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
 
-    override fun handleStreaming(span: Span, events: String) = Unit
+    /**
+     * Parses Gemini SSE stream (`data: <GenerateContentResponse JSON>` lines), accumulates
+     * candidate text across chunks, and sets `gen_ai.response.id`, `gen_ai.response.model`,
+     * `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`,
+     * `gen_ai.completion.0.content`, and `gen_ai.completion.0.finish_reason`.
+     */
+    override fun handleStreaming(span: Span, events: String) {
+        runCatching {
+        var responseId: String? = null
+        var responseModel: String? = null
+        var finishReason: String? = null
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
+
+        val accumulatedText = buildString {
+            for (line in events.lineSequence()) {
+                val data = when {
+                    line.startsWith("data:") -> line.removePrefix("data:").trim()
+                    else -> continue
+                }
+
+                val event = runCatching {
+                    Json.parseToJsonElement(data).jsonObject
+                }.getOrNull() ?: continue
+
+                event["candidates"]?.jsonArray?.firstOrNull()?.jsonObject?.let { candidate ->
+                    candidate["content"]?.jsonObject?.get("parts")?.jsonArray?.let { parts ->
+                        for (part in parts) {
+                            part.jsonObject["text"]?.jsonPrimitive?.contentOrNull?.let { append(it) }
+                        }
+                    }
+                    candidate["finishReason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it }
+                }
+
+                if (responseId == null) {
+                    responseId = event["responseId"]?.jsonPrimitive?.contentOrNull
+                }
+                if (responseModel == null) {
+                    responseModel = event["modelVersion"]?.jsonPrimitive?.contentOrNull
+                }
+
+                event["usageMetadata"]?.jsonObject?.let { usage ->
+                    usage["promptTokenCount"]?.jsonPrimitive?.intOrNull?.let { inputTokens = it }
+                    usage["candidatesTokenCount"]?.jsonPrimitive?.intOrNull?.let { outputTokens = it }
+                }
+            }
+        }
+
+        if (accumulatedText.isNotEmpty()) {
+            span.setAttribute("gen_ai.completion.0.content", accumulatedText.orRedactedOutput())
+        }
+        finishReason?.let { span.setAttribute("gen_ai.completion.0.finish_reason", it) }
+        responseId?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        responseModel?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
+        inputTokens?.let { span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it) }
+        outputTokens?.let { span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it) }
+        }.getOrElse { exception ->
+            span.setStatus(StatusCode.ERROR)
+            span.recordException(exception)
+        }
+    }
 
     private fun parseRequestMediaContent(body: JsonObject): MediaContent? {
         val contents = body["contents"]

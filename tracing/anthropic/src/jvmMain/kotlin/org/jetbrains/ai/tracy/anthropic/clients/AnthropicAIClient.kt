@@ -138,6 +138,10 @@ fun instrument(client: AnthropicClient) {
     // Scan the full object graph so all service impls (including BatchServiceImpl) are covered,
     // regardless of whether .batches() returns a factory-created instance per call.
     tryPatchAllOkHttpClients(client, interceptor)
+    // Force lazy-init of BatchServiceImpl before scanning: a null field at instrument-time is
+    // skipped by tryPatchAllOkHttpClients, so calling .messages().batches() ensures the service
+    // is instantiated and its OkHttpClient is reachable.
+    runCatching { tryPatchAllOkHttpClients(client.messages().batches(), interceptor) }
 }
 
 /**
