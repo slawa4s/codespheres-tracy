@@ -213,6 +213,28 @@ class AnthropicBatchesEndpointHandlerTest {
         assertEquals(0L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.expired")])
     }
 
+    // ── Error responses ───────────────────────────────────────────────────────
+
+    @Test
+    fun `batch error response does not set gen_ai output type`() {
+        val errorBody = """{"type":"error","error":{"type":"invalid_request_error","message":"request body is required"}}"""
+        val handler = AnthropicBatchesEndpointHandler()
+        val span = tracer.spanBuilder("test").startSpan()
+        handler.handleRequestAttributes(span, request("/v1/messages/batches", "POST"))
+        val errorResponse = object : TracyHttpResponse {
+            override val contentType = TracyContentType.Application.Json
+            override val code = 422
+            override val body = TracyHttpResponseBody.Json(Json.parseToJsonElement(errorBody))
+            override val url = url("/v1/messages/batches")
+            override val requestMethod = "POST"
+            override fun isError() = true
+        }
+        handler.handleResponseAttributes(span, errorResponse)
+        span.end()
+        val attrs = spanExporter.finishedSpanItems.last().attributes
+        assertEquals(null, attrs[AttributeKey.stringKey("gen_ai.output.type")])
+    }
+
     // ── Distinct operation names (no collisions) ──────────────────────────────
 
     @Test

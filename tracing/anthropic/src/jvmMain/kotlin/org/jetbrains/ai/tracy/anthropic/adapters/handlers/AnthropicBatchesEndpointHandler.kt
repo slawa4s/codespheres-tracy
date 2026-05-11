@@ -42,6 +42,7 @@ internal class AnthropicBatchesEndpointHandler : EndpointApiHandler {
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        if (response.isError()) return
         span.setAttribute("gen_ai.output.type", "message_batch")
         val body = response.body.asJson()?.jsonObject ?: return
 
