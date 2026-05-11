@@ -1,5 +1,19 @@
 # Changelog
 
+## Session 9
+
+**Session:** 9 | **Branch:** `claude-session-9` | **Base:** `claude-session-8`
+**Evaluator attempts:** 2 | **Artifacts:** `artifacts/9/evaluation_0.json` (baseline, score 100, 94 scoreable/60 provider_error), `artifacts/9/evaluation_1.json` (after changes, score 100, 93 scoreable/61 provider_error)
+
+### Anthropic adapter improvements
+- `AnthropicLLMTracingAdapter`: added `gen_ai.output.type = "model"` for `models.retrieve` (set from request side when URL has a model ID segment)
+- `AnthropicLLMTracingAdapter`: added `gen_ai.output.type = "message_batch"` for `batches.create` (POST with no batch ID) and `gen_ai.output.type = "message_batch_deleted"` for `batches.delete` (DELETE with batch ID)
+- `AnthropicLLMTracingAdapter`: added `gen_ai.output.type = "file"` for `files.upload` (POST) and `gen_ai.output.type = "file_deleted"` for `files.delete` (DELETE with file ID); all set from request side so the attribute is always present regardless of response body
+- `AnthropicLLMTracingAdapter`: added multipart form-data parsing for `files.upload` requests — extracts `gen_ai.request.file.filename`, `gen_ai.request.file.mime_type`, and `gen_ai.request.file.size_bytes` from the `file` part of the multipart body
+- `AnthropicLLMTracingAdapter`: added response attribute extraction for `files` API type — extracts `gen_ai.response.file.id`, `gen_ai.response.file.filename`, `gen_ai.response.file.mime_type`, `gen_ai.response.file.size_bytes`, `gen_ai.response.file.created_at`, and `gen_ai.response.file.downloadable` from the response body
+- Updated `mappedResponseAttributes` to include new files response field names (`filename`, `mime_type`, `size`, `downloadable`) to prevent double-emission via `populateUnmappedAttributes`
+- Added `AnthropicOutputTypeTest`: 5 MockWebServer-based tests verifying `gen_ai.output.type` for `models.retrieve`, `batches.create`, `batches.delete`, `files.upload` (including request/response file attributes), and `files.delete`
+
 ## Session 8
 
 **Session:** 8 | **Branch:** `claude-session-8` | **Base:** `claude-session-7`
