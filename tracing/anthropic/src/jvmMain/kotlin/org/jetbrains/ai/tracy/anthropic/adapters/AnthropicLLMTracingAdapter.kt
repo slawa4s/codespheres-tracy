@@ -349,9 +349,11 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
                     caps["citations"]?.jsonPrimitive?.booleanOrNull?.let {
                         span.setAttribute("gen_ai.response.model.capabilities.citations", it)
                     }
-                    caps["vision"]?.jsonPrimitive?.booleanOrNull?.let {
-                        span.setAttribute("gen_ai.response.model.capabilities.vision", it)
-                    }
+                    // Anthropic API nests this under capabilities.image_input.supported
+                    (caps["image_input"] as? JsonObject)
+                        ?.get("supported")?.jsonPrimitive?.booleanOrNull?.let {
+                            span.setAttribute("gen_ai.response.model.capabilities.vision", it)
+                        }
                 }
             }
         }

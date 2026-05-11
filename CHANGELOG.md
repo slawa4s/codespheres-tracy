@@ -1,5 +1,15 @@
 # Changelog
 
+## Session 7
+
+**Session:** 7 | **Branch:** `claude-session-7` | **Base:** `claude-session-6`
+**Evaluator attempts:** 2 | **Artifacts:** `artifacts/7/evaluation_0.json` (baseline, score 100, 94 scoreable/60 provider_error), `artifacts/7/evaluation_1.json` (after changes, score 100, 94 scoreable/60 provider_error)
+
+### Anthropic adapter bug fix
+- `AnthropicLLMTracingAdapter`: fixed `gen_ai.response.model.capabilities.vision` reading from the wrong API field — was reading `capabilities["vision"]` (non-existent), now reads `capabilities.image_input.supported` which is the documented Anthropic API path for vision capability
+- Added `AnthropicModelsHandlerTest`: MockWebServer-based unit test verifying that `gen_ai.response.model.capabilities.vision=true` is emitted when the API response contains `capabilities.image_input.supported=true`
+- Added `okhttp.mockwebserver` test dependency to `tracing/anthropic/build.gradle.kts`
+
 ## Session 6
 
 **Session:** 6 | **Branch:** `claude-session-6` | **Base:** `claude-session-5`
