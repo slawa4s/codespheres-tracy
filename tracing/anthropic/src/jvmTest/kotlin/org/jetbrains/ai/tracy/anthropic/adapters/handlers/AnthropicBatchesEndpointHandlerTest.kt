@@ -147,7 +147,7 @@ class AnthropicBatchesEndpointHandlerTest {
             "/v1/messages/batches/msgbatch_abc", "DELETE",
             responseJson = """{"id":"msgbatch_abc","deleted":true,"type":"message_batch_deleted"}"""
         )
-        assertEquals("message_batch_deleted", attrs[AttributeKey.stringKey("anthropic.output.type")])
+        assertEquals("message_batch_deleted", attrs[AttributeKey.stringKey("gen_ai.output.type")])
     }
 
     // ── anthropic.api.type ────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ class AnthropicBatchesEndpointHandlerTest {
             requestJson = """{"requests":[]}""",
             responseJson = """{"id":"msgbatch_x","processing_status":"in_progress","created_at":"2024-01-01T00:00:00Z","expires_at":"2024-01-02T00:00:00Z","request_counts":{"processing":0,"succeeded":0,"errored":0,"canceled":0,"expired":0}}"""
         )
-        assertEquals("message_batch", attrs[AttributeKey.stringKey("anthropic.output.type")])
+        assertEquals("message_batch", attrs[AttributeKey.stringKey("gen_ai.output.type")])
     }
 
     // ── anthropic.batch.* ────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ class AnthropicBatchesEndpointHandlerTest {
         handler.handleResponseAttributes(span, errorResponse)
         span.end()
         val attrs = spanExporter.finishedSpanItems.last().attributes
-        assertEquals(null, attrs[AttributeKey.stringKey("anthropic.output.type")])
+        assertEquals(null, attrs[AttributeKey.stringKey("gen_ai.output.type")])
     }
 
     // ── Distinct operation names (no collisions) ──────────────────────────────
