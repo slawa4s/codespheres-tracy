@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Audited `BatchesOpenAIApiEndpointHandler` for non-registry `gen_ai.*` attribute names; confirmed the handler's `batches.create` branch uses only `tracy.request.batch.*` attributes and contains no `gen_ai.request.batch.size` violation — no rename required
+
 - Added `batchesCreateWith422ResponseRecordsErrorSpan` MockWebServer integration test to `AnthropicBatchesEndpointHandlerTest` covering the full `OpenTelemetryOkHttpInterceptor` → `AnthropicLLMTracingAdapter` → `AnthropicBatchesEndpointHandler` pipeline for 422 error responses, asserting `gen_ai.provider.name`, `anthropic.api.type`, `http.response.status_code`, `error.type`, `server.address`, and `server.port` are all recorded on the exported span
 - Fixed `AnthropicBatchesEndpointHandler` to skip batch-metadata attributes (including `gen_ai.output.type = "message_batch"`) on error responses (4xx/5xx), preventing false batch-type tagging on error spans
 - Added `batches.delete` operation to `AnthropicBatchesEndpointHandler`: DELETE requests to `/v1/messages/batches/{id}` now emit `gen_ai.operation.name = "batches.delete"`; `gen_ai.output.type` is now read from `body["type"]` (falling back to `"message_batch"`) so DELETE responses correctly emit `gen_ai.output.type = "message_batch_deleted"`
