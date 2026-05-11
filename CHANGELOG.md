@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed string-quoting bug in `LLMTracingAdapter.populateUnmappedAttributes`: JSON string primitives are now stored without surrounding quotes (e.g. `alloy` instead of `"alloy"`) by using `JsonPrimitive.content` for string values and `.toString()` for all other JSON element types
 - Added `anthropic.api.type = "messages"`, `gen_ai.operation.name = "chat"`, and `gen_ai.output.type = "message"` to every Anthropic Messages API span, set unconditionally before request-body parsing so they appear on all paths including streaming and error spans
 - Added Anthropic SSE streaming support: `AnthropicLLMTracingAdapter` now detects `stream: true` in the request body and delegates to `AnthropicMessagesEndpointHandler.handleStreaming`, which parses `message_start` / `content_block_delta` / `message_delta` / `message_stop` events to capture `gen_ai.response.id`, `gen_ai.response.model`, `gen_ai.response.role`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, and `gen_ai.completion.0.content`
 - Added `gen_ai.operation.name = "generate_content"` and `gen_ai.output.type = "image"` span attributes to `ImagesCreateEditOpenAIApiEndpointHandler`
