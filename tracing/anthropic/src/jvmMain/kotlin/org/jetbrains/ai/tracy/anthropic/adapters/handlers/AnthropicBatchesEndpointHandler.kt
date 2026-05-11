@@ -36,41 +36,42 @@ internal class AnthropicBatchesEndpointHandler : EndpointApiHandler {
         if (operation == "batches.create") {
             val body = request.body.asJson()?.jsonObject ?: return
             body["requests"]?.jsonArray?.size?.let { count ->
-                span.setAttribute("anthropic.batch.request_size", count.toLong())
+                span.setAttribute("gen_ai.request.batch.size", count.toLong())
             }
         }
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        span.setAttribute("gen_ai.output.type", "message_batch")
         val body = response.body.asJson()?.jsonObject ?: return
 
         body["id"]?.jsonPrimitive?.content?.let {
-            span.setAttribute("anthropic.batch.id", it)
+            span.setAttribute("gen_ai.response.batch.id", it)
         }
         body["processing_status"]?.jsonPrimitive?.content?.let {
-            span.setAttribute("anthropic.batch.processing_status", it)
+            span.setAttribute("gen_ai.response.batch.processing_status", it)
         }
         body["created_at"]?.jsonPrimitive?.content?.let {
-            span.setAttribute("anthropic.batch.created_at", it)
+            span.setAttribute("gen_ai.response.batch.created_at", it)
         }
         body["expires_at"]?.jsonPrimitive?.content?.let {
-            span.setAttribute("anthropic.batch.expires_at", it)
+            span.setAttribute("gen_ai.response.batch.expires_at", it)
         }
         body["request_counts"]?.jsonObject?.let { counts ->
             counts["processing"]?.jsonPrimitive?.intOrNull?.let {
-                span.setAttribute("anthropic.batch.request_counts.processing", it.toLong())
+                span.setAttribute("gen_ai.response.batch.request_counts.processing", it.toLong())
             }
             counts["succeeded"]?.jsonPrimitive?.intOrNull?.let {
-                span.setAttribute("anthropic.batch.request_counts.succeeded", it.toLong())
+                span.setAttribute("gen_ai.response.batch.request_counts.succeeded", it.toLong())
             }
             counts["errored"]?.jsonPrimitive?.intOrNull?.let {
-                span.setAttribute("anthropic.batch.request_counts.errored", it.toLong())
+                span.setAttribute("gen_ai.response.batch.request_counts.errored", it.toLong())
             }
             counts["canceled"]?.jsonPrimitive?.intOrNull?.let {
-                span.setAttribute("anthropic.batch.request_counts.canceled", it.toLong())
+                span.setAttribute("gen_ai.response.batch.request_counts.canceled", it.toLong())
             }
             counts["expired"]?.jsonPrimitive?.intOrNull?.let {
-                span.setAttribute("anthropic.batch.request_counts.expired", it.toLong())
+                span.setAttribute("gen_ai.response.batch.request_counts.expired", it.toLong())
             }
         }
     }
