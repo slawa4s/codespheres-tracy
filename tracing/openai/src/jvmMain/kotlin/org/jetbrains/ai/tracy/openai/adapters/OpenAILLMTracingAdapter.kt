@@ -12,6 +12,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ChatCompletionsOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils
 import org.jetbrains.ai.tracy.openai.adapters.handlers.ResponsesOpenAIApiEndpointHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioSpeechOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranscriptionOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.audio.AudioTranslationOpenAIApiEndpointHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.BatchesOpenAIApiEndpointHandler
@@ -42,6 +43,9 @@ private enum class OpenAIApiType(val route: String) {
     // Must be checked before AUDIO_TRANSCRIPTIONS so that "audio/translations" is not accidentally
     // matched by the shorter "audio/transcriptions" substring check order.
     AUDIO_TRANSLATIONS("audio/translations"),
+
+    // See: https://platform.openai.com/docs/api-reference/audio/createSpeech
+    AUDIO_SPEECH("audio/speech"),
 
     // See: https://platform.openai.com/docs/api-reference/audio/createTranscription
     // Must be checked before CHAT_COMPLETIONS so that "audio/transcriptions" is not missed
@@ -89,6 +93,7 @@ private enum class OpenAIApiType(val route: String) {
  * - **Chat Completions**: `/v1/chat/completions`
  * - **Responses API**: `/v1/responses`
  * - **Conversations API**: `/v1/conversations` and `/v1/conversations/{id}/items`
+ * - **Audio Speech**: `/v1/audio/speech`
  * - **Audio Transcriptions**: `/v1/audio/transcriptions`
  * - **Audio Translations**: `/v1/audio/translations`
  * - **Files API**: `/v1/files`
@@ -171,6 +176,10 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
             OpenAIApiType.AUDIO_TRANSLATIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSLATIONS) {
                 AudioTranslationOpenAIApiEndpointHandler()
+            }
+
+            OpenAIApiType.AUDIO_SPEECH -> handlers.getOrPut(OpenAIApiType.AUDIO_SPEECH) {
+                AudioSpeechOpenAIApiEndpointHandler()
             }
 
             OpenAIApiType.AUDIO_TRANSCRIPTIONS -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSCRIPTIONS) {
