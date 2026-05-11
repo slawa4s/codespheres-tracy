@@ -13,12 +13,22 @@ import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter
 import io.opentelemetry.sdk.trace.SdkTracerProvider
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor
 import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
+import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.http.protocol.*
+import org.jetbrains.ai.tracy.core.instrument
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 
 /**
  * Unit tests for [AnthropicBatchesEndpointHandler].
@@ -125,6 +135,21 @@ class AnthropicBatchesEndpointHandlerTest {
         assertEquals("batches.results", attrs[AttributeKey.stringKey("gen_ai.operation.name")])
     }
 
+    @Test
+    fun `batches delete sets operation name`() {
+        val attrs = capture("/v1/messages/batches/msgbatch_abc", "DELETE")
+        assertEquals("batches.delete", attrs[AttributeKey.stringKey("gen_ai.operation.name")])
+    }
+
+    @Test
+    fun `batches delete sets output type to message_batch_deleted`() {
+        val attrs = capture(
+            "/v1/messages/batches/msgbatch_abc", "DELETE",
+            responseJson = """{"id":"msgbatch_abc","deleted":true,"type":"message_batch_deleted"}"""
+        )
+        assertEquals("message_batch_deleted", attrs[AttributeKey.stringKey("gen_ai.output.type")])
+    }
+
     // ── anthropic.api.type ────────────────────────────────────────────────────
 
     @Test
@@ -144,7 +169,7 @@ class AnthropicBatchesEndpointHandlerTest {
         }
     }
 
-    // ── anthropic.batch.size ─────────────────────────────────────────────────
+    // ── gen_ai.request.batch.size ────────────────────────────────────────────
 
     @Test
     fun `batches create records request batch size`() {
@@ -157,13 +182,13 @@ class AnthropicBatchesEndpointHandlerTest {
             }
         """.trimIndent()
         val attrs = capture("/v1/messages/batches", "POST", requestJson = requestBody)
-        assertEquals(2L, attrs[AttributeKey.longKey("anthropic.batch.size")])
+        assertEquals(2L, attrs[AttributeKey.longKey("gen_ai.request.batch.size")])
     }
 
     @Test
     fun `batches retrieve does not set batch size`() {
         val attrs = capture("/v1/messages/batches/msgbatch_abc", "GET")
-        assertEquals(null, attrs[AttributeKey.longKey("anthropic.batch.size")])
+        assertEquals(null, attrs[AttributeKey.longKey("gen_ai.request.batch.size")])
     }
 
     // ── gen_ai.output.type ───────────────────────────────────────────────────
@@ -178,7 +203,7 @@ class AnthropicBatchesEndpointHandlerTest {
         assertEquals("message_batch", attrs[AttributeKey.stringKey("gen_ai.output.type")])
     }
 
-    // ── anthropic.batch.* ────────────────────────────────────────────────────
+    // ── gen_ai.response.batch.* ──────────────────────────────────────────────
 
     @Test
     fun `response attributes are parsed from MessageBatch object`() {
@@ -202,33 +227,107 @@ class AnthropicBatchesEndpointHandlerTest {
             "/v1/messages/batches/msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", "GET",
             responseJson = responseBody
         )
-        assertEquals("msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", attrs[AttributeKey.stringKey("anthropic.batch.id")])
-        assertEquals("ended", attrs[AttributeKey.stringKey("anthropic.batch.processing_status")])
-        assertEquals("2024-09-24T18:37:24.100435Z", attrs[AttributeKey.stringKey("anthropic.batch.created_at")])
-        assertEquals("2024-09-25T18:37:24.100435Z", attrs[AttributeKey.stringKey("anthropic.batch.expires_at")])
-        assertEquals(0L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.processing")])
-        assertEquals(2L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.succeeded")])
-        assertEquals(1L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.errored")])
-        assertEquals(0L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.canceled")])
-        assertEquals(0L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.expired")])
+        assertEquals("msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", attrs[AttributeKey.stringKey("gen_ai.response.batch.id")])
+        assertEquals("ended", attrs[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
+        assertEquals("2024-09-24T18:37:24.100435Z", attrs[AttributeKey.stringKey("gen_ai.response.batch.created_at")])
+        assertEquals("2024-09-25T18:37:24.100435Z", attrs[AttributeKey.stringKey("gen_ai.response.batch.expires_at")])
+        assertEquals(0L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.processing")])
+        assertEquals(2L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")])
+        assertEquals(1L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.errored")])
+        assertEquals(0L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.canceled")])
+        assertEquals(0L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.expired")])
+    }
+
+    // ── Error responses ───────────────────────────────────────────────────────
+
+    @Test
+    fun `batch error response does not set gen_ai output type`() {
+        val errorBody = """{"type":"error","error":{"type":"invalid_request_error","message":"request body is required"}}"""
+        val handler = AnthropicBatchesEndpointHandler()
+        val span = tracer.spanBuilder("test").startSpan()
+        handler.handleRequestAttributes(span, request("/v1/messages/batches", "POST"))
+        val errorResponse = object : TracyHttpResponse {
+            override val contentType = TracyContentType.Application.Json
+            override val code = 422
+            override val body = TracyHttpResponseBody.Json(Json.parseToJsonElement(errorBody))
+            override val url = url("/v1/messages/batches")
+            override val requestMethod = "POST"
+            override fun isError() = true
+        }
+        handler.handleResponseAttributes(span, errorResponse)
+        span.end()
+        val attrs = spanExporter.finishedSpanItems.last().attributes
+        assertEquals(null, attrs[AttributeKey.stringKey("gen_ai.output.type")])
     }
 
     // ── Distinct operation names (no collisions) ──────────────────────────────
 
     @Test
-    fun `all four routes produce distinct operation names`() {
+    fun `all five routes produce distinct operation names`() {
         val ops = mutableSetOf<String>()
         val cases = listOf(
-            Triple("/v1/messages/batches",                      "POST", """{"requests":[]}"""),
-            Triple("/v1/messages/batches/msgbatch_abc",         "GET",  null),
-            Triple("/v1/messages/batches/msgbatch_abc/cancel",  "POST", null),
-            Triple("/v1/messages/batches/msgbatch_abc/results", "GET",  null),
+            Triple("/v1/messages/batches",                      "POST",   """{"requests":[]}"""),
+            Triple("/v1/messages/batches/msgbatch_abc",         "GET",    null),
+            Triple("/v1/messages/batches/msgbatch_abc",         "DELETE", null),
+            Triple("/v1/messages/batches/msgbatch_abc/cancel",  "POST",   null),
+            Triple("/v1/messages/batches/msgbatch_abc/results", "GET",    null),
         )
         for ((path, method, reqBody) in cases) {
             val name = capture(path, method, requestJson = reqBody)[AttributeKey.stringKey("gen_ai.operation.name")]!!
             ops.add(name)
             spanExporter.reset()
         }
-        assertEquals(4, ops.size, "All four batch routes must produce distinct operation names: $ops")
+        assertEquals(5, ops.size, "All five batch routes must produce distinct operation names: $ops")
+    }
+
+    // ── Full interceptor stack (MockWebServer) ────────────────────────────────
+
+    /**
+     * Exercises the full interceptor pipeline — [org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor]
+     * → [AnthropicLLMTracingAdapter] → [AnthropicBatchesEndpointHandler] — for a 422 error response,
+     * ensuring cross-cutting attributes (`gen_ai.provider.name`, `server.address`, `server.port`,
+     * `http.response.status_code`, `error.type`) and the handler-specific attribute
+     * (`anthropic.api.type`) are all recorded on the exported span.
+     */
+    @Test
+    fun `batchesCreateWith422ResponseRecordsErrorSpan`() {
+        val testExporter = InMemorySpanExporter.create()
+        val testProvider = SdkTracerProvider.builder()
+            .addSpanProcessor(SimpleSpanProcessor.create(testExporter))
+            .build()
+        TracingManager.setSdk(OpenTelemetrySdk.builder().setTracerProvider(testProvider).build())
+        TracingManager.isTracingEnabled = true
+
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(422)
+                .addHeader("Content-Type", "application/json")
+                .setBody("""{"type":"error","error":{"type":"invalid_request_error","message":"requests must not be empty"}}""")
+        )
+        server.start()
+
+        try {
+            val client = instrument(OkHttpClient(), AnthropicLLMTracingAdapter())
+            val request = Request.Builder()
+                .url(server.url("/v1/messages/batches"))
+                .post("""{"requests":[]}""".toRequestBody("application/json".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use {}
+
+            val spans = testExporter.finishedSpanItems
+            assertEquals(1, spans.size, "Expected exactly one span for the batch request")
+            val span = spans.first()
+
+            assertEquals("anthropic", span.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertEquals("batches", span.attributes[AttributeKey.stringKey("anthropic.api.type")])
+            assertEquals(422L, span.attributes[AttributeKey.longKey("http.response.status_code")])
+            assertNotNull(span.attributes[AttributeKey.stringKey("error.type")], "error.type must be set on 422 response")
+            assertNotNull(span.attributes[AttributeKey.stringKey("server.address")], "server.address must be set")
+            assertNotNull(span.attributes[AttributeKey.longKey("server.port")], "server.port must be set")
+        } finally {
+            server.shutdown()
+        }
     }
 }
