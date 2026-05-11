@@ -280,6 +280,31 @@ class AnthropicBatchesEndpointHandlerTest {
         assertEquals(5, ops.size, "All five batch routes must produce distinct operation names: $ops")
     }
 
+    // ── Robustness: identifier attributes survive malformed bodies ───────────
+
+    @Test
+    fun `batches create with empty body still sets identifier attributes`() {
+        val handler = AnthropicBatchesEndpointHandler()
+        val span = tracer.spanBuilder("test").startSpan()
+        handler.handleRequestAttributes(span, request("/v1/messages/batches", "POST", jsonBody = null))
+        span.end()
+        val attrs = spanExporter.finishedSpanItems.last().attributes
+        assertEquals("batches.create", attrs[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("batches", attrs[AttributeKey.stringKey("anthropic.api.type")])
+    }
+
+    @Test
+    fun `batches create with non-object body still sets identifier attributes`() {
+        // A JSON array instead of object would cause .jsonObject to throw without runCatching
+        val handler = AnthropicBatchesEndpointHandler()
+        val span = tracer.spanBuilder("test").startSpan()
+        handler.handleRequestAttributes(span, request("/v1/messages/batches", "POST", jsonBody = "[]"))
+        span.end()
+        val attrs = spanExporter.finishedSpanItems.last().attributes
+        assertEquals("batches.create", attrs[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("batches", attrs[AttributeKey.stringKey("anthropic.api.type")])
+    }
+
     // ── Full interceptor stack (MockWebServer) ────────────────────────────────
 
     /**

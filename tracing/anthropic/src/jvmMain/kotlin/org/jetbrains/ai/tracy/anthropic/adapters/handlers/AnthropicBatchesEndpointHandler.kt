@@ -35,9 +35,11 @@ internal class AnthropicBatchesEndpointHandler : EndpointApiHandler {
         span.setAttribute("gen_ai.operation.name", operation)
 
         if (operation == "batches.create") {
-            val body = request.body.asJson()?.jsonObject ?: return
-            body["requests"]?.jsonArray?.size?.let { count ->
-                span.setAttribute("gen_ai.request.batch.size", count.toLong())
+            runCatching {
+                val body = request.body.asJson()?.jsonObject ?: return@runCatching
+                body["requests"]?.jsonArray?.size?.let { count ->
+                    span.setAttribute("gen_ai.request.batch.size", count.toLong())
+                }
             }
         }
     }
