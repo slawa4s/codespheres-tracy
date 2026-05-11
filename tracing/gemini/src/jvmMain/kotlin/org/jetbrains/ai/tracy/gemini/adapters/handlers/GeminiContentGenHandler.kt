@@ -192,7 +192,7 @@ class GeminiContentGenHandler(
                 span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
             }
             usage.jsonObject["totalTokenCount"]?.jsonPrimitive?.intOrNull?.let {
-                span.setAttribute("gen_ai.usage.total_tokens", it.toLong())
+                span.setAttribute("gemini.usage.total_tokens", it.toLong())
             }
 
             /**
@@ -217,7 +217,58 @@ class GeminiContentGenHandler(
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.RESPONSE)
     }
 
-    override fun handleStreaming(span: Span, events: String) = Unit
+    override fun handleStreaming(span: Span, events: String): Unit = runCatching {
+        val contentBuilders = mutableMapOf<Int, StringBuilder>()
+        val lastFinishReasons = mutableMapOf<Int, String>()
+        var lastChunk: JsonObject? = null
+
+        for (line in events.lineSequence()) {
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+            val chunk = runCatching { Json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
+
+            lastChunk = chunk
+
+            chunk["candidates"]?.jsonArray?.let { candidates ->
+                for ((index, candidate) in candidates.withIndex()) {
+                    candidate.jsonObject["content"]?.jsonObject?.get("parts")?.jsonArray
+                        ?.forEach { part ->
+                            part.jsonObject["text"]?.jsonPrimitive?.content?.let { text ->
+                                contentBuilders.getOrPut(index) { StringBuilder() }.append(text)
+                            }
+                        }
+                    candidate.jsonObject["finishReason"]?.jsonPrimitive?.contentOrNull
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let { lastFinishReasons[index] = it }
+                }
+            }
+        }
+
+        lastChunk?.let { chunk ->
+            chunk["responseId"]?.jsonPrimitive?.content?.let {
+                span.setAttribute(GEN_AI_RESPONSE_ID, it)
+            }
+            chunk["modelVersion"]?.jsonPrimitive?.content?.let {
+                span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+            }
+            chunk["usageMetadata"]?.jsonObject?.let { usage ->
+                usage["promptTokenCount"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, it)
+                }
+                usage["candidatesTokenCount"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, it)
+                }
+            }
+        }
+
+        for ((index, builder) in contentBuilders) {
+            span.setAttribute("gen_ai.completion.$index.content", builder.toString().orRedactedOutput())
+        }
+
+        for ((index, reason) in lastFinishReasons) {
+            span.setAttribute("gen_ai.completion.$index.finish_reason", reason)
+        }
+    }.getOrElse { e -> span.recordException(e) }
 
     private fun parseRequestMediaContent(body: JsonObject): MediaContent? {
         val contents = body["contents"]

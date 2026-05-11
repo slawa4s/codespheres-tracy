@@ -13,6 +13,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiContentGenHandler
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiEmbedHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiImagenHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
@@ -48,6 +49,10 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
         model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
         operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
 
+        if ("models" in request.url.pathSegments) {
+            span.setAttribute("gemini.api.type", "models")
+        }
+
         val handler = selectHandler(request.url)
         handler.handleRequestAttributes(span, request)
     }
@@ -59,8 +64,10 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
     override fun getSpanName(request: TracyHttpRequest) = "Gemini-generation"
 
-    // streaming is not supported
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
+    override fun isStreamingRequest(request: TracyHttpRequest): Boolean {
+        val (_, operation) = request.url.modelAndOperation()
+        return operation == "streamGenerateContent"
+    }
     override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) {
         val handler = selectHandler(url)
         handler.handleStreaming(span, events)
@@ -68,6 +75,7 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
     private fun selectHandler(url: TracyHttpUrl): EndpointApiHandler = when {
         url.isImagenUrl() -> GeminiImagenHandler(extractor)
+        url.isEmbedUrl() -> GeminiEmbedHandler()
         else -> GeminiContentGenHandler(extractor)
     }
 
@@ -80,6 +88,12 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private fun TracyHttpUrl.isImagenUrl(): Boolean {
         val (model, operation) = this.modelAndOperation()
         return (model?.startsWith("imagen") == true) && (operation == "predict")
+    }
+
+    private fun TracyHttpUrl.isEmbedUrl(): Boolean {
+        val (model, operation) = this.modelAndOperation()
+        return operation == "embedContent" ||
+            (operation == "predict" && (model?.startsWith("text-embedding") == true || model?.startsWith("textembedding") == true))
     }
 
     private companion object {
