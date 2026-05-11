@@ -11,6 +11,7 @@ import org.jetbrains.ai.tracy.core.adapters.media.*
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.core.http.protocol.asFormData
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.ContentKind
 import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
@@ -72,13 +73,47 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         if (apiType.isNotEmpty()) span.setAttribute("anthropic.api.type", apiType)
         if (operationName.isNotEmpty()) span.setAttribute(GEN_AI_OPERATION_NAME, operationName)
 
-        // For model retrieve: extract model ID from URL path (no request body on GET)
-        if (apiType == "models") {
-            val segments = request.url.pathSegments.dropWhile { it.isBlank() }
-            // /v1/models/{model_id} has the model ID at index 2
-            if (segments.size >= 3) {
-                val modelId = segments[2]
-                if (modelId.isNotBlank()) span.setAttribute(GEN_AI_REQUEST_MODEL, modelId)
+        val urlSegments = request.url.pathSegments.dropWhile { it.isBlank() }
+
+        // Set gen_ai.output.type from request for endpoints where the type is deterministic.
+        when (apiType) {
+            "models" -> {
+                // /v1/models/{model_id} — retrieve returns a model object
+                if (urlSegments.size >= 3 && urlSegments[2].isNotBlank()) {
+                    span.setAttribute(GEN_AI_REQUEST_MODEL, urlSegments[2])
+                    span.setAttribute(GEN_AI_OUTPUT_TYPE, "model")
+                }
+            }
+            "batches" -> {
+                // /v1/messages/batches              POST  → create → message_batch
+                // /v1/messages/batches/{id}         DELETE → delete → message_batch_deleted
+                val hasBatchId = urlSegments.size >= 4 && urlSegments[3].isNotBlank()
+                when {
+                    !hasBatchId && request.method.uppercase() == "POST" ->
+                        span.setAttribute(GEN_AI_OUTPUT_TYPE, "message_batch")
+                    hasBatchId && request.method.uppercase() == "DELETE" ->
+                        span.setAttribute(GEN_AI_OUTPUT_TYPE, "message_batch_deleted")
+                }
+            }
+            "files" -> {
+                // /v1/files            POST → create → file
+                // /v1/files/{id}       GET  → retrieve → file
+                // /v1/files/{id}       DELETE → delete → file_deleted
+                val hasFileId = urlSegments.size >= 3 && urlSegments[2].isNotBlank()
+                if (hasFileId && request.method.uppercase() == "DELETE") {
+                    span.setAttribute(GEN_AI_OUTPUT_TYPE, "file_deleted")
+                } else if (request.method.uppercase() != "GET" || hasFileId) {
+                    // create (POST) and retrieve (GET /v1/files/{id}) both return file objects
+                    span.setAttribute(GEN_AI_OUTPUT_TYPE, "file")
+                }
+                // For file upload (POST /v1/files), extract metadata from multipart body
+                request.body.asFormData()?.parts?.forEach { part ->
+                    if (part.name == "file") {
+                        part.contentType?.let { span.setAttribute("gen_ai.request.file.mime_type", it.asString()) }
+                        part.filename?.let { span.setAttribute("gen_ai.request.file.filename", it) }
+                        span.setAttribute("gen_ai.request.file.size_bytes", part.content.size.toLong())
+                    }
+                }
             }
         }
 
@@ -356,6 +391,27 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
                         }
                 }
             }
+            "files" -> {
+                (body["id"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.response.file.id", it)
+                }
+                (body["filename"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.response.file.filename", it)
+                }
+                (body["mime_type"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.response.file.mime_type", it)
+                }
+                // Anthropic Files API returns size in bytes as "size"
+                (body["size"] as? JsonPrimitive)?.longOrNull?.let {
+                    span.setAttribute("gen_ai.response.file.size_bytes", it)
+                }
+                (body["created_at"] as? JsonPrimitive)?.contentOrNull?.let {
+                    span.setAttribute("gen_ai.response.file.created_at", it)
+                }
+                (body["downloadable"] as? JsonPrimitive)?.booleanOrNull?.let {
+                    span.setAttribute("gen_ai.response.file.downloadable", it)
+                }
+            }
         }
 
         // list pagination (models/list, files/list, batches/list)
@@ -623,7 +679,12 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
         "display_name",
         "max_input_tokens",
         "max_output_tokens",
-        "capabilities"
+        "capabilities",
+        // files response fields
+        "filename",
+        "mime_type",
+        "size",
+        "downloadable"
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
