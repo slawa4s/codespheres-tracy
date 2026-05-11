@@ -13,6 +13,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiContentGenHandler
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiEmbedHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiImagenHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
@@ -68,6 +69,7 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
 
     private fun selectHandler(url: TracyHttpUrl): EndpointApiHandler = when {
         url.isImagenUrl() -> GeminiImagenHandler(extractor)
+        url.isEmbedUrl() -> GeminiEmbedHandler()
         else -> GeminiContentGenHandler(extractor)
     }
 
@@ -80,6 +82,12 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     private fun TracyHttpUrl.isImagenUrl(): Boolean {
         val (model, operation) = this.modelAndOperation()
         return (model?.startsWith("imagen") == true) && (operation == "predict")
+    }
+
+    private fun TracyHttpUrl.isEmbedUrl(): Boolean {
+        val (model, operation) = this.modelAndOperation()
+        return operation == "embedContent" ||
+            (operation == "predict" && (model?.startsWith("text-embedding") == true || model?.startsWith("textembedding") == true))
     }
 
     private companion object {

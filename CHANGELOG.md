@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `GeminiEmbedHandler` for Gemini `embedContent` and Vertex AI text-embedding `predict` endpoints: sets `gen_ai.operation.name = "embedContent"` (overriding the URL-parsed verb), `gen_ai.output.type = "embedding"`, extracts `gen_ai.request.task_type` and `gen_ai.request.output_dimensionality` from the request body, and `gen_ai.response.embedding.dimension` (vector length) from the response; updated `GeminiLLMTracingAdapter.selectHandler` to route embed URLs to the new handler before falling back to `GeminiContentGenHandler`
+
 - Renamed `anthropic.batch.*` span attributes in `AnthropicBatchesEndpointHandler` to evaluator-suite conventions `gen_ai.response.batch.*` (`id`, `processing_status`, `created_at`, `expires_at`, `request_counts.*`) and `gen_ai.request.batch.size`; added unconditional `gen_ai.output.type = "message_batch"` in `handleResponseAttributes`
 - Added `AudioSpeechOpenAIApiEndpointHandler` for `POST /v1/audio/speech`: sets `gen_ai.operation.name = "audio.speech"`, `openai.api.type = "audio"`, `gen_ai.output.type = "speech"`, and extracts `gen_ai.request.model`, `tracy.request.voice`, `tracy.request.response_format`, and `tracy.request.speed` from the JSON request body; fixes the previous wrong dispatch to `ChatCompletionsOpenAIApiEndpointHandler` for this endpoint
 - Fixed `OpenTelemetryOkHttpInterceptor` binary-response fallback: the `else` branch now emits a `buildJsonObject` containing `_tracy_binary_size_bytes` (from `Content-Length`) instead of an always-empty `JsonObject`, enabling downstream handlers (e.g. `AudioSpeechOpenAIApiEndpointHandler`) to set `tracy.response.audio.size_bytes`
