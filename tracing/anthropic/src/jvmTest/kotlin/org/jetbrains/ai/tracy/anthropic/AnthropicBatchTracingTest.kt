@@ -364,6 +364,44 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
         }
     }
 
+    /**
+     * Verifies that [instrumentSdkClient] forces lazy initialisation of `BatchServiceImpl` so that
+     * a successful batches.create call still produces a span with the correct operation name and
+     * response attributes. Complements [sdk path records span for batches create with 400 error],
+     * which only covers the error path.
+     */
+    @Test
+    fun `sdk path records span for batches create with 200 response`() = runTest {
+        withMockServer { server ->
+            val sdkClient = AnthropicOkHttpClient.builder()
+                .baseUrl(server.url("/").toString().trimEnd('/'))
+                .apiKey("test-key")
+                .timeout(Duration.ofSeconds(5))
+                .build()
+            instrumentSdkClient(sdkClient)
+
+            server.enqueueBatchResponse(
+                id = "msgbatch_lazy_init",
+                processingStatus = "in_progress"
+            )
+
+            try {
+                sdkClient.messages().batches().create(
+                    BatchCreateParams.builder().requests(emptyList()).build()
+                )
+            } catch (_: Exception) {
+                // SDK may throw on empty requests — the span should still be recorded
+            }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val span = traces.first()
+            assertEquals("batches.create", span.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches", span.attributes[AttributeKey.stringKey("anthropic.api.type")])
+            assertNotNull(span.attributes[AttributeKey.stringKey("gen_ai.response.batch.id")])
+        }
+    }
+
     // ===== tryPatchAllOkHttpClients JDK-wrapper unwrapping =====
 
     @Test

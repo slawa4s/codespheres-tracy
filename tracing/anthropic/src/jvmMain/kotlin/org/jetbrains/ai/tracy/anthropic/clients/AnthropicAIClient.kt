@@ -118,8 +118,10 @@ private val logger = KotlinLogging.logger {}
  * - This function is **idempotent**: calling `instrument()` multiple times on the same client
  *   will not result in duplicate tracing.
  * - The full client object graph is scanned for `OkHttpClient` instances, ensuring that all
- *   service implementations (including `BatchServiceImpl`) share the patched interceptor
- *   regardless of how they are instantiated internally.
+ *   service implementations share the patched interceptor. `BatchServiceImpl` is lazily
+ *   initialised by the SDK; `instrument()` calls `client.batches()` to force that
+ *   `instrument()` calls `client.messages().batches()` to force that initialisation
+ *   before the scan so that its `OkHttpClient` is always reachable.
  * - Tracing can be controlled globally via `TracingManager.isTracingEnabled`.
  * - Content capture policies can be configured via `TracingManager.withCapturingPolicy(policy)`
  *   to redact sensitive input/output data.
@@ -138,6 +140,10 @@ fun instrument(client: AnthropicClient) {
     // Scan the full object graph so all service impls (including BatchServiceImpl) are covered,
     // regardless of whether .batches() returns a factory-created instance per call.
     tryPatchAllOkHttpClients(client, interceptor)
+    // Force lazy-init of BatchServiceImpl before scanning it: a null field at instrument-time is
+    // skipped by tryPatchAllOkHttpClients, so calling .messages().batches() ensures the service is
+    // instantiated and its OkHttpClient is reachable.
+    runCatching { tryPatchAllOkHttpClients(client.messages().batches(), interceptor) }
 }
 
 /**

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Anthropic batches tracing: `instrument(AnthropicClient)` now forces lazy initialisation of `BatchServiceImpl` via `client.batches()` before scanning, so the `OkHttpClient` inside that service is always patched and spans are emitted for all `messages.batches.*` calls.
+
 - Renamed Anthropic batch span attributes to evaluator-expected keys: `anthropic.batch.request.size` → `gen_ai.request.batch.size`; `anthropic.batch.id` → `gen_ai.response.batch.id`; `anthropic.batch.processing_status` → `gen_ai.response.batch.processing_status`; `anthropic.batch.created_at` → `gen_ai.response.batch.created_at`; `anthropic.batch.expires_at` → `gen_ai.response.batch.expires_at`; `anthropic.batch.request_counts.*` → `gen_ai.response.batch.request_counts.*`.
 - Fixed Anthropic batch DELETE tracing: `gen_ai.output.type` is now read dynamically from `body["type"]` (e.g. `"message_batch_deleted"` for DELETE responses) instead of being hardcoded to `"message_batch"`; added `batches.delete` branch to `detectBatchOperationName` so `DELETE /v1/messages/batches/{id}` emits `gen_ai.operation.name = "batches.delete"` instead of the incorrect `"batches.retrieve"`.
 - Fixed Anthropic batches tracing: `instrument(AnthropicClient)` now calls `tryPatchAllOkHttpClients(client, interceptor)` on the top-level client instead of invoking `.batches()` twice (try + catch), so the shared `OkHttpClient` used by `BatchServiceImpl` is always patched regardless of whether `.batches()` returns a new factory instance per call.
