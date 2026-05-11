@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Renamed `anthropic.batch.*` response span attributes in `AnthropicBatchesEndpointHandler` to `gen_ai.response.batch.*` (`id`, `processing_status`, `created_at`, `expires_at`, `request_counts.*`) and renamed `anthropic.output.type` to `gen_ai.output.type` to match evaluator-suite conventions for `anthropic/batches/lifecycle` and `anthropic/batches/delete` scenarios
+
 - Added `ModerationsOpenAIApiEndpointHandler` for `POST /v1/moderations`: sets `gen_ai.operation.name = "moderations"`, `openai.api.type = "moderations"`, `tracy.request.input.type` (`"string"` or `"multimodal"`), and response attributes `tracy.response.results.count`, `tracy.response.results.flagged`, `tracy.response.results.categories`, `tracy.response.results.category_scores`, `tracy.response.results.category_applied_input_types`; fixes misrouting of `/v1/moderations` to `ChatCompletionsOpenAIApiEndpointHandler`
 - Renamed non-OTel-registry attributes in `AnthropicBatchesEndpointHandler`: `gen_ai.response.batch.*` → `anthropic.batch.*`, `gen_ai.output.type` → `anthropic.output.type`, `gen_ai.request.batch.size` → `anthropic.request.batch.size`; wrapped body-parsing block in `runCatching` so identifier attributes survive empty or malformed request bodies
 - Added `batchesCreateWith422ResponseRecordsErrorSpan` MockWebServer integration test to `AnthropicBatchesEndpointHandlerTest` covering the full `OpenTelemetryOkHttpInterceptor` → `AnthropicLLMTracingAdapter` → `AnthropicBatchesEndpointHandler` pipeline for 422 error responses, asserting `gen_ai.provider.name`, `anthropic.api.type`, `http.response.status_code`, `error.type`, `server.address`, and `server.port` are all recorded on the exported span

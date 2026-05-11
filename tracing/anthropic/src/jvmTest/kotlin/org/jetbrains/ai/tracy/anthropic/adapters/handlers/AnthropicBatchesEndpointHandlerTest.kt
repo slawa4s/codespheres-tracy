@@ -147,7 +147,7 @@ class AnthropicBatchesEndpointHandlerTest {
             "/v1/messages/batches/msgbatch_abc", "DELETE",
             responseJson = """{"id":"msgbatch_abc","deleted":true,"type":"message_batch_deleted"}"""
         )
-        assertEquals("message_batch_deleted", attrs[AttributeKey.stringKey("anthropic.output.type")])
+        assertEquals("message_batch_deleted", attrs[AttributeKey.stringKey("gen_ai.output.type")])
     }
 
     // ── anthropic.api.type ────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ class AnthropicBatchesEndpointHandlerTest {
             requestJson = """{"requests":[]}""",
             responseJson = """{"id":"msgbatch_x","processing_status":"in_progress","created_at":"2024-01-01T00:00:00Z","expires_at":"2024-01-02T00:00:00Z","request_counts":{"processing":0,"succeeded":0,"errored":0,"canceled":0,"expired":0}}"""
         )
-        assertEquals("message_batch", attrs[AttributeKey.stringKey("anthropic.output.type")])
+        assertEquals("message_batch", attrs[AttributeKey.stringKey("gen_ai.output.type")])
     }
 
     // ── anthropic.batch.* ────────────────────────────────────────────────────
@@ -227,15 +227,15 @@ class AnthropicBatchesEndpointHandlerTest {
             "/v1/messages/batches/msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", "GET",
             responseJson = responseBody
         )
-        assertEquals("msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", attrs[AttributeKey.stringKey("anthropic.batch.id")])
-        assertEquals("ended", attrs[AttributeKey.stringKey("anthropic.batch.processing_status")])
-        assertEquals("2024-09-24T18:37:24.100435Z", attrs[AttributeKey.stringKey("anthropic.batch.created_at")])
-        assertEquals("2024-09-25T18:37:24.100435Z", attrs[AttributeKey.stringKey("anthropic.batch.expires_at")])
-        assertEquals(0L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.processing")])
-        assertEquals(2L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.succeeded")])
-        assertEquals(1L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.errored")])
-        assertEquals(0L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.canceled")])
-        assertEquals(0L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.expired")])
+        assertEquals("msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", attrs[AttributeKey.stringKey("gen_ai.response.batch.id")])
+        assertEquals("ended", attrs[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
+        assertEquals("2024-09-24T18:37:24.100435Z", attrs[AttributeKey.stringKey("gen_ai.response.batch.created_at")])
+        assertEquals("2024-09-25T18:37:24.100435Z", attrs[AttributeKey.stringKey("gen_ai.response.batch.expires_at")])
+        assertEquals(0L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.processing")])
+        assertEquals(2L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")])
+        assertEquals(1L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.errored")])
+        assertEquals(0L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.canceled")])
+        assertEquals(0L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.expired")])
     }
 
     // ── Error responses ───────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ class AnthropicBatchesEndpointHandlerTest {
         handler.handleResponseAttributes(span, errorResponse)
         span.end()
         val attrs = spanExporter.finishedSpanItems.last().attributes
-        assertEquals(null, attrs[AttributeKey.stringKey("anthropic.output.type")])
+        assertEquals(null, attrs[AttributeKey.stringKey("gen_ai.output.type")])
     }
 
     // ── Distinct operation names (no collisions) ──────────────────────────────
