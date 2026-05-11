@@ -13,12 +13,22 @@ import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter
 import io.opentelemetry.sdk.trace.SdkTracerProvider
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor
 import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
+import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.http.protocol.*
+import org.jetbrains.ai.tracy.core.instrument
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 
 /**
  * Unit tests for [AnthropicBatchesEndpointHandler].
@@ -230,5 +240,56 @@ class AnthropicBatchesEndpointHandlerTest {
             spanExporter.reset()
         }
         assertEquals(4, ops.size, "All four batch routes must produce distinct operation names: $ops")
+    }
+
+    // ── Full interceptor stack (MockWebServer) ────────────────────────────────
+
+    /**
+     * Exercises the full interceptor pipeline — [org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor]
+     * → [AnthropicLLMTracingAdapter] → [AnthropicBatchesEndpointHandler] — for a 422 error response,
+     * ensuring cross-cutting attributes (`gen_ai.provider.name`, `server.address`, `server.port`,
+     * `http.response.status_code`, `error.type`) and the handler-specific attribute
+     * (`anthropic.api.type`) are all recorded on the exported span.
+     */
+    @Test
+    fun `batchesCreateWith422ResponseRecordsErrorSpan`() {
+        val testExporter = InMemorySpanExporter.create()
+        val testProvider = SdkTracerProvider.builder()
+            .addSpanProcessor(SimpleSpanProcessor.create(testExporter))
+            .build()
+        TracingManager.setSdk(OpenTelemetrySdk.builder().setTracerProvider(testProvider).build())
+        TracingManager.isTracingEnabled = true
+
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(422)
+                .addHeader("Content-Type", "application/json")
+                .setBody("""{"type":"error","error":{"type":"invalid_request_error","message":"requests must not be empty"}}""")
+        )
+        server.start()
+
+        try {
+            val client = instrument(OkHttpClient(), AnthropicLLMTracingAdapter())
+            val request = Request.Builder()
+                .url(server.url("/v1/messages/batches"))
+                .post("""{"requests":[]}""".toRequestBody("application/json".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use {}
+
+            val spans = testExporter.finishedSpanItems
+            assertEquals(1, spans.size, "Expected exactly one span for the batch request")
+            val span = spans.first()
+
+            assertEquals("anthropic", span.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertEquals("batches", span.attributes[AttributeKey.stringKey("anthropic.api.type")])
+            assertEquals(422L, span.attributes[AttributeKey.longKey("http.response.status_code")])
+            assertNotNull(span.attributes[AttributeKey.stringKey("error.type")], "error.type must be set on 422 response")
+            assertNotNull(span.attributes[AttributeKey.stringKey("server.address")], "server.address must be set")
+            assertNotNull(span.attributes[AttributeKey.longKey("server.port")], "server.port must be set")
+        } finally {
+            server.shutdown()
+        }
     }
 }
