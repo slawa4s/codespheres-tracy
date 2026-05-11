@@ -144,7 +144,7 @@ class AnthropicBatchesEndpointHandlerTest {
         }
     }
 
-    // ── anthropic.batch.size ─────────────────────────────────────────────────
+    // ── gen_ai.request.batch.size ────────────────────────────────────────────
 
     @Test
     fun `batches create records request batch size`() {
@@ -157,13 +157,13 @@ class AnthropicBatchesEndpointHandlerTest {
             }
         """.trimIndent()
         val attrs = capture("/v1/messages/batches", "POST", requestJson = requestBody)
-        assertEquals(2L, attrs[AttributeKey.longKey("anthropic.batch.size")])
+        assertEquals(2L, attrs[AttributeKey.longKey("gen_ai.request.batch.size")])
     }
 
     @Test
     fun `batches retrieve does not set batch size`() {
         val attrs = capture("/v1/messages/batches/msgbatch_abc", "GET")
-        assertEquals(null, attrs[AttributeKey.longKey("anthropic.batch.size")])
+        assertEquals(null, attrs[AttributeKey.longKey("gen_ai.request.batch.size")])
     }
 
     // ── gen_ai.output.type ───────────────────────────────────────────────────
@@ -178,7 +178,7 @@ class AnthropicBatchesEndpointHandlerTest {
         assertEquals("message_batch", attrs[AttributeKey.stringKey("gen_ai.output.type")])
     }
 
-    // ── anthropic.batch.* ────────────────────────────────────────────────────
+    // ── gen_ai.response.batch.* ──────────────────────────────────────────────
 
     @Test
     fun `response attributes are parsed from MessageBatch object`() {
@@ -202,15 +202,15 @@ class AnthropicBatchesEndpointHandlerTest {
             "/v1/messages/batches/msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", "GET",
             responseJson = responseBody
         )
-        assertEquals("msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", attrs[AttributeKey.stringKey("anthropic.batch.id")])
-        assertEquals("ended", attrs[AttributeKey.stringKey("anthropic.batch.processing_status")])
-        assertEquals("2024-09-24T18:37:24.100435Z", attrs[AttributeKey.stringKey("anthropic.batch.created_at")])
-        assertEquals("2024-09-25T18:37:24.100435Z", attrs[AttributeKey.stringKey("anthropic.batch.expires_at")])
-        assertEquals(0L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.processing")])
-        assertEquals(2L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.succeeded")])
-        assertEquals(1L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.errored")])
-        assertEquals(0L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.canceled")])
-        assertEquals(0L, attrs[AttributeKey.longKey("anthropic.batch.request_counts.expired")])
+        assertEquals("msgbatch_013Zva2CMHLNnXjNJJKqJ2EF", attrs[AttributeKey.stringKey("gen_ai.response.batch.id")])
+        assertEquals("ended", attrs[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
+        assertEquals("2024-09-24T18:37:24.100435Z", attrs[AttributeKey.stringKey("gen_ai.response.batch.created_at")])
+        assertEquals("2024-09-25T18:37:24.100435Z", attrs[AttributeKey.stringKey("gen_ai.response.batch.expires_at")])
+        assertEquals(0L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.processing")])
+        assertEquals(2L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.succeeded")])
+        assertEquals(1L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.errored")])
+        assertEquals(0L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.canceled")])
+        assertEquals(0L, attrs[AttributeKey.longKey("gen_ai.response.batch.request_counts.expired")])
     }
 
     // ── Distinct operation names (no collisions) ──────────────────────────────
