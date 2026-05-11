@@ -309,6 +309,64 @@ class AnthropicBatchesEndpointHandlerTest {
 
     /**
      * Exercises the full interceptor pipeline — [org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor]
+     * → [AnthropicLLMTracingAdapter] → [AnthropicBatchesEndpointHandler] — for a successful (HTTP 200)
+     * batch create, asserting that response attributes are emitted under the correct provider namespace
+     * (`anthropic.batch.*`, `anthropic.output.type`).
+     *
+     * Note: `gen_ai.response.batch.*` and `gen_ai.output.type` are not in the OTel GenAI registry;
+     * per the attribute-naming policy these fields live in the `anthropic.*` namespace.
+     */
+    @Test
+    fun `batchCreateResponseAttributesUseGenAiPrefix`() {
+        val testExporter = InMemorySpanExporter.create()
+        val testProvider = SdkTracerProvider.builder()
+            .addSpanProcessor(SimpleSpanProcessor.create(testExporter))
+            .build()
+        TracingManager.setSdk(OpenTelemetrySdk.builder().setTracerProvider(testProvider).build())
+        TracingManager.isTracingEnabled = true
+
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "application/json")
+                .setBody(
+                    """{"id":"msgbatch_test01","type":"message_batch","processing_status":"in_progress",""" +
+                        """"created_at":"2024-09-24T18:37:24Z","expires_at":"2024-09-25T18:37:24Z",""" +
+                        """"request_counts":{"processing":1,"succeeded":0,"errored":0,"canceled":0,"expired":0}}"""
+                )
+        )
+        server.start()
+
+        try {
+            val client = instrument(OkHttpClient(), AnthropicLLMTracingAdapter())
+            val requestBody =
+                """{"requests":[{"custom_id":"r1","params":{"model":"claude-3-5-haiku-20241022","max_tokens":10,"messages":[{"role":"user","content":"Hi"}]}}]}"""
+            val request = Request.Builder()
+                .url(server.url("/v1/messages/batches"))
+                .post(requestBody.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use {}
+
+            val spans = testExporter.finishedSpanItems
+            assertEquals(1, spans.size, "Expected exactly one span for the batch create request")
+            val span = spans.first()
+
+            assertEquals("anthropic", span.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
+            assertEquals("batches.create", span.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            // Response attributes use anthropic.* namespace (gen_ai.response.batch.* is not in OTel registry)
+            assertEquals("message_batch", span.attributes[AttributeKey.stringKey("anthropic.output.type")])
+            assertEquals("msgbatch_test01", span.attributes[AttributeKey.stringKey("anthropic.batch.id")])
+            assertEquals("in_progress", span.attributes[AttributeKey.stringKey("anthropic.batch.processing_status")])
+            assertEquals(1L, span.attributes[AttributeKey.longKey("anthropic.batch.request_counts.processing")])
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    /**
+     * Exercises the full interceptor pipeline — [org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor]
      * → [AnthropicLLMTracingAdapter] → [AnthropicBatchesEndpointHandler] — for a 422 error response,
      * ensuring cross-cutting attributes (`gen_ai.provider.name`, `server.address`, `server.port`,
      * `http.response.status_code`, `error.type`) and the handler-specific attribute
