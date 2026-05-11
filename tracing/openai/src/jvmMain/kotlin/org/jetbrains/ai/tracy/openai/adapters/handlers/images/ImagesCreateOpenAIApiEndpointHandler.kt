@@ -13,8 +13,11 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.openai.adapters.handlers.asString
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -29,15 +32,19 @@ internal class ImagesCreateOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
 
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "image")
         body["prompt"]?.let { span.setAttribute("gen_ai.prompt.0.content", it.jsonPrimitive.content.orRedactedInput()) }
         body["model"]?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, it.jsonPrimitive.content) }
+        body["stream"]?.jsonPrimitive?.booleanOrNull?.let { span.setAttribute("gen_ai.request.stream", it) }
+        body["n"]?.jsonPrimitive?.intOrNull?.let { span.setAttribute("tracy.request.n", it.toLong()) }
+        body["partial_images"]?.jsonPrimitive?.intOrNull?.let { span.setAttribute("tracy.request.partial_images", it.toLong()) }
 
-        val manuallyParsedKeys = listOf("prompt", "model")
+        val manuallyParsedKeys = listOf("prompt", "model", "stream", "n", "partial_images")
         for ((key, value) in body.entries) {
             if (key in manuallyParsedKeys) {
                 continue
             }
-            span.setAttribute("gen_ai.request.$key", value.asString.orRedactedInput())
+            span.setAttribute("tracy.request.$key", value.asString.orRedactedInput())
         }
     }
 

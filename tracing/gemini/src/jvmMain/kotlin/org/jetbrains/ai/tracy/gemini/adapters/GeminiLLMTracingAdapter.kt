@@ -12,10 +12,14 @@ import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiContentGenHandler
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiEmbedHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiImagenHandler
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.jsonObject
 
 /**
  * Tracing adapter for Google Gemini and Imagen APIs.
@@ -43,17 +47,48 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
  */
 class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.GEMINI) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
-        val (model, operation) = request.url.modelAndOperation()
+        val (model, rawOperation) = request.url.modelAndOperation()
 
         model?.let { span.setAttribute(GEN_AI_REQUEST_MODEL, model) }
-        operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, operation) }
 
-        val handler = selectHandler(request.url)
+        // Detect embed requests: Vertex AI uses "predict" for embed, remap to Gemini API name
+        val isEmbed = model != null && model.contains("embedding") && rawOperation == "predict"
+        val bodyObj = request.body.asJson()?.jsonObject
+        // Detect batch embed for both Vertex AI (multiple "instances") and Gemini native ("requests" key)
+        val isBatchEmbed = isEmbed && (
+            bodyObj?.containsKey("requests") == true ||
+            (bodyObj?.get("instances") as? JsonArray)?.size?.let { it > 1 } == true
+        )
+        val operation = when {
+            isEmbed && isBatchEmbed -> "batchEmbedContents"
+            isEmbed -> "embedContent"
+            else -> rawOperation
+        }
+
+        operation?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
+
+        // Set gemini.api.type from URL path
+        val segments = request.url.pathSegments
+        if (segments.dropLast(1).contains("models")) {
+            span.setAttribute("gemini.api.type", "models")
+        }
+
+        // Set gen_ai.output.type based on operation/request type
+        val isImagen = request.url.isImagenUrl()
+        when {
+            isImagen -> span.setAttribute(GEN_AI_OUTPUT_TYPE, "image")
+            operation == "generateContent" || operation == "streamGenerateContent" -> span.setAttribute(GEN_AI_OUTPUT_TYPE, "message")
+            operation == "embedContent" || operation == "batchEmbedContents" -> span.setAttribute(GEN_AI_OUTPUT_TYPE, "embedding")
+        }
+
+        val handler = selectHandler(request.url, model, isEmbed)
         handler.handleRequestAttributes(span, request)
     }
 
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {
-        val handler = selectHandler(response.url)
+        val (model, rawOperation) = response.url.modelAndOperation()
+        val isEmbed = model != null && model.contains("embedding") && rawOperation == "predict"
+        val handler = selectHandler(response.url, model, isEmbed)
         handler.handleResponseAttributes(span, response)
     }
 
@@ -62,12 +97,15 @@ class GeminiLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
     // streaming is not supported
     override fun isStreamingRequest(request: TracyHttpRequest) = false
     override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) {
-        val handler = selectHandler(url)
+        val (model, rawOperation) = url.modelAndOperation()
+        val isEmbed = model != null && model.contains("embedding") && rawOperation == "predict"
+        val handler = selectHandler(url, model, isEmbed)
         handler.handleStreaming(span, events)
     }
 
-    private fun selectHandler(url: TracyHttpUrl): EndpointApiHandler = when {
+    private fun selectHandler(url: TracyHttpUrl, model: String? = null, isEmbed: Boolean = false): EndpointApiHandler = when {
         url.isImagenUrl() -> GeminiImagenHandler(extractor)
+        isEmbed -> GeminiEmbedHandler()
         else -> GeminiContentGenHandler(extractor)
     }
 

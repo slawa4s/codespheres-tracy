@@ -67,22 +67,20 @@ class GeminiImagenHandler(
         }
         extractor.setUploadableContentAttributes(span, field = "input", mediaContent)
 
-        body["parameters"]?.let { span.setAttribute("tracy.request.imagen.parameters", it.toString()) }
+        body["parameters"]?.jsonObject?.let { params ->
+            params["sampleCount"]?.jsonPrimitive?.intOrNull?.let {
+                span.setAttribute("gen_ai.request.image.number_of_images", it.toLong())
+            }
+        }
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
 
         val predictions = body["predictions"]?.jsonArray ?: return
-        for ((index, prediction) in predictions.withIndex()) {
-            span.setAttribute(
-                "gen_ai.completion.$index.content",
-                prediction.jsonObject["prompt"]?.jsonPrimitive?.content
-            )
-        }
-        val resources = parseImagenImages(predictions)
+        span.setAttribute("gen_ai.response.image.count", predictions.size.toLong())
 
-        // setting generated images for upload
+        val resources = parseImagenImages(predictions)
         val mediaContent = MediaContent(resources.map { MediaContentPart(it) })
         extractor.setUploadableContentAttributes(span, field = "output", mediaContent)
     }

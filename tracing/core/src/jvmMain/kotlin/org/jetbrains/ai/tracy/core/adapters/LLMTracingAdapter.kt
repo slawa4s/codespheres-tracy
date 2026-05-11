@@ -11,9 +11,13 @@ import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_SYSTEM
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 
 /**
@@ -57,6 +61,9 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
         getRequestBodyAttributes(span, request)
         span.setAttribute("gen_ai.api_base", "${request.url.scheme}://${request.url.host}")
         span.setAttribute(GEN_AI_SYSTEM, genAISystem)
+        span.setAttribute("gen_ai.provider.name", genAISystem)
+        span.setAttribute("server.address", request.url.host)
+        span.setAttribute("server.port", request.url.port.toLong())
 
         return@runCatching
     }.getOrElse { exception ->
@@ -86,9 +93,10 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
                 }
             }
 
-            span.setAttribute("http.status_code", response.code.toLong())
+            span.setAttribute("http.response.status_code", response.code.toLong())
 
             if (response.isError()) {
+                span.setAttribute("error.type", response.code.toString())
                 getResponseErrorBodyAttributes(span, response.body)
                 span.setStatus(StatusCode.ERROR)
             } else {
@@ -142,7 +150,17 @@ abstract class LLMTracingAdapter(private val genAISystem: String) {
             body.entries.forEach { (key, value) ->
                 if (key !in (mappedAttributes)) {
                     val attributeKey = "tracy.${payloadType.value}.$key"
-                    setAttribute(attributeKey, value.toString())
+                    if (value is JsonPrimitive) {
+                        when {
+                            value.isString -> setAttribute(attributeKey, value.content)
+                            value.booleanOrNull != null -> setAttribute(attributeKey, value.boolean)
+                            value.longOrNull != null -> setAttribute(attributeKey, value.longOrNull!!)
+                            value.doubleOrNull != null -> setAttribute(attributeKey, value.doubleOrNull!!)
+                            else -> setAttribute(attributeKey, value.content)
+                        }
+                    } else {
+                        setAttribute(attributeKey, value.toString())
+                    }
                 }
             }
         }

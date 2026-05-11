@@ -7,6 +7,8 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 
 import io.opentelemetry.api.trace.Span
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -36,6 +38,16 @@ internal class GetVideoHandler : VideoRouteHandler {
      */
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceVideoModel(body, "gen_ai.response.video")
+        body["id"]?.let { span.setAttribute("gen_ai.response.id", it.jsonPrimitive.content) }
+        body["model"]?.let {
+            span.setAttribute("gen_ai.response.model", it.jsonPrimitive.content)
+            span.setAttribute("tracy.response.model", it.jsonPrimitive.content)
+        }
+        body["object"]?.let { span.setAttribute("tracy.response.object", it.jsonPrimitive.content) }
+        body["status"]?.let { span.setAttribute("tracy.response.status", it.jsonPrimitive.content) }
+        body["created_at"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.created_at", it) }
+        body["progress"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.progress", it) }
+        body["seconds"]?.let { span.setAttribute("tracy.response.seconds", it.jsonPrimitive.content) }
+        body["size"]?.let { span.setAttribute("tracy.response.size", it.jsonPrimitive.content) }
     }
 }

@@ -18,6 +18,7 @@ import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import mu.KotlinLogging
@@ -34,30 +35,23 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asFormData() ?: return
 
+        span.setAttribute(GEN_AI_OUTPUT_TYPE, "image")
+
         val mediaContentParts = mutableListOf<MediaContentPart>()
         var imagesCount = 0
 
         for (part in body.parts) {
-            // TODO: TRACY-88
             val contentType = part.contentType
-            if (contentType == null) {
-                logger.warn { "Missing content type of form data part '${part.name}'" }
-                continue
-            }
 
-            // decode content based on the expected content type
-            val content = when(contentType.type) {
+            // decode content based on the content type; treat null content type as text
+            val content = when (contentType?.type) {
                 "image" -> Base64.getEncoder().encodeToString(part.content)
-                "text" -> part.content.toString(
-                    contentType.charset() ?: Charsets.US_ASCII
-                )
-                else -> null
-            }
-
-            if (content == null) {
-                logger.warn { "Form data part '${part.name}' with content type '$contentType' has no content" }
-                continue
-            }
+                null, "text" -> part.content.toString(contentType?.charset() ?: Charsets.UTF_8)
+                else -> {
+                    logger.warn { "Form data part '${part.name}' with content type '$contentType' skipped" }
+                    null
+                }
+            } ?: continue
 
             when (part.name) {
                 "prompt" -> {
@@ -69,39 +63,49 @@ internal class ImagesCreateEditOpenAIApiEndpointHandler(
                 }
                 // mask is a single image that should be uploaded as well
                 "mask" -> if (contentTracingAllowed(ContentKind.INPUT)) {
-                    // trace mask only when input content tracing is allowed.
-                    // base64-encoded mask content
-                    span.setAttribute("gen_ai.request.mask.content", content)
-                    span.setAttribute("gen_ai.request.mask.contentType", contentType.asString())
-                    if (part.filename != null) {
-                        span.setAttribute("gen_ai.request.mask.filename", part.filename)
+                    if (contentType != null) {
+                        span.setAttribute("gen_ai.request.mask.content", content)
+                        span.setAttribute("gen_ai.request.mask.contentType", contentType.asString())
+                        if (part.filename != null) {
+                            span.setAttribute("gen_ai.request.mask.filename", part.filename)
+                        }
+                        mediaContentParts.add(
+                            MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
+                        )
                     }
-                    // save mask for further upload
-                    mediaContentParts.add(
-                        MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
-                    )
                 }
                 // either a single image or an array of images
-                "image", "image[]" -> if (contentTracingAllowed(ContentKind.INPUT)) {
-                    // trace images only when input content tracing is allowed.
-                    // base64-encoded image content
-                    span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
-                    span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
-                    if (part.filename != null) {
-                        span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                "image", "image[]" -> {
+                    span.setAttribute("tracy.request.image.size_bytes", part.content.size.toLong())
+                    if (contentTracingAllowed(ContentKind.INPUT) && contentType != null) {
+                        span.setAttribute("gen_ai.request.image.$imagesCount.content", content)
+                        span.setAttribute("gen_ai.request.image.$imagesCount.contentType", contentType.asString())
+                        if (part.filename != null) {
+                            span.setAttribute("gen_ai.request.image.$imagesCount.filename", part.filename)
+                        }
+                        mediaContentParts.add(
+                            MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
+                        )
                     }
-                    // save image for further upload
-                    mediaContentParts.add(
-                        MediaContentPart(resource = Resource.Base64(content, contentType.asString()))
-                    )
                     ++imagesCount
                 }
 
                 null -> logger.warn { "Form data part with missing name ignored. Content type: '$contentType'" }
+                "stream" -> {
+                    val boolVal = content.lowercase() == "true"
+                    span.setAttribute("gen_ai.request.stream", boolVal)
+                    span.setAttribute("tracy.request.stream", boolVal)
+                }
+                "n" -> {
+                    content.toLongOrNull()?.let { span.setAttribute("tracy.request.n", it) }
+                        ?: span.setAttribute("tracy.request.n", content.orRedactedInput())
+                }
+                "partial_images" -> {
+                    content.toLongOrNull()?.let { span.setAttribute("tracy.request.partial_images", it) }
+                        ?: span.setAttribute("tracy.request.partial_images", content.orRedactedInput())
+                }
                 else -> {
-                    // since we don't know how sensitive other fields may be,
-                    // we disguise their content if input tracing is disallowed.
-                    span.setAttribute("gen_ai.request.${part.name}", content.orRedactedInput())
+                    span.setAttribute("tracy.request.${part.name}", content.orRedactedInput())
                 }
             }
         }

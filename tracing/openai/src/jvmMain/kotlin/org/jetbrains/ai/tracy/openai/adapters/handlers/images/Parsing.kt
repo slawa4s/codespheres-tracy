@@ -20,6 +20,7 @@ import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
 import kotlinx.serialization.json.*
+import kotlinx.serialization.json.longOrNull
 
 
 // See: https://platform.openai.com/docs/api-reference/images/create#images_create-output_format
@@ -37,6 +38,10 @@ internal fun handleImageGenerationResponseAttributes(
         for ((index, image) in data.withIndex()) {
             span.setAttribute("gen_ai.completion.$index.content", image.asString.orRedactedOutput())
         }
+        // Extract first image URL for tracy.response.image.url
+        data.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.response.image.url", it)
+        }
         // install media content for further upload
         val format = body["output_format"]?.jsonPrimitive?.content ?: defaultImageFormat
         val mediaType = "image/$format"
@@ -48,13 +53,14 @@ internal fun handleImageGenerationResponseAttributes(
     }
 
     body["usage"]?.jsonObject?.let { setUsageAttributes(span, it) }
+    body["created"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.response.created", it) }
 
-    val manuallyParsedKeys = listOf("data", "usage")
+    val manuallyParsedKeys = listOf("data", "usage", "created")
     for ((key, value) in body.entries) {
         if (key in manuallyParsedKeys) {
             continue
         }
-        span.setAttribute("gen_ai.response.$key", value.asString)
+        span.setAttribute("tracy.response.$key", value.asString)
     }
 }
 
@@ -84,7 +90,7 @@ internal fun handleStreamedImage(
             val manuallyParsedKeys = listOf("b64_json", "usage")
             for ((key, value) in data.entries) {
                 if (key !in manuallyParsedKeys) {
-                    span.setAttribute("gen_ai.response.$key", value.asString)
+                    span.setAttribute("tracy.response.$key", value.asString)
                 }
             }
         }
