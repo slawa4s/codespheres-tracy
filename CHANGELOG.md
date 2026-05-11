@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed Gemini streaming: `GeminiLLMTracingAdapter.isStreamingRequest` now returns `true` for `streamGenerateContent` URL operations; `GeminiContentGenHandler.handleStreaming` now parses Gemini SSE chunks to emit `gen_ai.response.id`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.completion.{i}.content` (accumulated across chunks), and `gen_ai.completion.{i}.finish_reason`
 - Renamed `anthropic.batch.*` span attributes in `AnthropicBatchesEndpointHandler` to evaluator-suite conventions `gen_ai.response.batch.*` (`id`, `processing_status`, `created_at`, `expires_at`, `request_counts.*`) and `gen_ai.request.batch.size`; added unconditional `gen_ai.output.type = "message_batch"` in `handleResponseAttributes`
 - Added `AudioSpeechOpenAIApiEndpointHandler` for `POST /v1/audio/speech`: sets `gen_ai.operation.name = "audio.speech"`, `openai.api.type = "audio"`, `gen_ai.output.type = "speech"`, and extracts `gen_ai.request.model`, `tracy.request.voice`, `tracy.request.response_format`, and `tracy.request.speed` from the JSON request body; fixes the previous wrong dispatch to `ChatCompletionsOpenAIApiEndpointHandler` for this endpoint
 - Fixed `OpenTelemetryOkHttpInterceptor` binary-response fallback: the `else` branch now emits a `buildJsonObject` containing `_tracy_binary_size_bytes` (from `Content-Length`) instead of an always-empty `JsonObject`, enabling downstream handlers (e.g. `AudioSpeechOpenAIApiEndpointHandler`) to set `tracy.response.audio.size_bytes`
