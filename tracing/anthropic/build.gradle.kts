@@ -13,7 +13,7 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
 
     jvm {
         compilerOptions.jvmTarget = JVM_17
@@ -46,6 +46,7 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.test)
                 implementation(libs.opentelemetry.sdk.testing)
                 implementation(project.dependencies.testFixtures(project(":tracing:test-utils")))
+                implementation(libs.okhttp.mockwebserver)
             }
         }
     }

@@ -257,12 +257,32 @@ class OpenTelemetryOkHttpInterceptor(
                     val responseBody = when (mimeType?.lowercase()) {
                         "application/json" -> try {
                             val peekedBody = response.peekBody(Long.MAX_VALUE).string()
-                            Json.decodeFromString<JsonObject>(peekedBody)
+                            val parsed = Json.decodeFromString<JsonObject>(peekedBody)
+                            // Inject request-id header so adapters can use it as gen_ai.response.id
+                            // when the response body doesn't include an id field (e.g. count_tokens)
+                            val requestId = response.header("request-id")
+                                ?: response.header("x-request-id")
+                                ?: response.header("x-litellm-trace-id")
+                                ?: response.header("x-litellm-request-id")
+                            if (requestId != null && !parsed.containsKey("_request_id")) {
+                                JsonObject(parsed + mapOf("_request_id" to JsonPrimitive(requestId)))
+                            } else {
+                                parsed
+                            }
                         } catch (_: Exception) {
                             JsonObject(emptyMap())
                         }
                         else -> {
-                            JsonObject(emptyMap())
+                            // Include content-length so handlers can report binary response sizes.
+                            // Prefer the Content-Length header; fall back to reading the body when
+                            // the response uses chunked transfer encoding (contentLength() == -1).
+                            val contentLength = response.body?.contentLength()?.takeIf { it >= 0 }
+                                ?: try { response.peekBody(Long.MAX_VALUE)?.bytes()?.size?.toLong()?.takeIf { it >= 0 } } catch (_: Exception) { null }
+                            if (contentLength != null) {
+                                JsonObject(mapOf("_response_content_length" to JsonPrimitive(contentLength)))
+                            } else {
+                                JsonObject(emptyMap())
+                            }
                         }
                     }
 
