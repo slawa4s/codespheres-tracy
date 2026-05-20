@@ -14,13 +14,13 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.CreateConversationHandler
-import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.CreateConversationItemsHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.DeleteConversationHandler
-import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.DeleteConversationItemHandler
-import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.ListConversationItemsHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.RetrieveConversationHandler
-import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.RetrieveConversationItemHandler
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.UpdateConversationHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.items.CreateConversationItemsHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.items.DeleteConversationItemHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.items.ListConversationItemsHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.items.RetrieveConversationItemHandler
 
 /**
  * Handler for OpenAI Conversations API.

@@ -18,12 +18,12 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 internal class RetrieveConversationHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
         extractConversationIdFromPath(request.url)?.let {
-            span.setAttribute("gen_ai.conversation.id", it)
+            span.setAttribute("tracy.request.conversation_id", it)
         }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceConversationObject(body)
+        span.traceConversation(body)
     }
 }

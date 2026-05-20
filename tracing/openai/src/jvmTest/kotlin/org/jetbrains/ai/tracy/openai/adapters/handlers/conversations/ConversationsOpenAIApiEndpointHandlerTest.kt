@@ -17,6 +17,8 @@ import com.openai.models.responses.EasyInputMessage
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
+import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -59,7 +61,77 @@ class ConversationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals("conversations.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("gen_ai.conversation.id")])
-            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.conversation.created_at")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.response.created_at")])
+        }
+    }
+
+    @Test
+    fun `test CREATE conversation traces metadata and items with redaction`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = false, captureOutputs = false)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(3)
+            ).apply { instrument(this) }
+
+            server.enqueue(enqueueConversationResponse(id = "conv_with_items"))
+
+            val params = ConversationCreateParams.builder()
+                .metadata(ConversationCreateParams.Metadata.builder().build())
+                .addItem(
+                    EasyInputMessage.builder()
+                        .role(EasyInputMessage.Role.USER)
+                        .content("secret prompt")
+                        .build()
+                )
+                .build()
+            client.conversations().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertNotNull(trace.attributes[AttributeKey.stringKey("tracy.request.metadata")])
+            assertEquals(1L, trace.attributes[AttributeKey.longKey("tracy.request.items.count")])
+            // role is well-known → verbatim
+            assertEquals("user", trace.attributes[AttributeKey.stringKey("tracy.request.items.0.role")])
+            // content is sensitive → redacted under default policy
+            assertEquals("REDACTED", trace.attributes[AttributeKey.stringKey("tracy.request.items.0.content")])
+        }
+    }
+
+    @Test
+    fun `test CREATE conversation traces item content verbatim when input capture is enabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(3)
+            ).apply { instrument(this) }
+
+            server.enqueue(enqueueConversationResponse(id = "conv_with_items_verbatim"))
+
+            val params = ConversationCreateParams.builder()
+                .addItem(
+                    EasyInputMessage.builder()
+                        .role(EasyInputMessage.Role.USER)
+                        .content("Hello world")
+                        .build()
+                )
+                .build()
+            client.conversations().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("user", trace.attributes[AttributeKey.stringKey("tracy.request.items.0.role")])
+            // content is a JsonPrimitive string here, so its .content is the raw string (unquoted)
+            assertEquals("Hello world", trace.attributes[AttributeKey.stringKey("tracy.request.items.0.content")])
         }
     }
 
@@ -90,7 +162,7 @@ class ConversationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals("conversations.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("gen_ai.conversation.id")])
-            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.conversation.created_at")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.response.created_at")])
         }
     }
 
@@ -121,8 +193,10 @@ class ConversationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             assertEquals("conversations.update", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+            assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("tracy.request.conversation_id")])
             assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("gen_ai.conversation.id")])
-            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.conversation.created_at")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.response.created_at")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("tracy.request.metadata")])
         }
     }
 
@@ -165,7 +239,10 @@ class ConversationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             assertEquals("conversations.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
-            assertEquals(true, trace.attributes[AttributeKey.booleanKey("tracy.conversation.deleted")])
+            assertEquals(true, trace.attributes[AttributeKey.booleanKey("tracy.response.deleted")])
+            assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
+            assertEquals("conversation.deleted", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+            assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("tracy.request.conversation_id")])
         }
     }
 
@@ -423,9 +500,11 @@ class ConversationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             val trace = analyzeSpans().first()
 
-            // conversation_id should be set from URL path in the request handler
-            // and from response body in the response handler
+            // conversation_id should be set from URL path in the request handler under tracy.request.*,
+            // and from the response body in the response handler under gen_ai.conversation.id + tracy.response.id.
+            assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("tracy.request.conversation_id")])
             assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("gen_ai.conversation.id")])
+            assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
         }
     }
 

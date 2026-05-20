@@ -3,7 +3,7 @@
  * Use of this source code is governed by the Apache 2.0 license.
  */
 
-package org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes
+package org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.items
 
 import io.opentelemetry.api.trace.Span
 import kotlinx.serialization.json.jsonObject
@@ -11,6 +11,7 @@ import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
+import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.extractConversationIdFromPath
 
 /**
  * Handles the `GET /conversations/{conversation_id}/items` endpoint.

@@ -20,14 +20,18 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 internal class DeleteConversationHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
         extractConversationIdFromPath(request.url)?.let {
-            span.setAttribute("gen_ai.conversation.id", it)
+            span.setAttribute("tracy.request.conversation_id", it)
         }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
+        body["id"]?.jsonPrimitive?.content?.let { span.setAttribute("tracy.response.id", it) }
         body["deleted"]?.let {
-            span.setAttribute("tracy.conversation.deleted", it.jsonPrimitive.boolean)
+            span.setAttribute("tracy.response.deleted", it.jsonPrimitive.boolean)
+        }
+        body["object"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.response.object", it)
         }
     }
 }
