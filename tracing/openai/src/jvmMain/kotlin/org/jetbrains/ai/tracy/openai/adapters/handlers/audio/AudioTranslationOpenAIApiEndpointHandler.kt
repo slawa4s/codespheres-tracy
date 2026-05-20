@@ -24,7 +24,7 @@ import mu.KotlinLogging
 /**
  * Extracts request/response attributes for the OpenAI Audio Translations API.
  *
- * See [Audio Translations API](https://platform.openai.com/docs/api-reference/audio/createTranslation)
+ * See [Create translation API](https://developers.openai.com/api/reference/resources/audio/subresources/translations/methods/create)
  */
 internal class AudioTranslationOpenAIApiEndpointHandler : EndpointApiHandler {
 

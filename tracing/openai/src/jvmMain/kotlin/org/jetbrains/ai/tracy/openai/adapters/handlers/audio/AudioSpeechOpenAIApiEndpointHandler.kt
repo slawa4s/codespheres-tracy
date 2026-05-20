@@ -21,7 +21,7 @@ import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 /**
  * Extracts request/response attributes for the OpenAI Audio Speech (TTS) API.
  *
- * See [Audio Speech API](https://platform.openai.com/docs/api-reference/audio/createSpeech)
+ * See [Create speech API](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create)
  */
 internal class AudioSpeechOpenAIApiEndpointHandler : EndpointApiHandler {
 
