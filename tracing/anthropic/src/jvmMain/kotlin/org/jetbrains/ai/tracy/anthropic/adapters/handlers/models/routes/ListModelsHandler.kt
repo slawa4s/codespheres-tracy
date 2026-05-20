@@ -16,17 +16,40 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 
 /**
  * Handles the `GET /v1/models` endpoint.
+ *
+ * See [models/list](https://platform.claude.com/docs/en/api/models-list)
  */
 internal class ListModelsHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        // No request-side attributes for list.
+        // NOTE: No request-side body attributes, only query parameters
+        val params = request.url.parameters
+        params.queryParameter("after_id")?.let {
+            span.setAttribute("gen_ai.request.after_id", it)
+        }
+        params.queryParameter("before_id")?.let {
+            span.setAttribute("gen_ai.request.before_id", it)
+        }
+        params.queryParameter("limit")?.toLongOrNull()?.let {
+            span.setAttribute("gen_ai.request.limit", it)
+        }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        body["data"]?.let { if (it is JsonArray) span.setAttribute("gen_ai.response.list.count", it.size.toLong()) }
-        body["has_more"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.list.has_more", it) }
-        body["first_id"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.list.first_id", it) }
-        body["last_id"]?.jsonPrimitive?.content?.let { span.setAttribute("gen_ai.response.list.last_id", it) }
+
+        val data = body["data"]
+        if (data is JsonArray) {
+            span.setAttribute("gen_ai.response.list.count", data.size.toLong())
+            span.traceBetaModelInfo(data)
+        }
+        body["has_more"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("gen_ai.response.list.has_more", it)
+        }
+        body["first_id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("gen_ai.response.list.first_id", it)
+        }
+        body["last_id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("gen_ai.response.list.last_id", it)
+        }
     }
 }

@@ -20,6 +20,7 @@ import org.junit.jupiter.api.TestInstance
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Unit tests for Anthropic Models API tracing using MockWebServer.
@@ -177,9 +178,11 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals(true, trace.attributes[AttributeKey.booleanKey("gen_ai.response.model.capabilities.batch")])
-            assertEquals(true, trace.attributes[AttributeKey.booleanKey("gen_ai.response.model.capabilities.citations")])
-            assertEquals(false, trace.attributes[AttributeKey.booleanKey("gen_ai.response.model.capabilities.pdf_input")])
+            val capabilities = trace.attributes[AttributeKey.stringKey("gen_ai.response.model.capabilities")]
+            assertNotNull(capabilities)
+            assertTrue(capabilities.contains("\"batch\""))
+            assertTrue(capabilities.contains("\"citations\""))
+            assertTrue(capabilities.contains("\"pdf_input\""))
         }
     }
 

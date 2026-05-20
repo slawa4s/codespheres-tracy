@@ -7,13 +7,8 @@ package org.jetbrains.ai.tracy.anthropic.adapters.handlers.models.routes
 
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -37,34 +32,12 @@ internal class RetrieveModelHandler : RouteHandler {
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
 
-        body["id"]?.jsonPrimitive?.content?.let { id ->
-            span.setAttribute(GEN_AI_RESPONSE_ID, id)
-            span.setAttribute("gen_ai.response.model.id", id)
-        }
-
+        // Pin GEN_AI_RESPONSE_MODEL to the URL alias so it lines up with
+        // GEN_AI_REQUEST_MODEL — body.id is the versioned id.
         extractModelAliasFromPath(response.url)?.let {
             span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
         }
 
-        body["display_name"]?.jsonPrimitive?.content?.let {
-            span.setAttribute("gen_ai.response.model.display_name", it)
-        }
-        body["created_at"]?.jsonPrimitive?.content?.let {
-            span.setAttribute("gen_ai.response.model.created_at", it)
-        }
-        body["max_input_tokens"]?.jsonPrimitive?.longOrNull?.let {
-            span.setAttribute("gen_ai.response.model.max_input_tokens", it)
-        }
-        body["max_tokens"]?.jsonPrimitive?.longOrNull?.let {
-            span.setAttribute("gen_ai.response.model.max_output_tokens", it)
-        }
-        body["capabilities"]?.jsonObject?.let { capabilities ->
-            for ((key, value) in capabilities) {
-                val supported = (value as? JsonObject)?.get("supported")?.jsonPrimitive?.booleanOrNull
-                if (supported != null) {
-                    span.setAttribute("gen_ai.response.model.capabilities.$key", supported)
-                }
-            }
-        }
+        span.traceBetaModelInfo(body)
     }
 }
