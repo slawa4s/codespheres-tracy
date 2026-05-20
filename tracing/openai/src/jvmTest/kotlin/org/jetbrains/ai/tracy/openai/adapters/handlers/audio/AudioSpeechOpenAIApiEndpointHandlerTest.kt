@@ -10,6 +10,8 @@ import com.openai.models.audio.speech.SpeechModel
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
+import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.junit.jupiter.api.Assertions.*
@@ -105,6 +107,101 @@ class AudioSpeechOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
+    fun `test input is traced and redacted when input capture is disabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = false, captureOutputs = false)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(speechResponse())
+            client.audio().speech().create(speechParams(input = "Hello world")).close()
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("REDACTED", trace.attributes[AttributeKey.stringKey("tracy.request.input")])
+        }
+    }
+
+    @Test
+    fun `test input is traced verbatim when input capture is enabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(speechResponse())
+            client.audio().speech().create(speechParams(input = "Hello world")).close()
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("Hello world", trace.attributes[AttributeKey.stringKey("tracy.request.input")])
+        }
+    }
+
+    @Test
+    fun `test instructions is traced and redacted when input capture is disabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = false, captureOutputs = false)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(speechResponse())
+            client.audio().speech().create(
+                speechParams(instructions = "Speak slowly and clearly.")
+            ).close()
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("REDACTED", trace.attributes[AttributeKey.stringKey("tracy.request.instructions")])
+        }
+    }
+
+    @Test
+    fun `test instructions is traced verbatim when input capture is enabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(speechResponse())
+            client.audio().speech().create(
+                speechParams(instructions = "Speak slowly and clearly.")
+            ).close()
+
+            val trace = analyzeSpans().first()
+
+            assertEquals(
+                "Speak slowly and clearly.",
+                trace.attributes[AttributeKey.stringKey("tracy.request.instructions")]
+            )
+        }
+    }
+
+    @Test
     fun `test response_format is traced from request body`() = runTest(timeout = 3.minutes) {
         withMockServer { server ->
             val client = createOpenAIClient(
@@ -147,7 +244,7 @@ class AudioSpeechOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test response audio size bytes is traced`() = runTest(timeout = 3.minutes) {
+    fun `test stream_format is traced from request body`() = runTest(timeout = 3.minutes) {
         withMockServer { server ->
             val client = createOpenAIClient(
                 url = server.url("/").toString(),
@@ -155,15 +252,14 @@ class AudioSpeechOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
                 timeout = Duration.ofMinutes(1),
             ).apply { instrument(this) }
 
-            val audioBytes = ByteArray(1024) { it.toByte() }
-            server.enqueue(speechResponse(body = audioBytes))
-            client.audio().speech().create(speechParams()).close()
+            server.enqueue(speechResponse())
+            client.audio().speech().create(
+                speechParams(streamFormat = SpeechCreateParams.StreamFormat.AUDIO)
+            ).close()
 
             val trace = analyzeSpans().first()
 
-            val sizeBytes = trace.attributes[AttributeKey.longKey("tracy.response.audio.size_bytes")]
-            assertNotNull(sizeBytes, "Response audio size_bytes should be traced")
-            assertEquals(1024L, sizeBytes)
+            assertEquals("audio", trace.attributes[AttributeKey.stringKey("tracy.request.stream_format")])
         }
     }
 
@@ -173,18 +269,26 @@ class AudioSpeechOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         model: SpeechModel = SpeechModel.TTS_1,
         voice: SpeechCreateParams.Voice = SpeechCreateParams.Voice.ALLOY,
         input: String = "Hello world",
+        instructions: String? = null,
         responseFormat: SpeechCreateParams.ResponseFormat? = null,
         speed: Double? = null,
+        streamFormat: SpeechCreateParams.StreamFormat? = null,
     ): SpeechCreateParams {
         val builder = SpeechCreateParams.builder()
             .model(model)
             .voice(voice)
             .input(input)
+        if (instructions != null) {
+            builder.instructions(instructions)
+        }
         if (responseFormat != null) {
             builder.responseFormat(responseFormat)
         }
         if (speed != null) {
             builder.speed(speed)
+        }
+        if (streamFormat != null) {
+            builder.streamFormat(streamFormat)
         }
         return builder.build()
     }

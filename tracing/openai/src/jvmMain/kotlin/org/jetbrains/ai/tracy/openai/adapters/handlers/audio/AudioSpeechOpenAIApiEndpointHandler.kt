@@ -12,7 +12,6 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQU
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -41,19 +40,25 @@ internal class AudioSpeechOpenAIApiEndpointHandler : EndpointApiHandler {
         body["voice"]?.jsonPrimitive?.content?.let {
             span.setAttribute("tracy.request.voice", it)
         }
+        body["instructions"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.request.instructions", it.orRedactedInput())
+        }
         body["response_format"]?.jsonPrimitive?.content?.let {
             span.setAttribute("tracy.request.response_format", it)
         }
         body["speed"]?.jsonPrimitive?.doubleOrNull?.let {
             span.setAttribute("tracy.request.speed", it)
         }
+        body["stream_format"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.request.stream_format", it)
+        }
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
-        val body = response.body.asJson()?.jsonObject ?: return
-        body["_tracy_response_size_bytes"]?.jsonPrimitive?.longOrNull?.let {
-            span.setAttribute("tracy.response.audio.size_bytes", it)
-        }
+        // The response is an audio file (or a stream of audio events) — see
+        // https://platform.openai.com/docs/api-reference/audio/createSpeech
+        // TODO: trace MIME type and size in bytes once non-JSON response bodies
+        //       are first-class in Tracy's TracyHttpResponse.
     }
 
     override fun handleStreaming(span: Span, events: String) {
