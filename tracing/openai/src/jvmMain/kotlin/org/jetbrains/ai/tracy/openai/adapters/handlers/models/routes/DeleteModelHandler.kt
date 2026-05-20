@@ -7,29 +7,38 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.models.routes
 
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 
 /**
- * Handles the `GET /models/{model}` endpoint.
+ * Handles the `DELETE /models/{model}` endpoint (delete a fine-tuned model).
+ *
+ * Response: ModelDeleted { id, deleted, object }
  */
-internal class RetrieveModelHandler : RouteHandler {
+internal class DeleteModelHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        span.setAttribute(GEN_AI_OPERATION_NAME, "models.retrieve")
+        span.setAttribute(GEN_AI_OPERATION_NAME, "models.delete")
         extractModelIdFromPath(request.url)?.let {
-            span.setAttribute(GEN_AI_REQUEST_MODEL, it)
             span.setAttribute("tracy.request.model", it)
         }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        extractModelIdFromPath(response.url)?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
-        span.traceModel(body)
+        body["id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.response.id", it)
+        }
+        body["deleted"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("tracy.response.deleted", it)
+        }
+        body["object"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.response.object", it)
+        }
     }
 }
