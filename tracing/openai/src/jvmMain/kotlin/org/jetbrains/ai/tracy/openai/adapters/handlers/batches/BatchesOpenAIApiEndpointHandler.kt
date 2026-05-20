@@ -70,8 +70,7 @@ internal class BatchesOpenAIApiEndpointHandler : EndpointApiHandler {
             return BatchRoute.CREATE
         }
 
-        val hasBatchId = segments.size > (batchesIndex + 1) &&
-                segments[batchesIndex + 1].isNotBlank()
+        val hasBatchId = segments.size > (batchesIndex + 1) && segments[batchesIndex + 1].isNotBlank()
         val hasCancel = segments.contains("cancel")
 
         return when {
