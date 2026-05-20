@@ -7,7 +7,6 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.ite
 
 import io.opentelemetry.api.trace.Span
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -20,16 +19,19 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.extr
 internal class RetrieveConversationItemHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
         extractConversationIdFromPath(request.url)?.let {
-            span.setAttribute("gen_ai.conversation.id", it)
+            span.setAttribute("tracy.request.conversation_id", it)
+        }
+        extractItemIdFromPath(request.url)?.let {
+            span.setAttribute("tracy.request.item_id", it)
+        }
+        val include = request.url.parameters.queryParameterValues("include").filterNotNull()
+        if (include.isNotEmpty()) {
+            span.setAttribute("tracy.request.include", include.joinToString(","))
         }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        body["id"]?.let { span.setAttribute("tracy.conversation.item.id", it.jsonPrimitive.content) }
-        body["type"]?.let { span.setAttribute("tracy.conversation.item.type", it.jsonPrimitive.content) }
-        body["status"]?.let {
-            span.setAttribute("tracy.conversation.item.status", it.jsonPrimitive.content)
-        }
+        span.traceConversationItem(body)
     }
 }

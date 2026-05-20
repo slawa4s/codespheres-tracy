@@ -6,12 +6,15 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.items
 
 import io.opentelemetry.api.trace.Span
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.extractConversationIdFromPath
+import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.traceRequestConversationItem
 
 /**
  * Handles the `POST /conversations/{conversation_id}/items` endpoint.
@@ -19,12 +22,26 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.extr
 internal class CreateConversationItemsHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
         extractConversationIdFromPath(request.url)?.let {
-            span.setAttribute("gen_ai.conversation.id", it)
+            span.setAttribute("tracy.request.conversation_id", it)
+        }
+
+        val include = request.url.parameters.queryParameterValues("include").filterNotNull()
+        if (include.isNotEmpty()) {
+            span.setAttribute("tracy.request.include", include.joinToString(","))
+        }
+
+        val body = request.body.asJson()?.jsonObject ?: return
+        (body["items"] as? JsonArray)?.let { items ->
+            span.setAttribute("tracy.request.items.count", items.size.toLong())
+            for ((index, element) in items.withIndex()) {
+                val item = element as? JsonObject ?: continue
+                span.traceRequestConversationItem(item, indexPrefix = "tracy.request.items.$index")
+            }
         }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceConversationItemsList(body)
+        span.traceConversationItemList(body)
     }
 }

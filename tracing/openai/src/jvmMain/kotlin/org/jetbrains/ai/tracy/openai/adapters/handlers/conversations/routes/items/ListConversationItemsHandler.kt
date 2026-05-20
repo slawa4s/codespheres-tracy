@@ -19,16 +19,20 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes.extr
 internal class ListConversationItemsHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
         extractConversationIdFromPath(request.url)?.let {
-            span.setAttribute("gen_ai.conversation.id", it)
+            span.setAttribute("tracy.request.conversation_id", it)
         }
         val params = request.url.parameters
+        params.queryParameter("after")?.let { span.setAttribute("tracy.request.after", it) }
+        val include = params.queryParameterValues("include").filterNotNull()
+        if (include.isNotEmpty()) {
+            span.setAttribute("tracy.request.include", include.joinToString(","))
+        }
         params.queryParameter("limit")?.let { span.setAttribute("tracy.request.limit", it) }
         params.queryParameter("order")?.let { span.setAttribute("tracy.request.order", it) }
-        params.queryParameter("after")?.let { span.setAttribute("tracy.request.after", it) }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceConversationItemsList(body)
+        span.traceConversationItemList(body)
     }
 }

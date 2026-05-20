@@ -9,10 +9,6 @@ import com.openai.models.conversations.ConversationCreateParams
 import com.openai.models.conversations.ConversationDeleteParams
 import com.openai.models.conversations.ConversationRetrieveParams
 import com.openai.models.conversations.ConversationUpdateParams
-import com.openai.models.conversations.items.ItemCreateParams
-import com.openai.models.conversations.items.ItemDeleteParams
-import com.openai.models.conversations.items.ItemListParams
-import com.openai.models.conversations.items.ItemRetrieveParams
 import com.openai.models.responses.EasyInputMessage
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
@@ -30,8 +26,8 @@ import java.time.Instant
 import kotlin.time.Duration.Companion.minutes
 
 /**
- * These tests use [okhttp3.mockwebserver.MockWebServer] and a mock OpenAI API key, so they do not
- * require access to the real OpenAI Conversations API or any specific account configuration.
+ * Tests for the top-level `/conversations` CRUD routes. The companion suite for the
+ * `/conversations/{id}/items` routes lives in [ConversationItemsOpenAIApiEndpointHandlerTest].
  */
 @Tag("openai")
 class ConversationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
@@ -246,238 +242,6 @@ class ConversationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         }
     }
 
-    // ============ ITEMS_CREATE: POST /conversations/{id}/items ============
-
-    @Test
-    fun `test ITEMS_CREATE endpoint gets traced`() = runTest(timeout = 3.minutes) {
-        withMockServer { server ->
-            val client = createOpenAIClient(
-                url = server.url("/").toString(),
-                apiKey = MOCK_API_KEY,
-                timeout = Duration.ofMinutes(3)
-            ).apply { instrument(this) }
-
-            val conversationId = "conv_items_create_001"
-
-            server.enqueue(enqueueConversationItemListResponse(count = 1))
-
-            val params = ItemCreateParams.builder()
-                .conversationId(conversationId)
-                .addItem(
-                    EasyInputMessage.builder()
-                        .role(EasyInputMessage.Role.USER)
-                        .content("Hello")
-                        .build()
-                )
-                .build()
-            client.conversations().items().create(params)
-
-            val traces = analyzeSpans()
-            assertTracesCount(1, traces)
-            val trace = traces.first()
-
-            assertEquals("conversations.items.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
-            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.conversation.items.count")])
-            assertNotNull(trace.attributes[AttributeKey.booleanKey("tracy.conversation.items.has_more")])
-        }
-    }
-
-    // ============ ITEMS_LIST: GET /conversations/{id}/items ============
-
-    @Test
-    fun `test ITEMS_LIST endpoint gets traced with pagination attributes`() = runTest(timeout = 3.minutes) {
-        withMockServer { server ->
-            val client = createOpenAIClient(
-                url = server.url("/").toString(),
-                apiKey = MOCK_API_KEY,
-                timeout = Duration.ofMinutes(3)
-            ).apply { instrument(this) }
-
-            val conversationId = "conv_items_list_002"
-            val limit = 5L
-            val order = "desc"
-            val after = "msg_abc123"
-
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "application/json")
-                    .setBody(
-                        """
-                        {
-                          "object": "list",
-                          "data": [
-                            {
-                              "id": "msg_item_1",
-                              "type": "message",
-                              "status": "completed",
-                              "role": "user",
-                              "content": []
-                            }
-                          ],
-                          "first_id": "msg_item_1",
-                          "last_id": "msg_item_1",
-                          "has_more": false
-                        }
-                        """.trimIndent()
-                    )
-            )
-
-            val params = ItemListParams.builder()
-                .conversationId(conversationId)
-                .limit(limit)
-                .order(ItemListParams.Order.DESC)
-                .after(after)
-                .build()
-            client.conversations().items().list(params)
-
-            val traces = analyzeSpans()
-            assertTracesCount(1, traces)
-            val trace = traces.first()
-
-            assertEquals("conversations.items.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
-
-            // Verify pagination request params are traced
-            assertEquals(limit.toString(), trace.attributes[AttributeKey.stringKey("tracy.request.limit")])
-            assertEquals(order, trace.attributes[AttributeKey.stringKey("tracy.request.order")])
-            assertEquals(after, trace.attributes[AttributeKey.stringKey("tracy.request.after")])
-
-            // Verify response list metadata
-            assertEquals(1L, trace.attributes[AttributeKey.longKey("tracy.conversation.items.count")])
-            assertEquals("msg_item_1", trace.attributes[AttributeKey.stringKey("tracy.conversation.items.first_id")])
-            assertEquals("msg_item_1", trace.attributes[AttributeKey.stringKey("tracy.conversation.items.last_id")])
-            assertEquals(false, trace.attributes[AttributeKey.booleanKey("tracy.conversation.items.has_more")])
-        }
-    }
-
-    @Test
-    fun `test ITEMS_LIST endpoint with empty list gets traced`() = runTest(timeout = 3.minutes) {
-        withMockServer { server ->
-            val client = createOpenAIClient(
-                url = server.url("/").toString(),
-                apiKey = MOCK_API_KEY,
-                timeout = Duration.ofMinutes(3)
-            ).apply { instrument(this) }
-
-            val conversationId = "conv_items_list_empty"
-
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "application/json")
-                    .setBody(
-                        """
-                        {
-                          "object": "list",
-                          "data": [],
-                          "first_id": null,
-                          "last_id": null,
-                          "has_more": false
-                        }
-                        """.trimIndent()
-                    )
-            )
-
-            val params = ItemListParams.builder()
-                .conversationId(conversationId)
-                .build()
-            client.conversations().items().list(params)
-
-            val traces = analyzeSpans()
-            assertTracesCount(1, traces)
-            val trace = traces.first()
-
-            assertEquals("conversations.items.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals(0L, trace.attributes[AttributeKey.longKey("tracy.conversation.items.count")])
-            assertEquals(false, trace.attributes[AttributeKey.booleanKey("tracy.conversation.items.has_more")])
-        }
-    }
-
-    // ============ ITEMS_RETRIEVE: GET /conversations/{id}/items/{item_id} ============
-
-    @Test
-    fun `test ITEMS_RETRIEVE endpoint gets traced`() = runTest(timeout = 3.minutes) {
-        withMockServer { server ->
-            val client = createOpenAIClient(
-                url = server.url("/").toString(),
-                apiKey = MOCK_API_KEY,
-                timeout = Duration.ofMinutes(3)
-            ).apply { instrument(this) }
-
-            val conversationId = "conv_item_retrieve_003"
-            val itemId = "msg_retrieve_xyz"
-
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "application/json")
-                    .setBody(
-                        """
-                        {
-                          "id": "$itemId",
-                          "type": "message",
-                          "status": "completed",
-                          "role": "assistant",
-                          "content": []
-                        }
-                        """.trimIndent()
-                    )
-            )
-
-            val params = ItemRetrieveParams.builder()
-                .conversationId(conversationId)
-                .itemId(itemId)
-                .build()
-            client.conversations().items().retrieve(params)
-
-            val traces = analyzeSpans()
-            assertTracesCount(1, traces)
-            val trace = traces.first()
-
-            assertEquals("conversations.items.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
-            assertEquals(itemId, trace.attributes[AttributeKey.stringKey("tracy.conversation.item.id")])
-            assertEquals("message", trace.attributes[AttributeKey.stringKey("tracy.conversation.item.type")])
-            assertEquals("completed", trace.attributes[AttributeKey.stringKey("tracy.conversation.item.status")])
-        }
-    }
-
-    // ============ ITEMS_DELETE: DELETE /conversations/{id}/items/{item_id} ============
-
-    @Test
-    fun `test ITEMS_DELETE endpoint gets traced`() = runTest(timeout = 3.minutes) {
-        withMockServer { server ->
-            val client = createOpenAIClient(
-                url = server.url("/").toString(),
-                apiKey = MOCK_API_KEY,
-                timeout = Duration.ofMinutes(3)
-            ).apply { instrument(this) }
-
-            val conversationId = "conv_item_delete_004"
-            val itemId = "msg_delete_abc"
-
-            // ITEMS_DELETE returns the parent Conversation object
-            server.enqueue(enqueueConversationResponse(id = conversationId))
-
-            val params = ItemDeleteParams.builder()
-                .conversationId(conversationId)
-                .itemId(itemId)
-                .build()
-            client.conversations().items().delete(params)
-
-            val traces = analyzeSpans()
-            assertTracesCount(1, traces)
-            val trace = traces.first()
-
-            assertEquals("conversations.items.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
-            assertEquals(itemId, trace.attributes[AttributeKey.stringKey("tracy.conversation.item.id")])
-            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.conversation.created_at")])
-        }
-    }
-
     // ============ CONVERSATIONS_ID extracted from path (non-CREATE routes) ============
 
     @Test
@@ -545,45 +309,6 @@ class ConversationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         }
     }
 
-    @Test
-    fun `test conversations items lifecycle - create items then list`() = runTest(timeout = 3.minutes) {
-        withMockServer { server ->
-            val client = createOpenAIClient(
-                url = server.url("/").toString(),
-                apiKey = MOCK_API_KEY,
-                timeout = Duration.ofMinutes(3)
-            ).apply { instrument(this) }
-
-            val conversationId = "conv_items_lifecycle_002"
-
-            server.enqueue(enqueueConversationItemListResponse(count = 1))
-            server.enqueue(enqueueConversationItemListResponse(count = 1))
-
-            // Create items
-            client.conversations().items().create(
-                ItemCreateParams.builder()
-                    .conversationId(conversationId)
-                    .addItem(
-                        EasyInputMessage.builder()
-                            .role(EasyInputMessage.Role.USER)
-                            .content("Hello")
-                            .build()
-                    )
-                    .build()
-            )
-            // List items
-            client.conversations().items().list(
-                ItemListParams.builder().conversationId(conversationId).build()
-            )
-
-            val traces = analyzeSpans()
-            assertTracesCount(2, traces)
-
-            assertEquals("conversations.items.create", traces[0].attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals("conversations.items.list", traces[1].attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-        }
-    }
-
     // ============ HELPER METHODS ============
 
     private fun enqueueConversationResponse(
@@ -600,39 +325,6 @@ class ConversationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
                   "object": "conversation",
                   "created_at": $createdAt,
                   "metadata": {}
-                }
-                """.trimIndent()
-            )
-    }
-
-    private fun enqueueConversationItemListResponse(
-        count: Int,
-        firstId: String = "msg_first_001",
-        lastId: String = "msg_last_001",
-        hasMore: Boolean = false
-    ): MockResponse {
-        val items = (1..count).joinToString(",") { i ->
-            """
-            {
-              "id": "msg_item_$i",
-              "type": "message",
-              "status": "completed",
-              "role": "user",
-              "content": []
-            }
-            """.trimIndent()
-        }
-        return MockResponse()
-            .setResponseCode(200)
-            .setHeader("Content-Type", "application/json")
-            .setBody(
-                """
-                {
-                  "object": "list",
-                  "data": [$items],
-                  "first_id": "$firstId",
-                  "last_id": "$lastId",
-                  "has_more": $hasMore
                 }
                 """.trimIndent()
             )
