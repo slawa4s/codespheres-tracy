@@ -7,6 +7,7 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.files.routes
 
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -25,20 +26,63 @@ internal fun extractFileIdFromPath(url: TracyHttpUrl): String? {
 }
 
 /**
- * Populates the shared OpenAI file object attributes common to CREATE and RETRIEVE responses.
+ * Populates the documented OpenAI `FileObject` fields for CREATE / RETRIEVE responses
+ * under `tracy.response.{field}`. Also writes the top-level OTel `gen_ai.response.id`
+ * from `body.id`.
  */
-internal fun Span.traceOpenAIFileObject(body: JsonObject) {
+internal fun Span.traceFileObject(body: JsonObject) {
+    body["id"]?.jsonPrimitive?.content?.let {
+        setAttribute(GEN_AI_RESPONSE_ID, it)
+    }
+    traceFileObjectFields(body, prefix = "tracy.response")
+}
+
+/**
+ * Populates `tracy.response.data.{i}.{field}` attributes for each `FileObject`
+ * element in the LIST response's `data` array.
+ *
+ * Does not touch the top-level OTel attrs — there is no single file to attribute them to.
+ */
+internal fun Span.traceFileObjects(items: JsonArray) {
+    for ((index, element) in items.withIndex()) {
+        val item = element as? JsonObject ?: continue
+        traceFileObjectFields(item, prefix = "tracy.response.data.$index")
+    }
+}
+
+/**
+ * Writes every documented `FileObject` field under `{prefix}.{field}`, in the order
+ * documented by the OpenAI API. The deprecated fields `status` and `status_details`
+ * are still traced.
+ */
+private fun Span.traceFileObjectFields(body: JsonObject, prefix: String) {
     val span = this
-    body["id"]?.let {
-        val id = it.jsonPrimitive.content
-        span.setAttribute("tracy.file.id", id)
-        span.setAttribute(GEN_AI_RESPONSE_ID, id)
+
+    body["id"]?.jsonPrimitive?.content?.let {
+        span.setAttribute("$prefix.id", it)
     }
-    body["filename"]?.let { span.setAttribute("tracy.file.filename", it.jsonPrimitive.content) }
-    body["purpose"]?.let { span.setAttribute("tracy.file.purpose", it.jsonPrimitive.content) }
-    body["bytes"]?.jsonPrimitive?.longOrNull?.let { span.setAttribute("tracy.file.bytes", it) }
+    body["bytes"]?.jsonPrimitive?.longOrNull?.let {
+        span.setAttribute("$prefix.bytes", it)
+    }
     body["created_at"]?.jsonPrimitive?.longOrNull?.let {
-        span.setAttribute("tracy.file.created_at", it)
+        span.setAttribute("$prefix.created_at", it)
     }
-    body["status"]?.let { span.setAttribute("tracy.file.status", it.jsonPrimitive.content) }
+    body["filename"]?.jsonPrimitive?.content?.let {
+        span.setAttribute("$prefix.filename", it)
+    }
+    body["object"]?.jsonPrimitive?.content?.let {
+        span.setAttribute("$prefix.object", it)
+    }
+    body["purpose"]?.jsonPrimitive?.content?.let {
+        span.setAttribute("$prefix.purpose", it)
+    }
+    body["status"]?.jsonPrimitive?.content?.let {
+        span.setAttribute("$prefix.status", it)
+    }
+    body["expires_at"]?.jsonPrimitive?.longOrNull?.let {
+        span.setAttribute("$prefix.expires_at", it)
+    }
+    body["status_details"]?.jsonPrimitive?.content?.let {
+        span.setAttribute("$prefix.status_details", it)
+    }
 }

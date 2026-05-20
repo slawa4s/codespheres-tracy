@@ -17,11 +17,13 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  */
 internal class RetrieveFileHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        extractFileIdFromPath(request.url)?.let { span.setAttribute("tracy.file.id", it) }
+        extractFileIdFromPath(request.url)?.let {
+            span.setAttribute("tracy.request.file_id", it)
+        }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceOpenAIFileObject(body)
+        span.traceFileObject(body)
     }
 }

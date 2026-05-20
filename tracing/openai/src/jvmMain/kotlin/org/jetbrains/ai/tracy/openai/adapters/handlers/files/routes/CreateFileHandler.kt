@@ -25,12 +25,15 @@ internal class CreateFileHandler : RouteHandler {
             when (partName) {
                 "file" -> {
                     span.setAttribute("tracy.request.file.size_bytes", part.content.size.toLong())
-                    part.filename?.let {
-                        span.setAttribute("tracy.request.file.filename", it)
+                    part.contentType?.let { ct ->
+                        span.setAttribute("tracy.request.file.mime_type", "${ct.type}/${ct.subtype}")
                     }
                 }
                 "purpose" -> {
-                    span.setAttribute("tracy.request.file.purpose", part.content.toString(charset))
+                    span.setAttribute("tracy.request.purpose", part.content.toString(charset))
+                }
+                "expires_after" -> {
+                    span.setAttribute("tracy.request.expires_after", part.content.toString(charset))
                 }
             }
         }
@@ -38,6 +41,6 @@ internal class CreateFileHandler : RouteHandler {
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceOpenAIFileObject(body)
+        span.traceFileObject(body)
     }
 }

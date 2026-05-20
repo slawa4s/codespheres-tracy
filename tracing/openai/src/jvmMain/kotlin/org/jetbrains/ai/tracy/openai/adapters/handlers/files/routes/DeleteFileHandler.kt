@@ -19,14 +19,21 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  */
 internal class DeleteFileHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        extractFileIdFromPath(request.url)?.let { span.setAttribute("tracy.file.id", it) }
+        extractFileIdFromPath(request.url)?.let {
+            span.setAttribute("tracy.request.file_id", it)
+        }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        body["id"]?.let { span.setAttribute("tracy.file.id", it.jsonPrimitive.content) }
+        body["id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.response.id", it)
+        }
         body["deleted"]?.let {
-            span.setAttribute("tracy.file.deleted", it.jsonPrimitive.boolean)
+            span.setAttribute("tracy.response.deleted", it.jsonPrimitive.boolean)
+        }
+        body["object"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.response.object", it)
         }
     }
 }
