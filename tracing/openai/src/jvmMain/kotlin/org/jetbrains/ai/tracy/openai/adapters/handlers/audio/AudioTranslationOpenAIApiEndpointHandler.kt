@@ -5,21 +5,25 @@
 
 package org.jetbrains.ai.tracy.openai.adapters.handlers.audio
 
+import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asFormData
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
-import io.opentelemetry.api.trace.Span
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OUTPUT_TYPE
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_TEMPERATURE
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
-import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import mu.KotlinLogging
+import org.jetbrains.ai.tracy.core.policy.orRedactedInput
+import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 
 /**
  * Extracts request/response attributes for the OpenAI Audio Translations API.
@@ -36,38 +40,41 @@ internal class AudioTranslationOpenAIApiEndpointHandler : EndpointApiHandler {
         for (part in body.parts) {
             val contentType = part.contentType
             val partName = part.name ?: continue
+            val charset = contentType?.charset() ?: Charsets.UTF_8
 
-            when {
-                // Audio file part: extract size and format
-                partName == "file" -> {
+            when (partName) {
+                "file" -> {
+                    // file: scrape MIME type and size in bytes from the multipart part
                     span.setAttribute("tracy.request.audio.size_bytes", part.content.size.toLong())
-                    val format = contentType?.subtype
-                        ?: part.filename?.substringAfterLast('.', "")?.takeIf { it.isNotEmpty() }
-                    if (format != null) {
-                        span.setAttribute("tracy.request.audio.format", format)
+                    if (contentType != null) {
+                        span.setAttribute("tracy.request.audio.mime_type", "${contentType.type}/${contentType.subtype}")
                     }
                 }
 
-                partName == "model" -> {
-                    val content = part.content.toString(contentType?.charset() ?: Charsets.UTF_8)
-                    span.setAttribute(GEN_AI_REQUEST_MODEL, content)
+                "model" -> {
+                    span.setAttribute(GEN_AI_REQUEST_MODEL, part.content.toString(charset))
                 }
 
-                partName == "response_format" -> {
-                    val content = part.content.toString(contentType?.charset() ?: Charsets.UTF_8)
+                "prompt" -> {
+                    // Caller-supplied content — apply input redaction policy.
+                    span.setAttribute(
+                        "tracy.request.prompt",
+                        part.content.toString(charset).orRedactedInput()
+                    )
+                }
+
+                "response_format" -> {
+                    val content = part.content.toString(charset)
                     span.setAttribute("tracy.request.response_format", content)
                     if (content == "json" || content == "verbose_json") {
                         span.setAttribute(GEN_AI_OUTPUT_TYPE, "json")
                     }
                 }
 
-                partName == "temperature" -> {
-                    val content = part.content.toString(contentType?.charset() ?: Charsets.UTF_8)
-                    content.toDoubleOrNull()?.let { span.setAttribute(GEN_AI_REQUEST_TEMPERATURE, it) }
-                }
-
-                partName == "prompt" -> {
-                    span.setAttribute("tracy.request.prompt.present", true)
+                "temperature" -> {
+                    part.content.toString(charset).toDoubleOrNull()?.let {
+                        span.setAttribute("tracy.request.temperature", it)
+                    }
                 }
 
                 else -> {
@@ -83,8 +90,56 @@ internal class AudioTranslationOpenAIApiEndpointHandler : EndpointApiHandler {
         body["model"]?.jsonPrimitive?.content?.let {
             span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
         }
+        body["text"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.response.translation.text", it.orRedactedOutput())
+        }
+        body["language"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.response.translation.language", it)
+        }
         body["duration"]?.jsonPrimitive?.doubleOrNull?.let {
             span.setAttribute("tracy.response.translation.duration_seconds", it)
+        }
+        body["segments"]?.jsonArray?.let { segments ->
+            for ((index, element) in segments.withIndex()) {
+                val segment = element as? JsonObject ?: continue
+                traceTranscriptionSegment(span, segment, prefix = "tracy.response.segments.$index")
+            }
+        }
+    }
+
+    /**
+     * Writes the documented [TranscriptionSegment] fields under `{prefix}.{field}`.
+     */
+    private fun traceTranscriptionSegment(span: Span, segment: JsonObject, prefix: String) {
+        segment["id"]?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute("$prefix.id", it)
+        }
+        segment["avg_logprob"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute("$prefix.avg_logprob", it)
+        }
+        segment["compression_ratio"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute("$prefix.compression_ratio", it)
+        }
+        segment["end"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute("$prefix.end", it)
+        }
+        segment["no_speech_prob"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute("$prefix.no_speech_prob", it)
+        }
+        segment["seek"]?.jsonPrimitive?.longOrNull?.let {
+            span.setAttribute("$prefix.seek", it)
+        }
+        segment["start"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute("$prefix.start", it)
+        }
+        segment["temperature"]?.jsonPrimitive?.doubleOrNull?.let {
+            span.setAttribute("$prefix.temperature", it)
+        }
+        segment["text"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("$prefix.text", it.orRedactedOutput())
+        }
+        segment["tokens"]?.let {
+            span.setAttribute("$prefix.tokens", it.toString())
         }
     }
 

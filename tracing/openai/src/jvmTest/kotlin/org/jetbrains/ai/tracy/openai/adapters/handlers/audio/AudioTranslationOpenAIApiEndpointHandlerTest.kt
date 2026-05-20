@@ -11,6 +11,8 @@ import com.openai.models.audio.translations.TranslationCreateParams
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
+import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.junit.jupiter.api.Assertions.*
@@ -93,8 +95,10 @@ class AudioTranslationOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertNotNull(sizeBytes, "Audio size_bytes should be traced")
             assertTrue(sizeBytes!! > 0, "Audio size_bytes should be positive")
 
-            val format = trace.attributes[AttributeKey.stringKey("tracy.request.audio.format")]
-            assertNotNull(format, "Audio format should be traced")
+            assertEquals(
+                AUDIO_CONTENT_TYPE,
+                trace.attributes[AttributeKey.stringKey("tracy.request.audio.mime_type")]
+            )
         }
     }
 
@@ -141,24 +145,210 @@ class AudioTranslationOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test verbose json response duration is traced`() = runTest(timeout = 3.minutes) {
+    fun `test verbose json response top-level fields are traced`() = runTest(timeout = 3.minutes) {
         withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
             val client = createOpenAIClient(
                 url = server.url("/").toString(),
                 apiKey = MOCK_API_KEY,
                 timeout = Duration.ofMinutes(1),
             ).apply { instrument(this) }
 
-            server.enqueue(verboseJsonTranslationResponse(duration = 7.5))
+            server.enqueue(verboseJsonTranslationResponse(duration = 7.5, language = "english"))
 
             val params = translationParams(responseFormat = TranslationCreateParams.ResponseFormat.VERBOSE_JSON)
             client.audio().translations().create(params)
 
             val trace = analyzeSpans().first()
 
-            assertNotNull(
-                trace.attributes[AttributeKey.doubleKey("tracy.response.translation.duration_seconds")],
-                "Duration should be traced"
+            assertEquals(
+                7.5,
+                trace.attributes[AttributeKey.doubleKey("tracy.response.translation.duration_seconds")]
+            )
+            assertEquals(
+                "english",
+                trace.attributes[AttributeKey.stringKey("tracy.response.translation.language")]
+            )
+            assertEquals(
+                "Hello world.",
+                trace.attributes[AttributeKey.stringKey("tracy.response.translation.text")]
+            )
+        }
+    }
+
+    @Test
+    fun `test response text is redacted when output capture is disabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = false, captureOutputs = false)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(jsonTranslationResponse())
+
+            val params = translationParams()
+            client.audio().translations().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals(
+                "REDACTED",
+                trace.attributes[AttributeKey.stringKey("tracy.response.translation.text")]
+            )
+        }
+    }
+
+    @Test
+    fun `test response text is traced verbatim when output capture is enabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(jsonTranslationResponse())
+
+            val params = translationParams()
+            client.audio().translations().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals(
+                "Hello world.",
+                trace.attributes[AttributeKey.stringKey("tracy.response.translation.text")]
+            )
+        }
+    }
+
+    @Test
+    fun `test segments are traced per-index with all fields`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "task": "translate",
+                          "language": "english",
+                          "duration": 5.0,
+                          "text": "Hello world.",
+                          "segments": [
+                            {
+                              "id": 0,
+                              "avg_logprob": -0.2,
+                              "compression_ratio": 1.3,
+                              "end": 2.5,
+                              "no_speech_prob": 0.01,
+                              "seek": 0,
+                              "start": 0.0,
+                              "temperature": 0.0,
+                              "text": "Hello",
+                              "tokens": [123, 456]
+                            },
+                            {
+                              "id": 1,
+                              "avg_logprob": -0.3,
+                              "compression_ratio": 1.4,
+                              "end": 5.0,
+                              "no_speech_prob": 0.02,
+                              "seek": 250,
+                              "start": 2.5,
+                              "temperature": 0.0,
+                              "text": "world.",
+                              "tokens": [789]
+                            }
+                          ]
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = translationParams(responseFormat = TranslationCreateParams.ResponseFormat.VERBOSE_JSON)
+            client.audio().translations().create(params)
+
+            val trace = analyzeSpans().first()
+
+            // Segment 0
+            assertEquals(0L, trace.attributes[AttributeKey.longKey("tracy.response.segments.0.id")])
+            assertEquals(-0.2, trace.attributes[AttributeKey.doubleKey("tracy.response.segments.0.avg_logprob")])
+            assertEquals(1.3, trace.attributes[AttributeKey.doubleKey("tracy.response.segments.0.compression_ratio")])
+            assertEquals(2.5, trace.attributes[AttributeKey.doubleKey("tracy.response.segments.0.end")])
+            assertEquals(0.01, trace.attributes[AttributeKey.doubleKey("tracy.response.segments.0.no_speech_prob")])
+            assertEquals(0L, trace.attributes[AttributeKey.longKey("tracy.response.segments.0.seek")])
+            assertEquals(0.0, trace.attributes[AttributeKey.doubleKey("tracy.response.segments.0.start")])
+            assertEquals(0.0, trace.attributes[AttributeKey.doubleKey("tracy.response.segments.0.temperature")])
+            assertEquals("Hello", trace.attributes[AttributeKey.stringKey("tracy.response.segments.0.text")])
+            assertEquals("[123,456]", trace.attributes[AttributeKey.stringKey("tracy.response.segments.0.tokens")])
+
+            // Segment 1
+            assertEquals(1L, trace.attributes[AttributeKey.longKey("tracy.response.segments.1.id")])
+            assertEquals("world.", trace.attributes[AttributeKey.stringKey("tracy.response.segments.1.text")])
+            assertEquals("[789]", trace.attributes[AttributeKey.stringKey("tracy.response.segments.1.tokens")])
+        }
+    }
+
+    @Test
+    fun `test segment text is redacted when output capture is disabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = false, captureOutputs = false)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "text": "Hello",
+                          "segments": [
+                            {"id": 0, "text": "Hello"}
+                          ]
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = translationParams(responseFormat = TranslationCreateParams.ResponseFormat.VERBOSE_JSON)
+            client.audio().translations().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals(
+                "REDACTED",
+                trace.attributes[AttributeKey.stringKey("tracy.response.segments.0.text")]
             )
         }
     }
@@ -175,13 +365,7 @@ class AudioTranslationOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             server.enqueue(jsonTranslationResponse())
 
             val params = TranslationCreateParams.builder()
-                .file(
-                    MultipartField.builder<InputStream>()
-                        .value(readResource(AUDIO_FILE))
-                        .contentType(AUDIO_CONTENT_TYPE)
-                        .filename(AUDIO_FILE)
-                        .build()
-                )
+                .file(audioFile())
                 .model(AudioModel.WHISPER_1)
                 .temperature(0.5)
                 .build()
@@ -189,16 +373,20 @@ class AudioTranslationOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             val trace = analyzeSpans().first()
 
-            assertNotNull(
-                trace.attributes[AttributeKey.doubleKey("gen_ai.request.temperature")],
-                "Temperature should be traced"
+            assertEquals(
+                0.5,
+                trace.attributes[AttributeKey.doubleKey("tracy.request.temperature")]
             )
         }
     }
 
     @Test
-    fun `test prompt presence is traced from request form data`() = runTest(timeout = 3.minutes) {
+    fun `test prompt is redacted when input capture is disabled`() = runTest(timeout = 3.minutes) {
         withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = false, captureOutputs = false)
+            )
+
             val client = createOpenAIClient(
                 url = server.url("/").toString(),
                 apiKey = MOCK_API_KEY,
@@ -208,13 +396,7 @@ class AudioTranslationOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             server.enqueue(jsonTranslationResponse())
 
             val params = TranslationCreateParams.builder()
-                .file(
-                    MultipartField.builder<InputStream>()
-                        .value(readResource(AUDIO_FILE))
-                        .contentType(AUDIO_CONTENT_TYPE)
-                        .filename(AUDIO_FILE)
-                        .build()
-                )
+                .file(audioFile())
                 .model(AudioModel.WHISPER_1)
                 .prompt("Translate the following audio to English.")
                 .build()
@@ -223,27 +405,58 @@ class AudioTranslationOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = analyzeSpans().first()
 
             assertEquals(
-                true,
-                trace.attributes[AttributeKey.booleanKey("tracy.request.prompt.present")],
-                "Prompt present should be traced as true"
+                "REDACTED",
+                trace.attributes[AttributeKey.stringKey("tracy.request.prompt")]
+            )
+        }
+    }
+
+    @Test
+    fun `test prompt is traced verbatim when input capture is enabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(jsonTranslationResponse())
+
+            val params = TranslationCreateParams.builder()
+                .file(audioFile())
+                .model(AudioModel.WHISPER_1)
+                .prompt("Translate the following audio to English.")
+                .build()
+            client.audio().translations().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals(
+                "Translate the following audio to English.",
+                trace.attributes[AttributeKey.stringKey("tracy.request.prompt")]
             )
         }
     }
 
     // ============ HELPER METHODS ============
 
+    private fun audioFile(): MultipartField<InputStream> =
+        MultipartField.builder<InputStream>()
+            .value(readResource(AUDIO_FILE))
+            .contentType(AUDIO_CONTENT_TYPE)
+            .filename(AUDIO_FILE)
+            .build()
+
     private fun translationParams(
         model: AudioModel = AudioModel.WHISPER_1,
         responseFormat: TranslationCreateParams.ResponseFormat? = null,
     ): TranslationCreateParams {
         val builder = TranslationCreateParams.builder()
-            .file(
-                MultipartField.builder<InputStream>()
-                    .value(readResource(AUDIO_FILE))
-                    .contentType(AUDIO_CONTENT_TYPE)
-                    .filename(AUDIO_FILE)
-                    .build()
-            )
+            .file(audioFile())
             .model(model)
         if (responseFormat != null) {
             builder.responseFormat(responseFormat)
