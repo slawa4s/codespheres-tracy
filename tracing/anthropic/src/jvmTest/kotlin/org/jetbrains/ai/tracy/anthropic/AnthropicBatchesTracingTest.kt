@@ -72,7 +72,12 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             val trace = traces.first()
 
             assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals(1L, trace.attributes[AttributeKey.longKey("gen_ai.request.batch.size")])
+            assertEquals(1L, trace.attributes[AttributeKey.longKey("gen_ai.request.requests.size")])
+            assertEquals("test-1", trace.attributes[AttributeKey.stringKey("gen_ai.request.requests.0.custom_id")])
+            assertEquals(
+                """{"model":"claude-haiku-4-5-20251001","max_tokens":100,"messages":[{"role":"user","content":"Hello"}]}""",
+                trace.attributes[AttributeKey.stringKey("gen_ai.request.requests.0.params")]
+            )
             assertEquals(BATCH_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals("in_progress", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
         }
