@@ -12,12 +12,14 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
+import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 
 /**
  * Handles the OpenAI Moderations API endpoint (`POST /v1/moderations`).
@@ -28,7 +30,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  * - `tracy.response.results.count`: number of results returned
  * - From `results[0]`: flagged status, categories, category scores, and applied input types
  *
- * See [Moderations API Reference](https://platform.openai.com/docs/api-reference/moderations)
+ * See [Moderations API Reference](https://developers.openai.com/api/reference/resources/moderations/methods/create)
  */
 internal class ModerationsOpenAIApiEndpointHandler : EndpointApiHandler {
 
@@ -42,8 +44,26 @@ internal class ModerationsOpenAIApiEndpointHandler : EndpointApiHandler {
         }
 
         when (val input = body["input"]) {
-            is JsonPrimitive -> span.setAttribute("tracy.request.input.type", "string")
-            is JsonArray -> span.setAttribute("tracy.request.input.type", "multimodal")
+            is JsonPrimitive -> span.setAttribute("tracy.request.input", input.jsonPrimitive.content.orRedactedInput())
+            is JsonArray -> {
+                for ((index, item) in input.jsonArray.withIndex()) {
+                    when (item) {
+                        is JsonPrimitive -> {
+                            span.setAttribute("tracy.request.input.$index", item.jsonPrimitive.content.orRedactedInput())
+                        }
+                        is JsonObject -> {
+                            for ((key, value) in item.jsonObject) {
+                                span.setAttribute("tracy.request.input.$index.$key", value.jsonPrimitive.toString().orRedactedInput())
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+                span.setAttribute(
+                    "tracy.request.input.type",
+                    if (input.size == 1) "string" else "multimodal"
+                )
+            }
             else -> Unit
         }
     }
@@ -51,25 +71,31 @@ internal class ModerationsOpenAIApiEndpointHandler : EndpointApiHandler {
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
 
-        val results = body["results"] as? JsonArray ?: return
-        span.setAttribute("tracy.response.results.count", results.size.toLong())
-
-        val first = results.firstOrNull() as? JsonObject ?: return
-
-        first["flagged"]?.jsonPrimitive?.booleanOrNull?.let {
-            span.setAttribute("tracy.response.results.flagged", it)
+        body["model"]?.jsonPrimitive?.content?.let {
+            span.setAttribute(GEN_AI_REQUEST_MODEL, it)
+        }
+        body["id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.response.id", it)
         }
 
-        first["categories"]?.let {
-            span.setAttribute("tracy.response.results.categories", it.toString())
-        }
+        val results = body["results"]
+        if (results is JsonArray) {
+            span.setAttribute("tracy.response.results.size", results.size.toLong())
 
-        first["category_scores"]?.let {
-            span.setAttribute("tracy.response.results.category_scores", it.toString())
-        }
-
-        first["category_applied_input_types"]?.let {
-            span.setAttribute("tracy.response.results.category_applied_input_types", it.toString())
+            for ((index, result) in results.withIndex()) {
+                result.jsonObject["categories"]?.let {
+                    span.setAttribute("tracy.response.results.$index.categories", it.toString())
+                }
+                result.jsonObject["category_applied_input_types"]?.let {
+                    span.setAttribute("tracy.response.results.$index.category_applied_input_types", it.toString())
+                }
+                result.jsonObject["category_scores"]?.let {
+                    span.setAttribute("tracy.response.results.$index.category_scores", it.toString())
+                }
+                result.jsonObject["flagged"]?.jsonPrimitive?.booleanOrNull?.let {
+                    span.setAttribute("tracy.response.results.$index.flagged", it)
+                }
+            }
         }
     }
 
