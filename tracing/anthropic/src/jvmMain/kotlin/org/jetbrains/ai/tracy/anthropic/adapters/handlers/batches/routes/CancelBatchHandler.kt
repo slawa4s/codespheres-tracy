@@ -7,6 +7,7 @@ package org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes
 
 import io.opentelemetry.api.trace.Span
 import kotlinx.serialization.json.jsonObject
+import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -17,11 +18,22 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  */
 internal class CancelBatchHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        // No request-side attributes.
+        // NOTE: No request-side body attributes, only a single path parameter
+        // URL: /v1/messages/batches/{message_batch_id}/cancel
+        // dropping `cancel` word to extract `message_batch_id`
+        val messageBatchId = request.url.pathSegments.dropLast(1).lastOrNull()
+        if (messageBatchId == null) {
+            logger.warn { "No message_batch_id in URL path: ${request.url.pathSegments.joinToString("/")}" }
+        }
+        span.setAttribute("gen_ai.request.message_batch_id", messageBatchId)
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceAnthropicBatch(body)
+        span.traceMessageBatch(body)
+    }
+
+    companion object {
+        private val logger = KotlinLogging.logger {}
     }
 }

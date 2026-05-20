@@ -16,10 +16,21 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 
 /**
  * Handles the `GET /v1/messages/batches` endpoint.
+ *
+ * See [batches/list](https://platform.claude.com/docs/en/api/messages/batches/list)
  */
 internal class ListBatchesHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        // No request-side attributes for list.
+        // NOTE: No request-side body attributes, only query parameters
+        val afterId = request.url.parameters.queryParameter("after_id")
+        val beforeId = request.url.parameters.queryParameter("before_id")
+        val limit = request.url.parameters.queryParameter("limit")?.toLongOrNull()
+
+        span.setAttribute("gen_ai.request.after_id", afterId)
+        span.setAttribute("gen_ai.request.before_id", beforeId)
+        if (limit != null) {
+            span.setAttribute("gen_ai.request.limit", limit)
+        }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
@@ -27,8 +38,11 @@ internal class ListBatchesHandler : RouteHandler {
 
         val data = body["data"]
         if (data is JsonArray) {
+            // list of message batches
             span.setAttribute("gen_ai.response.list.count", data.size.toLong())
+            span.traceMessageBatches(data)
         }
+
         body["has_more"]?.jsonPrimitive?.content?.let {
             span.setAttribute("gen_ai.response.list.has_more", it)
         }

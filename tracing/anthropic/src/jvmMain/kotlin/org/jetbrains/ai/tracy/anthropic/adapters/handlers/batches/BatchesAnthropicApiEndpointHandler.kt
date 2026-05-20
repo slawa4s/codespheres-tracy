@@ -13,6 +13,7 @@ import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.CreateB
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.DeleteBatchHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.ListBatchesHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.RetrieveBatchHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.RetrieveBatchResultsHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
@@ -23,11 +24,12 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
  * Handler for Anthropic Message Batches API.
  *
  * Maps HTTP method + URL path to `gen_ai.operation.name`:
- * - `POST /v1/messages/batches`               → `"batches.create"`
- * - `GET  /v1/messages/batches`               → `"batches.list"`
- * - `GET  /v1/messages/batches/{id}`          → `"batches.retrieve"`
- * - `POST /v1/messages/batches/{id}/cancel`   → `"batches.cancel"`
- * - `DELETE /v1/messages/batches/{id}`        → `"batches.delete"`
+ * - `POST   /v1/messages/batches`                 → `"batches.create"`
+ * - `GET    /v1/messages/batches`                 → `"batches.list"`
+ * - `GET    /v1/messages/batches/{id}`            → `"batches.retrieve"`
+ * - `POST   /v1/messages/batches/{id}/cancel`     → `"batches.cancel"`
+ * - `DELETE /v1/messages/batches/{id}`            → `"batches.delete"`
+ * - `GET    /v1/messages/batches/{id}/results`    → `"batches.results"`
  *
  * Dispatches to per-route [RouteHandler] implementations under `batches/routes/`.
  *
@@ -42,6 +44,7 @@ internal class BatchesAnthropicApiEndpointHandler : EndpointApiHandler {
             BatchRoute.RETRIEVE to RetrieveBatchHandler(),
             BatchRoute.CANCEL to CancelBatchHandler(),
             BatchRoute.DELETE to DeleteBatchHandler(),
+            BatchRoute.RESULTS to RetrieveBatchResultsHandler(),
         )
     }
 
@@ -83,10 +86,12 @@ internal class BatchesAnthropicApiEndpointHandler : EndpointApiHandler {
         val afterBatches = segments.drop(batchesIndex + 1).filter { it.isNotBlank() }
         val hasBatchId = afterBatches.isNotEmpty() && afterBatches.first() != "cancel"
         val hasCancel = afterBatches.contains("cancel")
+        val hasResults = afterBatches.contains("results")
 
         return when {
             method == "POST" && !hasBatchId && !hasCancel -> BatchRoute.CREATE
             method == "GET" && !hasBatchId -> BatchRoute.LIST
+            method == "GET" && hasBatchId && hasResults -> BatchRoute.RESULTS
             method == "GET" && hasBatchId -> BatchRoute.RETRIEVE
             method == "POST" && hasBatchId && hasCancel -> BatchRoute.CANCEL
             method == "DELETE" && hasBatchId -> BatchRoute.DELETE
@@ -103,6 +108,7 @@ internal class BatchesAnthropicApiEndpointHandler : EndpointApiHandler {
         RETRIEVE("batches.retrieve"),
         CANCEL("batches.cancel"),
         DELETE("batches.delete"),
+        RESULTS("batches.results"),
     }
 
     companion object {

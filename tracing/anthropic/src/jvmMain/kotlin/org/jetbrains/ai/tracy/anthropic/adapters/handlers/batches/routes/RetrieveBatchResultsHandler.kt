@@ -13,14 +13,18 @@ import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
+import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 
 /**
- * Handles the `DELETE /v1/messages/batches/{id}` endpoint.
+ * Handles the `GET /v1/messages/batches/{message_batch_id}/results` endpoint.
+ *
+ * See [batches/results](https://platform.claude.com/docs/en/api/messages/batches/results)
  */
-internal class DeleteBatchHandler : RouteHandler {
+internal class RetrieveBatchResultsHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        // NOTE: No request-side body attributes, only a single path parameter
-        val messageBatchId = request.url.pathSegments.lastOrNull()
+        // URL: /v1/messages/batches/{message_batch_id}/results
+        // dropping `results` segment to extract `message_batch_id`
+        val messageBatchId = request.url.pathSegments.dropLast(1).lastOrNull()
         if (messageBatchId == null) {
             logger.warn { "No message_batch_id in URL path: ${request.url.pathSegments.joinToString("/")}" }
         }
@@ -29,11 +33,18 @@ internal class DeleteBatchHandler : RouteHandler {
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        body["id"]?.jsonPrimitive?.content?.let {
-            span.setAttribute("gen_ai.response.message_batch_id", it)
+        body["custom_id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("gen_ai.response.custom_id", it)
         }
-        body["type"]?.jsonPrimitive?.content?.let {
-            span.setAttribute("gen_ai.response.type", it)
+        val result = body["result"]?.jsonObject ?: return
+        result["type"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("gen_ai.response.result.type", it)
+        }
+        result["message"]?.let {
+            span.setAttribute("gen_ai.response.result.message", it.toString().orRedactedOutput())
+        }
+        result["error"]?.let {
+            span.setAttribute("gen_ai.response.result.error", it.toString())
         }
     }
 
