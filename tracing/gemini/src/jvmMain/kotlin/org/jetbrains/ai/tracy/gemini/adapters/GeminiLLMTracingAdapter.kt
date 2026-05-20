@@ -12,7 +12,7 @@ import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
-import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiCachedContentsHandler
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.GeminiCachedContentsHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiContentGenHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiEmbedHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.GeminiImagenHandler

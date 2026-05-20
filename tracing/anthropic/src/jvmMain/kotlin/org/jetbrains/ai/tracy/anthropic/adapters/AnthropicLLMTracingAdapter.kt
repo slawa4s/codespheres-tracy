@@ -11,10 +11,10 @@ import io.opentelemetry.sdk.trace.ReadableSpan
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
 import kotlinx.serialization.json.*
 import mu.KotlinLogging
-import org.jetbrains.ai.tracy.anthropic.adapters.handlers.BatchesAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.CountTokensAnthropicApiEndpointHandler
-import org.jetbrains.ai.tracy.anthropic.adapters.handlers.FilesAnthropicApiEndpointHandler
-import org.jetbrains.ai.tracy.anthropic.adapters.handlers.ModelsAnthropicApiEndpointHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.BatchesAnthropicApiEndpointHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.files.FilesAnthropicApiEndpointHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.models.ModelsAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
 import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported

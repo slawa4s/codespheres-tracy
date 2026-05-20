@@ -28,6 +28,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrlImpl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyQueryParameters
 import org.jetbrains.ai.tracy.gemini.adapters.GeminiLLMTracingAdapter
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.GeminiCachedContentsHandler
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals

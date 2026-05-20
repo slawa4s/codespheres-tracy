@@ -9,6 +9,7 @@ import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
 import kotlinx.serialization.json.jsonObject
 import mu.KotlinLogging
+import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContent
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentPart
@@ -20,15 +21,14 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.ContentKind
 import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
-import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 import java.util.Base64
 
 private val logger = KotlinLogging.logger {}
 
 /**
- * Handles [VideosOpenAIApiEndpointHandler.VideoRoute.CREATE] endpoint: `POST /videos`.
+ * Handles the `POST /videos` endpoint.
  */
-internal class CreateVideoHandler(private val extractor: MediaContentExtractor) : VideoRouteHandler {
+internal class CreateVideoHandler(private val extractor: MediaContentExtractor) : RouteHandler {
     /**
      * Request is `multipart/form-data` with: prompt, input_reference (file), model, seconds, size
      */

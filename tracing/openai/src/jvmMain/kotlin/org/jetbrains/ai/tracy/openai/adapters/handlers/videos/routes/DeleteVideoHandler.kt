@@ -10,17 +10,17 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import mu.KotlinLogging
+import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
-import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 
 private val logger = KotlinLogging.logger {}
 
 /**
- * Handles [VideosOpenAIApiEndpointHandler.VideoRoute.DELETE] endpoint: `DELETE /videos/{video_id}`.
+ * Handles the `DELETE /videos/{video_id}` endpoint.
  */
-internal class DeleteVideoHandler : VideoRouteHandler {
+internal class DeleteVideoHandler : RouteHandler {
     /**
      * Request: Path parameter video_id
      */

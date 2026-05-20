@@ -6,81 +6,54 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.models
 
 import io.opentelemetry.api.trace.Span
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
+import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
-import org.jetbrains.ai.tracy.core.http.protocol.asJson
+import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
+import org.jetbrains.ai.tracy.openai.adapters.handlers.models.routes.ListModelsHandler
+import org.jetbrains.ai.tracy.openai.adapters.handlers.models.routes.RetrieveModelHandler
 
 /**
  * Handler for OpenAI Models API endpoints.
  *
- * Handles two endpoints:
- * 1. `GET /v1/models` - List all available models (`models.list`)
- * 2. `GET /v1/models/{model_id}` - Retrieve a specific model (`models.retrieve`)
- *
- * This handler detects the specific route from the URL path segments, stores the
- * model ID in a [ThreadLocal] during the request phase for use in the response phase.
+ * Dispatches to per-route [RouteHandler] implementations under `models/routes/`:
+ * 1. `GET /v1/models`              → `"models.list"`
+ * 2. `GET /v1/models/{model_id}`   → `"models.retrieve"`
  *
  * See [Models API Reference](https://platform.openai.com/docs/api-reference/models)
  */
 internal class ModelsOpenAIApiEndpointHandler : EndpointApiHandler {
 
-    /**
-     * Stores the model ID extracted from the URL during request handling so it can be
-     * applied in [handleResponseAttributes] to set [GEN_AI_RESPONSE_MODEL].
-     * Null for list requests.
-     */
-    private val modelIdThreadLocal = ThreadLocal<String>()
+    private val routeHandlers: Map<ModelRoute, RouteHandler> by lazy {
+        mapOf(
+            ModelRoute.LIST to ListModelsHandler(),
+            ModelRoute.RETRIEVE to RetrieveModelHandler(),
+        )
+    }
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
-        val segments = request.url.pathSegments
-        val modelsIndex = segments.indexOf("models")
-
-        val hasModelId = modelsIndex != -1 &&
-                segments.size > modelsIndex + 1 &&
-                segments[modelsIndex + 1].isNotBlank()
-
-        if (hasModelId) {
-            // Retrieve: GET /v1/models/{model_id}
-            val modelId = segments[modelsIndex + 1]
-            span.setAttribute(GEN_AI_OPERATION_NAME, OPERATION_RETRIEVE)
-            span.setAttribute(GEN_AI_REQUEST_MODEL, modelId)
-            modelIdThreadLocal.set(modelId)
-        } else {
-            // List: GET /v1/models
-            span.setAttribute(GEN_AI_OPERATION_NAME, OPERATION_LIST)
-        }
+        val route = detectRoute(request.url)
+        routeHandlers[route]?.handleRequest(span, request)
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
-        val modelId = modelIdThreadLocal.get()
-        modelIdThreadLocal.remove()
-
-        val body = response.body.asJson()?.jsonObject ?: return
-
-        body["object"]?.jsonPrimitive?.content?.let {
-            span.setAttribute("tracy.response.object", it)
-        }
-
-        if (modelId != null) {
-            body["id"]?.jsonPrimitive?.content?.let {
-                span.setAttribute("tracy.response.model.id", it)
-            }
-            span.setAttribute(GEN_AI_RESPONSE_MODEL, modelId)
-        }
+        val route = detectRoute(response.url)
+        routeHandlers[route]?.handleResponse(span, response)
     }
 
     override fun handleStreaming(span: Span, events: String) {
         // Models API does not use SSE streaming
     }
 
-    companion object {
-        private const val OPERATION_RETRIEVE = "models.retrieve"
-        private const val OPERATION_LIST = "models.list"
+    private fun detectRoute(url: TracyHttpUrl): ModelRoute {
+        val segments = url.pathSegments
+        val modelsIndex = segments.indexOf("models")
+        val hasModelId = modelsIndex != -1 &&
+                segments.size > modelsIndex + 1 &&
+                segments[modelsIndex + 1].isNotBlank()
+        return if (hasModelId) ModelRoute.RETRIEVE else ModelRoute.LIST
     }
+
+    private enum class ModelRoute { LIST, RETRIEVE }
 }

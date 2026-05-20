@@ -8,15 +8,15 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.*
+import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
-import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 
 /**
- * Handles [VideosOpenAIApiEndpointHandler.VideoRoute.LIST] endpoint: `GET /videos`.
+ * Handles the `GET /videos` endpoint.
  */
-internal class ListVideosHandler : VideoRouteHandler {
+internal class ListVideosHandler : RouteHandler {
     /**
      * Request: Query parameters after, limit, order
      */

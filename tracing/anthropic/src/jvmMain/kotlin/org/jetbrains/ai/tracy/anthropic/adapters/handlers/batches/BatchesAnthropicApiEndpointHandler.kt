@@ -3,38 +3,37 @@
  * Use of this source code is governed by the Apache 2.0 license.
  */
 
-package org.jetbrains.ai.tracy.openai.adapters.handlers.batches
+package org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches
 
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import mu.KotlinLogging
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.CancelBatchHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.CreateBatchHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.DeleteBatchHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.ListBatchesHandler
+import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.RetrieveBatchHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
-import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.routes.CancelBatchHandler
-import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.routes.CreateBatchHandler
-import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.routes.ListBatchesHandler
-import org.jetbrains.ai.tracy.openai.adapters.handlers.batches.routes.RetrieveBatchHandler
 
 /**
- * Handler for OpenAI Batches API.
+ * Handler for Anthropic Message Batches API.
  *
- * The Batches API provides endpoints to create and manage asynchronous batch jobs:
- * 1. `POST /batches`                  → `"batches.create"`
- * 2. `GET  /batches/{batch_id}`       → `"batches.retrieve"`
- * 3. `POST /batches/{batch_id}/cancel`→ `"batches.cancel"`
- * 4. `GET  /batches`                  → `"batches.list"`
+ * Maps HTTP method + URL path to `gen_ai.operation.name`:
+ * - `POST /v1/messages/batches`               → `"batches.create"`
+ * - `GET  /v1/messages/batches`               → `"batches.list"`
+ * - `GET  /v1/messages/batches/{id}`          → `"batches.retrieve"`
+ * - `POST /v1/messages/batches/{id}/cancel`   → `"batches.cancel"`
+ * - `DELETE /v1/messages/batches/{id}`        → `"batches.delete"`
  *
  * Dispatches to per-route [RouteHandler] implementations under `batches/routes/`.
- * The main handler re-applies the operation name in the response phase to override
- * what [org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils.setCommonResponseAttributes]
- * sets from the response `object` field (e.g. `"batch"`, `"list"`).
  *
- * See [Batch API Reference](https://platform.openai.com/docs/api-reference/batch)
+ * See: [Message Batches API](https://docs.anthropic.com/en/api/creating-message-batches)
  */
-internal class BatchesOpenAIApiEndpointHandler : EndpointApiHandler {
+internal class BatchesAnthropicApiEndpointHandler : EndpointApiHandler {
 
     private val routeHandlers: Map<BatchRoute, RouteHandler> by lazy {
         mapOf(
@@ -42,45 +41,57 @@ internal class BatchesOpenAIApiEndpointHandler : EndpointApiHandler {
             BatchRoute.LIST to ListBatchesHandler(),
             BatchRoute.RETRIEVE to RetrieveBatchHandler(),
             BatchRoute.CANCEL to CancelBatchHandler(),
+            BatchRoute.DELETE to DeleteBatchHandler(),
         )
     }
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
-        span.setAttribute("openai.api.type", "batches")
+        span.setAttribute("anthropic.api.type", "batches")
+
         val route = detectRoute(request.url, request.method)
+        span.setAttribute(GEN_AI_OPERATION_NAME, route.operationName)
+
         routeHandlers[route]?.handleRequest(span, request)
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
+        if (response.isError()) return
         val route = detectRoute(response.url, response.requestMethod)
-        span.setAttribute(GEN_AI_OPERATION_NAME, route.operationName)
         routeHandlers[route]?.handleResponse(span, response)
     }
 
     override fun handleStreaming(span: Span, events: String) {
-        logger.warn { "Batches API does not use server-sent events streaming" }
+        // Batches API does not use SSE streaming
     }
+
+    /**
+     * Detects which batch operation is being called based on the URL path and HTTP method.
+     * Exposed as `internal` so the adapter's error path can recover the operation name
+     * even after a redirect rewrites the response method.
+     */
+    internal fun detectOperation(url: TracyHttpUrl, method: String): String =
+        detectRoute(url, method).operationName
 
     private fun detectRoute(url: TracyHttpUrl, method: String): BatchRoute {
         val segments = url.pathSegments
         val batchesIndex = segments.indexOf("batches")
-
         if (batchesIndex == -1) {
-            logger.warn { "Failed to detect batches route. Endpoint has no `batches` path segment: ${url.pathSegments.joinToString(separator = "/")}" }
+            logger.warn { "No 'batches' segment in URL path: ${segments.joinToString("/")}" }
             return BatchRoute.CREATE
         }
 
-        val hasBatchId = segments.size > (batchesIndex + 1) &&
-                segments[batchesIndex + 1].isNotBlank()
-        val hasCancel = segments.contains("cancel")
+        val afterBatches = segments.drop(batchesIndex + 1).filter { it.isNotBlank() }
+        val hasBatchId = afterBatches.isNotEmpty() && afterBatches.first() != "cancel"
+        val hasCancel = afterBatches.contains("cancel")
 
         return when {
-            method == "POST" && !hasBatchId -> BatchRoute.CREATE
+            method == "POST" && !hasBatchId && !hasCancel -> BatchRoute.CREATE
             method == "GET" && !hasBatchId -> BatchRoute.LIST
             method == "GET" && hasBatchId -> BatchRoute.RETRIEVE
             method == "POST" && hasBatchId && hasCancel -> BatchRoute.CANCEL
+            method == "DELETE" && hasBatchId -> BatchRoute.DELETE
             else -> {
-                logger.warn { "Failed to detect batches route: $method ${url.pathSegments.joinToString(separator = "/")}" }
+                logger.warn { "Unknown batch operation: $method /${segments.joinToString("/")}" }
                 BatchRoute.CREATE
             }
         }
@@ -91,6 +102,7 @@ internal class BatchesOpenAIApiEndpointHandler : EndpointApiHandler {
         LIST("batches.list"),
         RETRIEVE("batches.retrieve"),
         CANCEL("batches.cancel"),
+        DELETE("batches.delete"),
     }
 
     companion object {

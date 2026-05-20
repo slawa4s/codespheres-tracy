@@ -3,39 +3,31 @@
  * Use of this source code is governed by the Apache 2.0 license.
  */
 
-package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
+package org.jetbrains.ai.tracy.openai.adapters.handlers.conversations.routes
 
 import io.opentelemetry.api.trace.Span
 import kotlinx.serialization.json.jsonObject
-import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 
-private val logger = KotlinLogging.logger {}
-
 /**
- * Handles the `GET /videos/{video_id}` endpoint.
+ * Handles the `GET /conversations/{conversation_id}/items` endpoint.
  */
-internal class GetVideoHandler : RouteHandler {
-    /**
-     * Request: Path parameter video_id
-     */
+internal class ListConversationItemsHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        val videoId = extractVideoIdFromPath(request.url)
-        if (videoId != null) {
-            span.setAttribute("gen_ai.request.video.requested_id", videoId)
-        } else {
-            logger.warn { "Failed to extract video ID from URL: ${request.url}" }
+        extractConversationIdFromPath(request.url)?.let {
+            span.setAttribute("gen_ai.conversation.id", it)
         }
+        val params = request.url.parameters
+        params.queryParameter("limit")?.let { span.setAttribute("tracy.request.limit", it) }
+        params.queryParameter("order")?.let { span.setAttribute("tracy.request.order", it) }
+        params.queryParameter("after")?.let { span.setAttribute("tracy.request.after", it) }
     }
 
-    /**
-     * Response: Video model
-     */
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceVideoModel(body, "gen_ai.response.video")
+        span.traceConversationItemsList(body)
     }
 }

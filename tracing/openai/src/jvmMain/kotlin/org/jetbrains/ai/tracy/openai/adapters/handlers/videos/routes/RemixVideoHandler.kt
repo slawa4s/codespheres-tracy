@@ -8,19 +8,19 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
 import io.opentelemetry.api.trace.Span
 import kotlinx.serialization.json.jsonObject
 import mu.KotlinLogging
+import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asFormData
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
-import org.jetbrains.ai.tracy.openai.adapters.handlers.videos.VideosOpenAIApiEndpointHandler
 
 private val logger = KotlinLogging.logger {}
 
 /**
- * Handles [VideosOpenAIApiEndpointHandler.VideoRoute.REMIX] endpoint: `POST /videos/{video_id}/remix`.
+ * Handles the `POST /videos/{video_id}/remix` endpoint.
  */
-internal class RemixVideoHandler : VideoRouteHandler {
+internal class RemixVideoHandler : RouteHandler {
     /**
      * Request: Path parameter video_id, body with prompt
      */

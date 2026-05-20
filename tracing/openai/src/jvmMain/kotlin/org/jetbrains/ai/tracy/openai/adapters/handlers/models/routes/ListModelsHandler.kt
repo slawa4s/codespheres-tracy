@@ -3,39 +3,29 @@
  * Use of this source code is governed by the Apache 2.0 license.
  */
 
-package org.jetbrains.ai.tracy.openai.adapters.handlers.videos.routes
+package org.jetbrains.ai.tracy.openai.adapters.handlers.models.routes
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.jsonObject
-import mu.KotlinLogging
+import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 
-private val logger = KotlinLogging.logger {}
-
 /**
- * Handles the `GET /videos/{video_id}` endpoint.
+ * Handles the `GET /v1/models` endpoint.
  */
-internal class GetVideoHandler : RouteHandler {
-    /**
-     * Request: Path parameter video_id
-     */
+internal class ListModelsHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        val videoId = extractVideoIdFromPath(request.url)
-        if (videoId != null) {
-            span.setAttribute("gen_ai.request.video.requested_id", videoId)
-        } else {
-            logger.warn { "Failed to extract video ID from URL: ${request.url}" }
-        }
+        span.setAttribute(GEN_AI_OPERATION_NAME, "models.list")
     }
 
-    /**
-     * Response: Video model
-     */
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceVideoModel(body, "gen_ai.response.video")
+        body["object"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.response.object", it)
+        }
     }
 }

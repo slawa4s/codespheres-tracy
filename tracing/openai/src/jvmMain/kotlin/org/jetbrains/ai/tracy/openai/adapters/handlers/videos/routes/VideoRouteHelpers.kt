@@ -9,18 +9,8 @@ import io.opentelemetry.api.trace.Span
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
-
-/**
- * Handles requests and responses for different video API routes of OpenAI.
- */
-internal interface VideoRouteHandler {
-    fun handleRequest(span: Span, request: TracyHttpRequest)
-    fun handleResponse(span: Span, response: TracyHttpResponse)
-}
 
 /**
  * Extracts `video_id` from a path like `/v1/videos/{video_id}` or `/v1/videos/{video_id}/content`.
