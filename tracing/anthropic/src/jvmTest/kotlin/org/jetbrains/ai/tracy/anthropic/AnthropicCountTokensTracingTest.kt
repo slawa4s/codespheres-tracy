@@ -13,19 +13,23 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
+import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.instrument
+import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Unit tests for Anthropic Count Tokens API tracing using MockWebServer.
  *
  * Verifies that `anthropic.api.type = "count_tokens"`, `gen_ai.operation.name = "count_tokens"`,
- * `gen_ai.request.model`, and `gen_ai.usage.input_tokens` are set correctly.
+ * `gen_ai.request.model`, request-body attributes (messages, system, tools, …) and
+ * `gen_ai.usage.input_tokens` are set correctly.
  *
  * See: [Count Tokens API](https://docs.anthropic.com/en/api/messages-count-tokens)
  */
@@ -167,6 +171,161 @@ class AnthropicCountTokensTracingTest : BaseAITracingTest() {
         }
     }
 
+    // ---- count_tokens: messages, system, tools, configuration objects -----------
+
+    @Test
+    fun `test count_tokens traces messages with role and redacted content`() = runTest {
+        withMockServer { server ->
+            // Enable output content capture so the message content is visible (not "REDACTED").
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(COUNT_TOKENS_RESPONSE)
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/count_tokens"))
+                    .addHeader("x-api-key", "test-key")
+                    .post(COUNT_TOKENS_REQUEST_FULL.toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals("user", trace.attributes[AttributeKey.stringKey("gen_ai.prompt.0.role")])
+            assertEquals("assistant", trace.attributes[AttributeKey.stringKey("gen_ai.prompt.1.role")])
+            // content is JSON-serialized (strings come out as JSON-quoted)
+            assertEquals("\"Hello, Claude\"", trace.attributes[AttributeKey.stringKey("gen_ai.prompt.0.content")])
+            assertEquals("\"Hi there!\"", trace.attributes[AttributeKey.stringKey("gen_ai.prompt.1.content")])
+        }
+    }
+
+    @Test
+    fun `test count_tokens redacts message content when output capture is disabled`() = runTest {
+        withMockServer { server ->
+            // Default policy: outputs NOT captured.
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = false, captureOutputs = false)
+            )
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(COUNT_TOKENS_RESPONSE)
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/count_tokens"))
+                    .addHeader("x-api-key", "test-key")
+                    .post(COUNT_TOKENS_REQUEST_FULL.toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            // role is plain metadata, not redacted
+            assertEquals("user", trace.attributes[AttributeKey.stringKey("gen_ai.prompt.0.role")])
+            // content is redacted via orRedactedOutput
+            assertEquals("REDACTED", trace.attributes[AttributeKey.stringKey("gen_ai.prompt.0.content")])
+        }
+    }
+
+    @Test
+    fun `test count_tokens traces system and configuration objects`() = runTest {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(COUNT_TOKENS_RESPONSE)
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/count_tokens"))
+                    .addHeader("x-api-key", "test-key")
+                    .post(COUNT_TOKENS_REQUEST_FULL.toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals("You are a helpful assistant.", trace.attributes[AttributeKey.stringKey("gen_ai.request.system")])
+
+            val cacheControl = trace.attributes[AttributeKey.stringKey("gen_ai.request.cache_control")]
+            assertNotNull(cacheControl)
+            assertTrue(cacheControl.contains("\"ephemeral\""))
+
+            val thinking = trace.attributes[AttributeKey.stringKey("gen_ai.request.thinking")]
+            assertNotNull(thinking)
+            assertTrue(thinking.contains("\"enabled\""))
+
+            val toolChoice = trace.attributes[AttributeKey.stringKey("gen_ai.request.tool_choice")]
+            assertNotNull(toolChoice)
+            assertTrue(toolChoice.contains("\"auto\""))
+
+            val outputConfig = trace.attributes[AttributeKey.stringKey("gen_ai.request.output_config")]
+            assertNotNull(outputConfig)
+            assertTrue(outputConfig.contains("\"json\""))
+        }
+    }
+
+    @Test
+    fun `test count_tokens traces tools array with count and per-index tool`() = runTest {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(COUNT_TOKENS_RESPONSE)
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/v1/messages/count_tokens"))
+                    .addHeader("x-api-key", "test-key")
+                    .post(COUNT_TOKENS_REQUEST_FULL.toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute().close()
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(2L, trace.attributes[AttributeKey.longKey("gen_ai.request.tools.count")])
+
+            val tool0 = trace.attributes[AttributeKey.stringKey("gen_ai.request.tools.0.tool")]
+            assertNotNull(tool0)
+            assertTrue(tool0.contains("\"get_weather\""))
+
+            val tool1 = trace.attributes[AttributeKey.stringKey("gen_ai.request.tools.1.tool")]
+            assertNotNull(tool1)
+            assertTrue(tool1.contains("\"get_time\""))
+        }
+    }
+
     // ---- regular messages endpoint is unaffected --------------------------------
 
     @Test
@@ -212,6 +371,25 @@ class AnthropicCountTokensTracingTest : BaseAITracingTest() {
             {
                 "model": "$MODEL",
                 "messages": [{"role": "user", "content": "Hello, Claude"}]
+            }
+        """.trimIndent()
+
+        private val COUNT_TOKENS_REQUEST_FULL = """
+            {
+                "model": "$MODEL",
+                "messages": [
+                    {"role": "user", "content": "Hello, Claude"},
+                    {"role": "assistant", "content": "Hi there!"}
+                ],
+                "system": "You are a helpful assistant.",
+                "cache_control": {"type": "ephemeral"},
+                "output_config": {"format": "json"},
+                "thinking": {"type": "enabled", "budget_tokens": 1024},
+                "tool_choice": {"type": "auto"},
+                "tools": [
+                    {"name": "get_weather", "description": "Get weather", "input_schema": {"type": "object"}},
+                    {"name": "get_time", "description": "Get current time", "input_schema": {"type": "object"}}
+                ]
             }
         """.trimIndent()
 
