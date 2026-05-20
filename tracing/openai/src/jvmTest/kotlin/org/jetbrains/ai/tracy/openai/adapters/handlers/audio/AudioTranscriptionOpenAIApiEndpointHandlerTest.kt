@@ -9,9 +9,12 @@ import com.openai.core.MultipartField
 import com.openai.models.audio.AudioModel
 import com.openai.models.audio.AudioResponseFormat
 import com.openai.models.audio.transcriptions.TranscriptionCreateParams
+import com.openai.models.audio.transcriptions.TranscriptionInclude
 import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
+import org.jetbrains.ai.tracy.core.TracingManager
+import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.junit.jupiter.api.Assertions.*
@@ -95,9 +98,149 @@ class AudioTranscriptionOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertNotNull(sizeBytes, "Audio size_bytes should be traced")
             assertTrue(sizeBytes!! > 0, "Audio size_bytes should be positive")
 
-            // Audio format should be traced (wav from lofi.wav)
-            val format = trace.attributes[AttributeKey.stringKey("tracy.request.audio.format")]
-            assertNotNull(format, "Audio format should be traced")
+            // Audio MIME type should be traced (audio/wav from lofi.wav)
+            assertEquals(
+                AUDIO_CONTENT_TYPE,
+                trace.attributes[AttributeKey.stringKey("tracy.request.audio.mime_type")]
+            )
+        }
+    }
+
+    @Test
+    fun `test language is traced from request form data`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(jsonTranscriptionResponse())
+
+            val params = TranscriptionCreateParams.builder()
+                .file(audioFile())
+                .model(AudioModel.WHISPER_1)
+                .language("en")
+                .responseFormat(AudioResponseFormat.JSON)
+                .build()
+            client.audio().transcriptions().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("en", trace.attributes[AttributeKey.stringKey("tracy.request.language")])
+        }
+    }
+
+    @Test
+    fun `test temperature is traced from request form data`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(jsonTranscriptionResponse())
+
+            val params = TranscriptionCreateParams.builder()
+                .file(audioFile())
+                .model(AudioModel.WHISPER_1)
+                .temperature(0.5)
+                .responseFormat(AudioResponseFormat.JSON)
+                .build()
+            client.audio().transcriptions().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals(0.5, trace.attributes[AttributeKey.doubleKey("tracy.request.temperature")])
+        }
+    }
+
+    @Test
+    fun `test prompt is redacted when input capture is disabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = false, captureOutputs = false)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(jsonTranscriptionResponse())
+
+            val params = TranscriptionCreateParams.builder()
+                .file(audioFile())
+                .model(AudioModel.WHISPER_1)
+                .prompt("This is a meeting transcript")
+                .responseFormat(AudioResponseFormat.JSON)
+                .build()
+            client.audio().transcriptions().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("REDACTED", trace.attributes[AttributeKey.stringKey("tracy.request.prompt")])
+        }
+    }
+
+    @Test
+    fun `test prompt is traced verbatim when input capture is enabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(jsonTranscriptionResponse())
+
+            val params = TranscriptionCreateParams.builder()
+                .file(audioFile())
+                .model(AudioModel.WHISPER_1)
+                .prompt("This is a meeting transcript")
+                .responseFormat(AudioResponseFormat.JSON)
+                .build()
+            client.audio().transcriptions().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals(
+                "This is a meeting transcript",
+                trace.attributes[AttributeKey.stringKey("tracy.request.prompt")]
+            )
+        }
+    }
+
+    @Test
+    fun `test include is traced from request form data`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(jsonTranscriptionResponse())
+
+            val params = TranscriptionCreateParams.builder()
+                .file(audioFile())
+                .model(AudioModel.WHISPER_1)
+                .include(listOf(TranscriptionInclude.LOGPROBS))
+                .responseFormat(AudioResponseFormat.JSON)
+                .build()
+            client.audio().transcriptions().create(params)
+
+            val trace = analyzeSpans().first()
+
+            val include = trace.attributes[AttributeKey.stringKey("tracy.request.include")]
+            assertNotNull(include, "Include should be traced")
+            assertTrue(include!!.contains("logprobs"), "Include should contain 'logprobs'")
         }
     }
 
@@ -146,6 +289,10 @@ class AudioTranscriptionOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     @Test
     fun `test verbose json response attributes are traced`() = runTest(timeout = 3.minutes) {
         withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
             val client = createOpenAIClient(
                 url = server.url("/").toString(),
                 apiKey = MOCK_API_KEY,
@@ -175,6 +322,185 @@ class AudioTranscriptionOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
                 3L,
                 trace.attributes[AttributeKey.longKey("tracy.response.transcription.words.count")]
             )
+            assertEquals(
+                "Hello world.",
+                trace.attributes[AttributeKey.stringKey("tracy.response.transcription.text")]
+            )
+        }
+    }
+
+    @Test
+    fun `test response text is redacted when output capture is disabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = false, captureOutputs = false)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(jsonTranscriptionResponse())
+
+            val params = transcriptionParams(AudioResponseFormat.JSON)
+            client.audio().transcriptions().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals(
+                "REDACTED",
+                trace.attributes[AttributeKey.stringKey("tracy.response.transcription.text")]
+            )
+        }
+    }
+
+    @Test
+    fun `test response text is traced verbatim when output capture is enabled`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            TracingManager.withCapturingPolicy(
+                ContentCapturePolicy(captureInputs = true, captureOutputs = true)
+            )
+
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(jsonTranscriptionResponse())
+
+            val params = transcriptionParams(AudioResponseFormat.JSON)
+            client.audio().transcriptions().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals(
+                "Hello world.",
+                trace.attributes[AttributeKey.stringKey("tracy.response.transcription.text")]
+            )
+        }
+    }
+
+    @Test
+    fun `test segments count is traced from response body`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "task": "transcribe",
+                          "language": "english",
+                          "duration": 5.0,
+                          "text": "Hello world.",
+                          "segments": [
+                            {"id": 0, "start": 0.0, "end": 2.5, "text": "Hello"},
+                            {"id": 1, "start": 2.5, "end": 5.0, "text": "world."}
+                          ]
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = transcriptionParams(AudioResponseFormat.VERBOSE_JSON)
+            client.audio().transcriptions().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals(
+                2L,
+                trace.attributes[AttributeKey.longKey("tracy.response.transcription.segments.count")]
+            )
+            assertEquals(
+                "transcribe",
+                trace.attributes[AttributeKey.stringKey("tracy.response.transcription.task")]
+            )
+        }
+    }
+
+    @Test
+    fun `test token usage is traced from response body`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "text": "Hello world.",
+                          "usage": {
+                            "type": "tokens",
+                            "input_tokens": 12,
+                            "output_tokens": 4,
+                            "total_tokens": 16
+                          }
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = transcriptionParams(AudioResponseFormat.JSON)
+            client.audio().transcriptions().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("tokens", trace.attributes[AttributeKey.stringKey("gen_ai.usage.type")])
+            assertEquals(12L, trace.attributes[AttributeKey.longKey("gen_ai.usage.input_tokens")])
+            assertEquals(4L, trace.attributes[AttributeKey.longKey("gen_ai.usage.output_tokens")])
+            assertEquals(16L, trace.attributes[AttributeKey.longKey("gen_ai.usage.total_tokens")])
+        }
+    }
+
+    @Test
+    fun `test duration usage is traced from response body`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(1),
+            ).apply { instrument(this) }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """
+                        {
+                          "text": "Hello world.",
+                          "usage": {
+                            "type": "duration",
+                            "seconds": 7.25
+                          }
+                        }
+                        """.trimIndent()
+                    )
+            )
+
+            val params = transcriptionParams(AudioResponseFormat.JSON)
+            client.audio().transcriptions().create(params)
+
+            val trace = analyzeSpans().first()
+
+            assertEquals("duration", trace.attributes[AttributeKey.stringKey("gen_ai.usage.type")])
+            assertEquals(7.25, trace.attributes[AttributeKey.doubleKey("gen_ai.usage.seconds")])
         }
     }
 
@@ -190,13 +516,7 @@ class AudioTranscriptionOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             server.enqueue(verboseJsonTranscriptionResponse())
 
             val params = TranscriptionCreateParams.builder()
-                .file(
-                    MultipartField.builder<InputStream>()
-                        .value(readResource(AUDIO_FILE))
-                        .contentType(AUDIO_CONTENT_TYPE)
-                        .filename(AUDIO_FILE)
-                        .build()
-                )
+                .file(audioFile())
                 .model(AudioModel.WHISPER_1)
                 .responseFormat(AudioResponseFormat.VERBOSE_JSON)
                 .addTimestampGranularity(TranscriptionCreateParams.TimestampGranularity.WORD)
@@ -217,18 +537,19 @@ class AudioTranscriptionOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
     // ============ HELPER METHODS ============
 
+    private fun audioFile(): MultipartField<InputStream> =
+        MultipartField.builder<InputStream>()
+            .value(readResource(AUDIO_FILE))
+            .contentType(AUDIO_CONTENT_TYPE)
+            .filename(AUDIO_FILE)
+            .build()
+
     private fun transcriptionParams(
         responseFormat: AudioResponseFormat,
         model: AudioModel = AudioModel.WHISPER_1,
     ): TranscriptionCreateParams {
         return TranscriptionCreateParams.builder()
-            .file(
-                MultipartField.builder<InputStream>()
-                    .value(readResource(AUDIO_FILE))
-                    .contentType(AUDIO_CONTENT_TYPE)
-                    .filename(AUDIO_FILE)
-                    .build()
-            )
+            .file(audioFile())
             .model(model)
             .responseFormat(responseFormat)
             .build()
