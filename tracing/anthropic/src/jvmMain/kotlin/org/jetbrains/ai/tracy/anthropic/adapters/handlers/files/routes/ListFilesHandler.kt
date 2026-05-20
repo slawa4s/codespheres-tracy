@@ -16,10 +16,25 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 
 /**
  * Handles the `GET /v1/files` endpoint.
+ *
+ * See [files/list](https://platform.claude.com/docs/en/api/beta/files/list)
  */
 internal class ListFilesHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        // No request-side attributes for list.
+        // NOTE: No request-side body attributes, only query parameters
+        val params = request.url.parameters
+        params.queryParameter("after_id")?.let {
+            span.setAttribute("gen_ai.request.after_id", it)
+        }
+        params.queryParameter("before_id")?.let {
+            span.setAttribute("gen_ai.request.before_id", it)
+        }
+        params.queryParameter("limit")?.toLongOrNull()?.let {
+            span.setAttribute("gen_ai.request.limit", it)
+        }
+        params.queryParameter("scope_id")?.let {
+            span.setAttribute("gen_ai.request.scope_id", it)
+        }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
@@ -28,6 +43,7 @@ internal class ListFilesHandler : RouteHandler {
         val data = body["data"]
         if (data is JsonArray) {
             span.setAttribute("gen_ai.response.list.count", data.size.toLong())
+            span.traceFileMetadata(data)
         }
         body["has_more"]?.jsonPrimitive?.content?.let {
             span.setAttribute("gen_ai.response.list.has_more", it)

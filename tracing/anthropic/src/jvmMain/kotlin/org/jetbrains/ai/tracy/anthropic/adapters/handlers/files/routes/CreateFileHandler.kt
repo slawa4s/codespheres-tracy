@@ -14,7 +14,9 @@ import org.jetbrains.ai.tracy.core.http.protocol.asFormData
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
 
 /**
- * Handles the `POST /v1/files` endpoint (multipart upload).
+ * Upload File: Handles the `POST /v1/files` endpoint (multipart upload).
+ *
+ * See [files/upload](https://platform.claude.com/docs/en/api/beta/files/upload)
  */
 internal class CreateFileHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
@@ -23,8 +25,8 @@ internal class CreateFileHandler : RouteHandler {
             if (part.name == "file") {
                 span.setAttribute("gen_ai.request.file.size_bytes", part.content.size.toLong())
                 part.filename?.let { span.setAttribute("gen_ai.request.file.filename", it) }
-                part.contentType?.let { ct ->
-                    span.setAttribute("gen_ai.request.file.mime_type", "${ct.type}/${ct.subtype}")
+                part.contentType?.let {
+                    span.setAttribute("gen_ai.request.file.mime_type", "${it.type}/${it.subtype}")
                 }
                 break
             }
@@ -33,6 +35,6 @@ internal class CreateFileHandler : RouteHandler {
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceAnthropicFileObject(body)
+        span.traceFileMetadata(body)
     }
 }

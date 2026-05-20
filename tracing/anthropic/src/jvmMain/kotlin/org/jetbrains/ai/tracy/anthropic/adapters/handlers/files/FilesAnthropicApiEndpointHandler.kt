@@ -31,7 +31,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
  *
  * Dispatches to per-route [RouteHandler] implementations under `files/routes/`.
  *
- * See: [Files API](https://docs.anthropic.com/en/api/files)
+ * See: [Files API](https://platform.claude.com/docs/en/api/beta/files)
  */
 internal class FilesAnthropicApiEndpointHandler : EndpointApiHandler {
 
