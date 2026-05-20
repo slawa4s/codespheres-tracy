@@ -96,6 +96,13 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
                             "total": 10,
                             "completed": 0,
                             "failed": 0
+                          },
+                          "usage": {
+                            "input_tokens": 100,
+                            "input_tokens_details": { "cached_tokens": 20 },
+                            "output_tokens": 40,
+                            "output_tokens_details": { "reasoning_tokens": 5 },
+                            "total_tokens": 140
                           }
                         }
                         """.trimIndent()
@@ -119,16 +126,22 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.batch.id")])
+            assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
             assertEquals(batchId, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
-            assertEquals("validating", trace.attributes[AttributeKey.stringKey("tracy.batch.status")])
-            assertEquals(inputFileId, trace.attributes[AttributeKey.stringKey("tracy.batch.input_file_id")])
-            assertEquals(endpoint, trace.attributes[AttributeKey.stringKey("tracy.batch.endpoint")])
-            assertEquals("24h", trace.attributes[AttributeKey.stringKey("tracy.batch.completion_window")])
-            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.batch.created_at")])
-            assertEquals(10L, trace.attributes[AttributeKey.longKey("tracy.batch.request_counts.total")])
-            assertEquals(0L, trace.attributes[AttributeKey.longKey("tracy.batch.request_counts.completed")])
-            assertEquals(0L, trace.attributes[AttributeKey.longKey("tracy.batch.request_counts.failed")])
+            assertEquals("batch", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+            assertEquals("validating", trace.attributes[AttributeKey.stringKey("tracy.response.status")])
+            assertEquals(inputFileId, trace.attributes[AttributeKey.stringKey("tracy.response.input_file_id")])
+            assertEquals(endpoint, trace.attributes[AttributeKey.stringKey("tracy.response.endpoint")])
+            assertEquals("24h", trace.attributes[AttributeKey.stringKey("tracy.response.completion_window")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.response.created_at")])
+            assertEquals(10L, trace.attributes[AttributeKey.longKey("tracy.response.request_counts.total")])
+            assertEquals(0L, trace.attributes[AttributeKey.longKey("tracy.response.request_counts.completed")])
+            assertEquals(0L, trace.attributes[AttributeKey.longKey("tracy.response.request_counts.failed")])
+            assertEquals(100L, trace.attributes[AttributeKey.longKey("tracy.response.usage.input_tokens")])
+            assertEquals(20L, trace.attributes[AttributeKey.longKey("tracy.response.usage.input_tokens_details.cached_tokens")])
+            assertEquals(40L, trace.attributes[AttributeKey.longKey("tracy.response.usage.output_tokens")])
+            assertEquals(5L, trace.attributes[AttributeKey.longKey("tracy.response.usage.output_tokens_details.reasoning_tokens")])
+            assertEquals(140L, trace.attributes[AttributeKey.longKey("tracy.response.usage.total_tokens")])
         }
     }
 
@@ -197,8 +210,9 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             // Operation name must be "batches.retrieve", NOT "batch" from the response `object` field
             assertEquals("batches.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals("batches", trace.attributes[AttributeKey.stringKey("openai.api.type")])
-            assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.batch.id")])
-            assertEquals("in_progress", trace.attributes[AttributeKey.stringKey("tracy.batch.status")])
+            assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.request.batch_id")])
+            assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
+            assertEquals("in_progress", trace.attributes[AttributeKey.stringKey("tracy.response.status")])
         }
     }
 
@@ -233,8 +247,9 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             // Operation name must be "batches.cancel", NOT "batch" from the response `object` field
             assertEquals("batches.cancel", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals("batches", trace.attributes[AttributeKey.stringKey("openai.api.type")])
-            assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.batch.id")])
-            assertEquals("cancelling", trace.attributes[AttributeKey.stringKey("tracy.batch.status")])
+            assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.request.batch_id")])
+            assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
+            assertEquals("cancelling", trace.attributes[AttributeKey.stringKey("tracy.response.status")])
         }
     }
 
@@ -264,7 +279,46 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             // Operation name must be "batches.list", NOT "list" from the response `object` field
             assertEquals("batches.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals("batches", trace.attributes[AttributeKey.stringKey("openai.api.type")])
-            assertEquals(3L, trace.attributes[AttributeKey.longKey("tracy.batch.count")])
+            assertEquals(3L, trace.attributes[AttributeKey.longKey("tracy.response.list.count")])
+        }
+    }
+
+    @Test
+    fun `test LIST batches endpoint traces per-element batches and pagination`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(3)
+            ).apply { instrument(this) }
+
+            server.enqueue(enqueueBatchListResponse(count = 2, hasMore = true))
+
+            try {
+                client.batches().list(BatchListParams.builder().build())
+            } catch (_: Exception) {
+                // SDK may throw on response validation; traces are already recorded
+            }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            // Pagination
+            assertEquals("list", trace.attributes[AttributeKey.stringKey("tracy.response.list.object")])
+            assertEquals("true", trace.attributes[AttributeKey.stringKey("tracy.response.list.has_more")])
+            assertEquals("batch-list-1", trace.attributes[AttributeKey.stringKey("tracy.response.list.first_id")])
+            assertEquals("batch-list-2", trace.attributes[AttributeKey.stringKey("tracy.response.list.last_id")])
+
+            // Per-element batches via tracy.response.data.{i}.*
+            assertEquals("batch-list-1", trace.attributes[AttributeKey.stringKey("tracy.response.data.0.id")])
+            assertEquals("batch", trace.attributes[AttributeKey.stringKey("tracy.response.data.0.object")])
+            assertEquals("completed", trace.attributes[AttributeKey.stringKey("tracy.response.data.0.status")])
+            assertEquals("file-input-1", trace.attributes[AttributeKey.stringKey("tracy.response.data.0.input_file_id")])
+
+            assertEquals("batch-list-2", trace.attributes[AttributeKey.stringKey("tracy.response.data.1.id")])
+            assertEquals("completed", trace.attributes[AttributeKey.stringKey("tracy.response.data.1.status")])
+            assertEquals(5L, trace.attributes[AttributeKey.longKey("tracy.response.data.1.request_counts.total")])
         }
     }
 

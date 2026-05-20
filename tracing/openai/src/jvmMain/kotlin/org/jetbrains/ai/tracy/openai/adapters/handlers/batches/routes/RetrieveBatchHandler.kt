@@ -17,11 +17,11 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  */
 internal class RetrieveBatchHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        extractBatchIdFromPath(request.url)?.let { span.setAttribute("tracy.batch.id", it) }
+        extractBatchIdFromPath(request.url)?.let { span.setAttribute("tracy.request.batch_id", it) }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceOpenAIBatchObject(body)
+        span.traceBatch(body)
     }
 }

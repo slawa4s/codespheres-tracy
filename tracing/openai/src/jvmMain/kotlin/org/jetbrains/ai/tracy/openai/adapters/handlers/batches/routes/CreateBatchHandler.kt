@@ -19,19 +19,25 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 internal class CreateBatchHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
-        body["input_file_id"]?.let {
-            span.setAttribute("tracy.request.input_file_id", it.jsonPrimitive.content)
+        body["completion_window"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.request.completion_window", it)
         }
-        body["endpoint"]?.let {
-            span.setAttribute("tracy.request.endpoint", it.jsonPrimitive.content)
+        body["endpoint"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.request.endpoint", it)
         }
-        body["completion_window"]?.let {
-            span.setAttribute("tracy.request.completion_window", it.jsonPrimitive.content)
+        body["input_file_id"]?.jsonPrimitive?.content?.let {
+            span.setAttribute("tracy.request.input_file_id", it)
+        }
+        body["metadata"]?.let {
+            span.setAttribute("tracy.request.metadata", it.toString())
+        }
+        body["output_expires_after"]?.let {
+            span.setAttribute("tracy.request.output_expires_after", it.toString())
         }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
-        span.traceOpenAIBatchObject(body)
+        span.traceBatch(body)
     }
 }
