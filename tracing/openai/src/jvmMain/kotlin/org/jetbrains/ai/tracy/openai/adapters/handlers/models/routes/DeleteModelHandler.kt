@@ -20,6 +20,8 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  * Handles the `DELETE /models/{model}` endpoint (delete a fine-tuned model).
  *
  * Response: ModelDeleted { id, deleted, object }
+ *
+ * See [delete](https://developers.openai.com/api/reference/resources/models/methods/delete)
  */
 internal class DeleteModelHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {

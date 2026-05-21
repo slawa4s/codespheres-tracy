@@ -17,6 +17,8 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 
 /**
  * Handles the `GET /models` endpoint.
+ *
+ * See [list](https://developers.openai.com/api/reference/resources/models/methods/list)
  */
 internal class ListModelsHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {

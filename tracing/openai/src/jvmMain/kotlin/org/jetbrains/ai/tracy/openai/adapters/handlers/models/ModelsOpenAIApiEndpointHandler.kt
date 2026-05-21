@@ -26,7 +26,7 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.models.routes.RetrieveMod
  * Both `/v1/models` and `/models` path prefixes are supported — detection is based on the
  * `models` segment, not the leading `v1`.
  *
- * See [Models API Reference](https://platform.openai.com/docs/api-reference/models)
+ * See [Models API Reference](https://developers.openai.com/api/reference/resources/models)
  */
 internal class ModelsOpenAIApiEndpointHandler : EndpointApiHandler {
 
