@@ -145,10 +145,12 @@ class ModerationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
+            assertEquals(moderationId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
+            assertEquals(moderationId, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals(1L, trace.attributes[AttributeKey.longKey("tracy.response.results.count")])
-            assertEquals(false, trace.attributes[AttributeKey.booleanKey("tracy.response.results.flagged")])
-            assertNotNull(trace.attributes[AttributeKey.stringKey("tracy.response.results.categories")])
-            assertNotNull(trace.attributes[AttributeKey.stringKey("tracy.response.results.category_scores")])
+            assertEquals(false, trace.attributes[AttributeKey.booleanKey("tracy.response.results.0.flagged")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("tracy.response.results.0.categories")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("tracy.response.results.0.category_scores")])
         }
     }
 
@@ -177,7 +179,7 @@ class ModerationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals(true, trace.attributes[AttributeKey.booleanKey("tracy.response.results.flagged")])
+            assertEquals(true, trace.attributes[AttributeKey.booleanKey("tracy.response.results.0.flagged")])
         }
     }
 
@@ -208,6 +210,8 @@ class ModerationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.request.model")])
+            // Response-side model should also be populated (regression: previously written to GEN_AI_REQUEST_MODEL).
+            assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
         }
     }
 
@@ -302,11 +306,11 @@ class ModerationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals("moderations", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
             assertEquals("moderations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(1L, trace.attributes[AttributeKey.longKey("tracy.response.results.count")])
-            assertEquals(false, trace.attributes[AttributeKey.booleanKey("tracy.response.results.flagged")])
-            assertNotNull(trace.attributes[AttributeKey.stringKey("tracy.response.results.categories")])
-            assertNotNull(trace.attributes[AttributeKey.stringKey("tracy.response.results.category_scores")])
+            assertEquals(false, trace.attributes[AttributeKey.booleanKey("tracy.response.results.0.flagged")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("tracy.response.results.0.categories")])
+            assertNotNull(trace.attributes[AttributeKey.stringKey("tracy.response.results.0.category_scores")])
             assertNotNull(
-                trace.attributes[AttributeKey.stringKey("tracy.response.results.category_applied_input_types")]
+                trace.attributes[AttributeKey.stringKey("tracy.response.results.0.category_applied_input_types")]
             )
         }
     }
