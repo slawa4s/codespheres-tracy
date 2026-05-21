@@ -5,6 +5,7 @@
 
 package org.jetbrains.ai.tracy.openai.adapters.handlers.models
 
+import com.openai.models.models.ModelDeleteParams
 import com.openai.models.models.ModelListParams
 import com.openai.models.models.ModelRetrieveParams
 import io.opentelemetry.api.common.AttributeKey
@@ -13,6 +14,7 @@ import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
 import org.jetbrains.ai.tracy.openai.clients.instrument
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -101,6 +103,40 @@ class ModelsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             // Must be "list" (bare string), not "\"list\"" (with JSON quotes)
             assertEquals("list", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+        }
+    }
+
+    @Test
+    fun `test LIST models traces per-element data via tracy_response_data fields`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(3)
+            ).apply { instrument(this) }
+
+            server.enqueue(enqueueModelListResponse(models = listOf("gpt-4o-mini", "gpt-4-turbo")))
+
+            try {
+                client.models().list(ModelListParams.builder().build())
+            } catch (_: Exception) {
+                // SDK may throw on response validation; traces are already recorded
+            }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(2L, trace.attributes[AttributeKey.longKey("tracy.response.list.count")])
+
+            // Per-element data
+            assertEquals("gpt-4o-mini", trace.attributes[AttributeKey.stringKey("tracy.response.data.0.id")])
+            assertEquals("model", trace.attributes[AttributeKey.stringKey("tracy.response.data.0.object")])
+            assertEquals(1686935002L, trace.attributes[AttributeKey.longKey("tracy.response.data.0.created")])
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("tracy.response.data.0.owned_by")])
+
+            assertEquals("gpt-4-turbo", trace.attributes[AttributeKey.stringKey("tracy.response.data.1.id")])
+            assertEquals("model", trace.attributes[AttributeKey.stringKey("tracy.response.data.1.object")])
         }
     }
 
@@ -224,7 +260,9 @@ class ModelsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             // Must be "model" (bare string), not "\"model\"" (with JSON quotes)
             assertEquals("model", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
-            assertEquals(modelId, trace.attributes[AttributeKey.stringKey("tracy.response.model.id")])
+            assertEquals(modelId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
+            assertEquals("openai", trace.attributes[AttributeKey.stringKey("tracy.response.owned_by")])
+            assertNotNull(trace.attributes[AttributeKey.longKey("tracy.response.created")])
             assertEquals(modelId, trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
         }
     }
@@ -260,6 +298,74 @@ class ModelsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals(requestModel, responseModel, "gen_ai.response.model should match gen_ai.request.model")
         }
     }
+
+    // ============ DELETE: DELETE /v1/models/{model} ============
+
+    @Test
+    fun `test DELETE model endpoint sets operation name to models delete`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(3)
+            ).apply { instrument(this) }
+
+            val modelId = "ft:gpt-4o-mini:org:custom:abc123"
+            server.enqueue(enqueueModelDeleteResponse(modelId = modelId))
+
+            try {
+                client.models().delete(
+                    ModelDeleteParams.builder()
+                        .model(modelId)
+                        .build()
+                )
+            } catch (_: Exception) {
+                // SDK may throw on response validation; traces are already recorded
+            }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals("models.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("models", trace.attributes[AttributeKey.stringKey("openai.api.type")])
+        }
+    }
+
+    @Test
+    fun `test DELETE model endpoint sets request model and response attributes`() = runTest(timeout = 3.minutes) {
+        withMockServer { server ->
+            val client = createOpenAIClient(
+                url = server.url("/").toString(),
+                apiKey = MOCK_API_KEY,
+                timeout = Duration.ofMinutes(3)
+            ).apply { instrument(this) }
+
+            val modelId = "ft:gpt-4o-mini:org:custom:abc123"
+            server.enqueue(enqueueModelDeleteResponse(modelId = modelId))
+
+            try {
+                client.models().delete(
+                    ModelDeleteParams.builder()
+                        .model(modelId)
+                        .build()
+                )
+            } catch (_: Exception) {
+                // SDK may throw on response validation; traces are already recorded
+            }
+
+            val traces = analyzeSpans()
+            assertTracesCount(1, traces)
+            val trace = traces.first()
+
+            assertEquals(modelId, trace.attributes[AttributeKey.stringKey("tracy.request.model")])
+            assertEquals(modelId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
+            assertEquals(true, trace.attributes[AttributeKey.booleanKey("tracy.response.deleted")])
+            assertEquals("model", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
+        }
+    }
+
+    // ============ Negative test ============
 
     @Test
     fun `test LIST models endpoint does not set gen_ai request model or response model`() = runTest(timeout = 3.minutes) {
@@ -331,6 +437,24 @@ class ModelsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
                   "object": "model",
                   "created": $created,
                   "owned_by": "$ownedBy"
+                }
+                """.trimIndent()
+            )
+    }
+
+    private fun enqueueModelDeleteResponse(
+        modelId: String,
+        deleted: Boolean = true
+    ): MockResponse {
+        return MockResponse()
+            .setResponseCode(200)
+            .setHeader("Content-Type", "application/json")
+            .setBody(
+                """
+                {
+                  "id": "$modelId",
+                  "deleted": $deleted,
+                  "object": "model"
                 }
                 """.trimIndent()
             )
