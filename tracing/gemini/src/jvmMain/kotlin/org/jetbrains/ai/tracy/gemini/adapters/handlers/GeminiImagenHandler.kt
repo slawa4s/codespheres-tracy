@@ -29,7 +29,12 @@ class GeminiImagenHandler(
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val body = request.body.asJson()?.jsonObject ?: return
 
-        val instances = body["instances"]?.jsonArray ?: return
+        val instancesEntry = body["instances"]
+        if (instancesEntry == null || instancesEntry !is JsonArray) {
+            return
+        }
+        val instances = instancesEntry.jsonArray
+
         for ((index, instance) in instances.withIndex()) {
             span.setAttribute("gen_ai.prompt.$index.content", instance.jsonObject["prompt"]?.jsonPrimitive?.content)
         }
