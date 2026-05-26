@@ -481,7 +481,7 @@ class AnthropicTracingTest : BaseAnthropicTracingTest() {
         val trace = traces.firstOrNull()
 
         assertEquals(
-            "\"additionalBodyPropertyValue\"",
+            "additionalBodyPropertyValue",
             trace?.attributes?.get(AttributeKey.stringKey("tracy.request.additionalBodyPropertyKey"))
         )
     }
