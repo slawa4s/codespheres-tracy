@@ -7,6 +7,7 @@ package org.jetbrains.ai.tracy.anthropic
 
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -241,7 +242,10 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            // `gen_ai.operation.name` is an OTel enum; the Anthropic Messages API maps to
+            // "chat", not "messages" (which lives in `anthropic.api.type`).
+            // See: https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/#gen-ai-operation-name
+            assertEquals("chat", trace.attributes[GEN_AI_OPERATION_NAME])
             assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
         }
     }

@@ -362,6 +362,9 @@ class AnthropicTracingTest : BaseAnthropicTracingTest() {
 
         assertTrue(trace.attributes[AttributeKey.stringKey("gen_ai.response.model")]?.commonPrefixWith(model.asString()) == "claude-haiku-4-5")
 
+        // `gen_ai.operation.name` is an OTel enum; the Anthropic Messages API maps to
+        // "chat", not "messages" (which lives in `anthropic.api.type`).
+        // See: https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/#gen-ai-operation-name
         assertEquals("chat", trace.attributes[GEN_AI_OPERATION_NAME])
 
         val type = trace.attributes[AttributeKey.stringKey("gen_ai.completion.0.type")]

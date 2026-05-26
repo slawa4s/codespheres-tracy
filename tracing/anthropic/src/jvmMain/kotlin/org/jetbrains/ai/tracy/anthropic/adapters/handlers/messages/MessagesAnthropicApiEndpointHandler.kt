@@ -41,6 +41,13 @@ internal class MessagesAnthropicApiEndpointHandler(
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         span.setAttribute("anthropic.api.type", "messages")
+        // `gen_ai.operation.name` is an OTel-defined enum: chat | generate_content |
+        // text_completion | embeddings | create_agent | invoke_agent | execute_tool.
+        // The Anthropic Messages API is semantically a chat-completion operation, so the
+        // correct value is "chat" — NOT "messages" (the Anthropic-specific endpoint name,
+        // captured separately in `anthropic.api.type`). Using "chat" keeps Anthropic spans
+        // groupable with chat completions from other providers in observability backends.
+        // See: https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/#gen-ai-operation-name
         span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
 
         val body = request.body.asJson()?.jsonObject ?: return
