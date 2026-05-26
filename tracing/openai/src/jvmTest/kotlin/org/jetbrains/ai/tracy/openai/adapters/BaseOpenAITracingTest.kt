@@ -164,7 +164,7 @@ abstract class BaseOpenAITracingTest : BaseAITracingTest() {
             trace?.attributes?.get(AttributeKey.stringKey("tracy.request.metadata"))
         )
         assertEquals(
-            "\"additionalBodyPropertyValue\"",
+            "additionalBodyPropertyValue",
             trace?.attributes?.get(AttributeKey.stringKey("tracy.request.additionalBodyPropertyKey"))
         )
     }
