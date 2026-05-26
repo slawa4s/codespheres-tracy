@@ -14,7 +14,8 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
-import org.jetbrains.ai.tracy.core.instrument
+import org.jetbrains.ai.tracy.core.interceptors.instrument
+import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -399,7 +400,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
      * follows a redirect and the final response URL no longer contains a "batches" path segment.
      *
      * The ThreadLocal in [AnthropicLLMTracingAdapter] stores the API type detected from the
-     * *original* request URL so that [getResponseErrorBodyAttributes] does not need to re-parse
+     * *original* request URL so that [LLMTracingAdapter.getResponseErrorBodyAttributes] does not need to re-parse
      * the (potentially rewritten) response URL.
      */
     @Test
