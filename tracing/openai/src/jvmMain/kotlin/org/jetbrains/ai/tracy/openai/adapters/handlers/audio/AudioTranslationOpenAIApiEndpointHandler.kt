@@ -18,6 +18,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
+import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
+import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asFormData
@@ -107,6 +109,14 @@ internal class AudioTranslationOpenAIApiEndpointHandler : EndpointApiHandler {
         }
     }
 
+    override fun handleStreamingEvent(
+        span: Span,
+        event: SseEvent,
+        index: Long
+    ): Result<Unit> {
+        return sseHandlingUnsupported()
+    }
+
     /**
      * Writes the documented [TranscriptionSegment] fields under `{prefix}.{field}`.
      */
@@ -141,10 +151,6 @@ internal class AudioTranslationOpenAIApiEndpointHandler : EndpointApiHandler {
         segment["tokens"]?.let {
             span.setAttribute("$prefix.tokens", it.toString())
         }
-    }
-
-    override fun handleStreaming(span: Span, events: String) {
-        // Audio translation endpoint does not support SSE streaming
     }
 
     companion object {

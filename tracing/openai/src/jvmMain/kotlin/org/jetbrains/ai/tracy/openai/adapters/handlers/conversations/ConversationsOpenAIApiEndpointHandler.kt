@@ -10,6 +10,8 @@ import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPER
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
+import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
+import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
@@ -65,8 +67,12 @@ internal class ConversationsOpenAIApiEndpointHandler : EndpointApiHandler {
         routeHandlers[route]?.handleResponse(span, response)
     }
 
-    override fun handleStreaming(span: Span, events: String) {
-        logger.warn { "Conversations API does not use server-sent events streaming" }
+    override fun handleStreamingEvent(
+        span: Span,
+        event: SseEvent,
+        index: Long
+    ): Result<Unit> {
+        return sseHandlingUnsupported()
     }
 
     private fun detectRoute(url: TracyHttpUrl, method: String): ConversationRoute {

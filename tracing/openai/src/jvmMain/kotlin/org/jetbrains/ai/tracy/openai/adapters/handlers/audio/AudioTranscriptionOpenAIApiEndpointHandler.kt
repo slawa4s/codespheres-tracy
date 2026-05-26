@@ -19,6 +19,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
+import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
+import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asFormData
@@ -178,10 +180,15 @@ internal class AudioTranscriptionOpenAIApiEndpointHandler : EndpointApiHandler {
         }
     }
 
-    override fun handleStreaming(span: Span, events: String) {
+    override fun handleStreamingEvent(
+        span: Span,
+        event: SseEvent,
+        index: Long
+    ): Result<Unit> {
         // TODO: Audio Transcription supports SSE streaming on newer models (see
         //   https://platform.openai.com/docs/api-reference/audio/createTranscription).
         //   Implement event parsing once we add a corresponding test fixture.
+        return sseHandlingUnsupported()
     }
 
     companion object {

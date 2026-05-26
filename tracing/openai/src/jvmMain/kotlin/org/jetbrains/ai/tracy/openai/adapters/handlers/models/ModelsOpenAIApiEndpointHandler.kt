@@ -8,6 +8,8 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.models
 import io.opentelemetry.api.trace.Span
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
+import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
+import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
@@ -48,8 +50,12 @@ internal class ModelsOpenAIApiEndpointHandler : EndpointApiHandler {
         routeHandlers[route]?.handleResponse(span, response)
     }
 
-    override fun handleStreaming(span: Span, events: String) {
-        // Models API does not use SSE streaming
+    override fun handleStreamingEvent(
+        span: Span,
+        event: SseEvent,
+        index: Long
+    ): Result<Unit> {
+        return sseHandlingUnsupported()
     }
 
     private fun detectRoute(url: TracyHttpUrl, method: String): ModelRoute {
