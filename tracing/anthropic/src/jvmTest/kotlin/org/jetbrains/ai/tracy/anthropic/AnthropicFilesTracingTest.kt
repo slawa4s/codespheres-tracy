@@ -76,7 +76,7 @@ class AnthropicFilesTracingTest : BaseAITracingTest() {
             assertEquals("application/pdf", trace.attributes[AttributeKey.stringKey("gen_ai.request.file.mime_type")])
             val sizeBytes = trace.attributes[AttributeKey.longKey("gen_ai.request.file.size_bytes")]
             assertNotNull(sizeBytes)
-            assertTrue(sizeBytes!! > 0L)
+            assertTrue(sizeBytes > 0L)
         }
     }
 

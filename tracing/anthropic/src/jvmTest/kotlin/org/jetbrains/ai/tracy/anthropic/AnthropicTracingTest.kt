@@ -15,6 +15,7 @@ import com.anthropic.helpers.MessageAccumulator
 import com.anthropic.models.messages.*
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_FINISH_REASONS
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
@@ -361,7 +362,7 @@ class AnthropicTracingTest : BaseAnthropicTracingTest() {
 
         assertTrue(trace.attributes[AttributeKey.stringKey("gen_ai.response.model")]?.commonPrefixWith(model.asString()) == "claude-haiku-4-5")
 
-        assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("chat", trace.attributes[GEN_AI_OPERATION_NAME])
 
         val type = trace.attributes[AttributeKey.stringKey("gen_ai.completion.0.type")]
         assertNotNull(type)
