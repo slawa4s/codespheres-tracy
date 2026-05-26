@@ -31,6 +31,8 @@ internal object OpenAIApiUtils {
      */
     fun setCommonResponseAttributes(span: Span, response: JsonObject) {
         response["id"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it) }
+        // TODO: GEN_AI_OPERATION_NAME is defined by OTEL spec;
+        //       'object' attr probably should be assigned to 'anthropic.api.type' or alike
         response["object"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_OPERATION_NAME, it) }
         response["model"]?.jsonPrimitive?.content?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it) }
     }
