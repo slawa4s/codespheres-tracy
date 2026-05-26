@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.gemini.adapters.handlers
 
 import io.opentelemetry.api.common.AttributeKey
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -15,9 +16,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
-import org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.http.protocol.*
+import org.jetbrains.ai.tracy.core.interceptors.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.gemini.adapters.GeminiLLMTracingAdapter
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.GeminiCachedContentsHandler
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
@@ -40,6 +41,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         host = "generativelanguage.googleapis.com",
         port = 443,
         pathSegments = listOf("v1beta", "cachedContents"),
+        url = "https://generativelanguage.googleapis.com/v1beta/cachedContents",
         parameters = emptyQueryParameters(),
     )
 
@@ -48,6 +50,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         host = "generativelanguage.googleapis.com",
         port = 443,
         pathSegments = listOf("v1beta", "cachedContents", id),
+        url = "https://generativelanguage.googleapis.com/v1beta/cachedContents/$id",
         parameters = emptyQueryParameters(),
     )
 
@@ -58,7 +61,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
 
     // ─── Request / response factories ─────────────────────────────────────────
 
-    private fun makeRequest(url: TracyHttpUrl, method: String, body: kotlinx.serialization.json.JsonObject? = null): TracyHttpRequest =
+    private fun makeRequest(url: TracyHttpUrl, method: String, body: JsonObject? = null): TracyHttpRequest =
         object : TracyHttpRequest {
             override val contentType = if (body != null) TracyContentType.Application.Json else null
             override val body = if (body != null) TracyHttpRequestBody.Json(body) else TracyHttpRequestBody.Empty
@@ -66,7 +69,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
             override val method = method
         }
 
-    private fun makeResponse(url: TracyHttpUrl, body: kotlinx.serialization.json.JsonObject): TracyHttpResponse =
+    private fun makeResponse(url: TracyHttpUrl, body: JsonObject): TracyHttpResponse =
         object : TracyHttpResponse {
             override val contentType = TracyContentType.Application.Json
             override val code = 200

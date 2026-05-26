@@ -11,12 +11,14 @@ import io.opentelemetry.api.trace.StatusCode
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.PayloadType
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter.Companion.populateUnmappedAttributes
+import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyContentType
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequestBody
@@ -35,9 +37,13 @@ private const val TEST_PROVIDER = "test-provider"
 private object TestLLMTracingAdapter : LLMTracingAdapter(TEST_PROVIDER) {
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) = Unit
     override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) = Unit
-    override fun getSpanName(request: TracyHttpRequest) = "test-span"
-    override fun isStreamingRequest(request: TracyHttpRequest) = false
-    override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+    override fun getSpanName(): String = "test-span"
+    override fun registerResponseStreamEvent(
+        span: Span,
+        url: TracyHttpUrl,
+        event: SseEvent,
+        index: Long,
+    ): Result<Unit> = Result.success(Unit)
 }
 
 private val testUrl = TracyHttpUrlImpl(
@@ -45,6 +51,7 @@ private val testUrl = TracyHttpUrlImpl(
     host = "api.example.com",
     port = 443,
     pathSegments = listOf("v1", "chat", "completions"),
+    url = "https://api.example.com/v1/chat/completions",
     parameters = object : TracyQueryParameters {
         override fun queryParameter(name: String): String? = null
         override fun queryParameterValues(name: String): List<String?> = emptyList()
@@ -63,9 +70,14 @@ class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
     private val adapter = object : LLMTracingAdapter("test-system") {
         override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {}
         override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {}
-        override fun getSpanName(request: TracyHttpRequest) = "test-span"
-        override fun isStreamingRequest(request: TracyHttpRequest) = false
-        override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) {}
+        override fun getSpanName(): String = "test-span"
+
+        override fun registerResponseStreamEvent(
+            span: Span,
+            url: TracyHttpUrl,
+            event: SseEvent,
+            index: Long
+        ): Result<Unit> = Result.success(Unit)
     }
 
     private val adapterTestUrl = TracyHttpUrlImpl(
@@ -73,10 +85,11 @@ class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
         host = "api.test.com",
         port = 443,
         pathSegments = listOf("v1", "chat"),
+        url = "https://api.test.com/v1/chat",
         parameters = object : TracyQueryParameters {
             override fun queryParameter(name: String) = null
             override fun queryParameterValues(name: String) = emptyList<String?>()
-        }
+        },
     )
 
     @Test
@@ -215,9 +228,14 @@ class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
                 throw RuntimeException("provider-specific parsing failure")
             }
             override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) {}
-            override fun getSpanName(request: TracyHttpRequest) = "test-throwing-span"
-            override fun isStreamingRequest(request: TracyHttpRequest) = false
-            override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) {}
+            override fun getSpanName(): String = "test-throwing-span"
+
+            override fun registerResponseStreamEvent(
+                span: Span,
+                url: TracyHttpUrl,
+                event: SseEvent,
+                index: Long
+            ): Result<Unit> = Result.success(Unit)
         }
 
         val span = TracingManager.tracer.spanBuilder("test-throwing").startSpan()
@@ -293,7 +311,7 @@ class LLMTracingAdapterTest : BaseOpenTelemetryTracingTest() {
     fun `populateUnmappedAttributes stores JSON arrays as JSON strings`() {
         val span = TracingManager.tracer.spanBuilder("test-unmapped-array").startSpan()
 
-        val body = buildJsonObject { put("items", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("a")) }) }
+        val body = buildJsonObject { put("items", buildJsonArray { add(JsonPrimitive("a")) }) }
         with(span) { populateUnmappedAttributes(body, emptyList(), PayloadType.REQUEST) }
         span.end()
 

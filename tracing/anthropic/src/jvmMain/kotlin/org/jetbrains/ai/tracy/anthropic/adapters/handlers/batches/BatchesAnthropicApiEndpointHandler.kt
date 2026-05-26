@@ -16,6 +16,8 @@ import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.Retriev
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.batches.routes.RetrieveBatchResultsHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
+import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
+import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
@@ -63,8 +65,12 @@ internal class BatchesAnthropicApiEndpointHandler : EndpointApiHandler {
         routeHandlers[route]?.handleResponse(span, response)
     }
 
-    override fun handleStreaming(span: Span, events: String) {
-        // Batches API does not use SSE streaming
+    override fun handleStreamingEvent(
+        span: Span,
+        event: SseEvent,
+        index: Long
+    ): Result<Unit> {
+        return sseHandlingUnsupported()
     }
 
     /**

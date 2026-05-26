@@ -15,6 +15,7 @@ import io.opentelemetry.sdk.trace.SdkTracerProvider
 import io.opentelemetry.sdk.trace.data.SpanData
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor
 import kotlinx.serialization.json.buildJsonObject
+import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequestBody
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -34,9 +35,13 @@ class LLMTracingAdapterServerAttributesTest {
     private val adapter = object : LLMTracingAdapter("test-system") {
         override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) = Unit
         override fun getResponseBodyAttributes(span: Span, response: TracyHttpResponse) = Unit
-        override fun getSpanName(request: TracyHttpRequest) = "test-span"
-        override fun isStreamingRequest(request: TracyHttpRequest) = false
-        override fun handleStreaming(span: Span, url: TracyHttpUrl, events: String) = Unit
+        override fun getSpanName(): String = "test-span"
+        override fun registerResponseStreamEvent(
+            span: Span,
+            url: TracyHttpUrl,
+            event: SseEvent,
+            index: Long,
+        ): Result<Unit> = Result.success(Unit)
     }
 
     @BeforeEach
@@ -57,10 +62,11 @@ class LLMTracingAdapterServerAttributesTest {
             host = host,
             port = port,
             pathSegments = listOf("v1", "chat", "completions"),
+            url = "https://$host:$port/v1/chat/completions",
             parameters = object : TracyQueryParameters {
                 override fun queryParameter(name: String): String? = null
                 override fun queryParameterValues(name: String): List<String?> = emptyList()
-            }
+            },
         )
         return TracyHttpRequestBody.Json(buildJsonObject {}).asRequestView(
             contentType = null,

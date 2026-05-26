@@ -12,6 +12,8 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
+import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
+import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
@@ -78,5 +80,11 @@ internal class GeminiEmbedHandler : EndpointApiHandler {
         dimension?.let { span.setAttribute("gen_ai.response.embedding.dimension", it.toLong()) }
     }
 
-    override fun handleStreaming(span: Span, events: String) = Unit
+    override fun handleStreamingEvent(
+        span: Span,
+        event: SseEvent,
+        index: Long
+    ): Result<Unit> {
+        return sseHandlingUnsupported()
+    }
 }

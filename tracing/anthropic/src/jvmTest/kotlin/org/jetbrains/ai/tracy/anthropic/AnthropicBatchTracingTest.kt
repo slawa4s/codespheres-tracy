@@ -16,18 +16,13 @@ import io.opentelemetry.api.common.AttributeKey
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.anthropic.clients.instrument
-import org.jetbrains.ai.tracy.anthropic.clients.tryInjectViaDirectField
-import org.jetbrains.ai.tracy.anthropic.clients.tryInjectViaDelegateField
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import java.lang.reflect.Proxy
 import java.time.Duration
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
-import kotlin.test.assertSame
-import kotlin.test.assertTrue
 
 /** Mock batch response body returned by all three lifecycle endpoints. */
 private val MOCK_BATCH_RESPONSE = """
@@ -409,119 +404,8 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
     }
 
     // ──────────────────────────────────────────────────────────────────────────────────────────
-    // Injection helper unit tests
-    // ──────────────────────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Verifies that [tryInjectViaDelegateField] successfully installs the proxy by swapping
-     * the `_value` inside the Kotlin `by lazy` delegate field.
-     */
-    @Test
-    fun `test tryInjectViaDelegateField installs proxy via lazy delegate`() = runTest {
-        withMockServer { server ->
-            val client = createClient(server.url("/").toString())
-            val messagesService = client.messages()
-            // Force lazy initialisation.
-            val originalBatchService = messagesService.batches()
-
-            val replacementProxy = makeBatchServiceProxy(originalBatchService)
-
-            val result = tryInjectViaDelegateField(messagesService, replacementProxy)
-
-            assertTrue(result, "tryInjectViaDelegateField should return true for the current SDK")
-            assertSame(
-                replacementProxy,
-                messagesService.batches(),
-                "batches() should return the injected proxy after delegate injection"
-            )
-        }
-    }
-
-    /**
-     * Verifies that [tryInjectViaDirectField] installs the proxy when the messages-service
-     * object has a plain (non-lazy) field typed as [BatchService].
-     *
-     * This simulates SDK versions where the batch service is stored as a plain `val` rather
-     * than via a Kotlin `by lazy` delegate.
-     */
-    @Test
-    fun `test tryInjectViaDirectField installs proxy into plain BatchService field`() {
-        // Synthetic holder representing a "different SDK version" with a direct field.
-        class DirectFieldHolder {
-            @JvmField
-            var batchesField: BatchService = Proxy.newProxyInstance(
-                BatchService::class.java.classLoader,
-                arrayOf(BatchService::class.java),
-            ) { _, _, _ -> null } as BatchService
-        }
-
-        val holder = DirectFieldHolder()
-        val newProxy = Proxy.newProxyInstance(
-            BatchService::class.java.classLoader,
-            arrayOf(BatchService::class.java),
-        ) { _, _, _ -> null } as BatchService
-
-        val result = tryInjectViaDirectField(holder, newProxy)
-
-        assertTrue(result, "tryInjectViaDirectField should find the BatchService-typed field")
-        assertSame(newProxy, holder.batchesField, "The direct field should be set to the new proxy")
-    }
-
-    /**
-     * Verifies that [tryInjectViaDirectField] returns `false` when no [BatchService]-typed
-     * field exists in the object's class hierarchy.
-     */
-    @Test
-    fun `test tryInjectViaDirectField returns false when no matching field exists`() {
-        val noFieldObject = object {
-            @Suppress("UNUSED")
-            val unrelated: String = "unrelated"
-        }
-
-        val proxy = Proxy.newProxyInstance(
-            BatchService::class.java.classLoader,
-            arrayOf(BatchService::class.java),
-        ) { _, _, _ -> null } as BatchService
-
-        val result = tryInjectViaDirectField(noFieldObject, proxy)
-
-        assertFalse(result, "tryInjectViaDirectField should return false when no matching field exists")
-    }
-
-    /**
-     * Verifies that [tryInjectViaDelegateField] returns `false` (rather than throwing) when
-     * the target object has no `batches${'$'}delegate` field.
-     */
-    @Test
-    fun `test tryInjectViaDelegateField returns false when delegate field is absent`() {
-        val noFieldObject = object {
-            @Suppress("UNUSED")
-            val unrelated: String = "unrelated"
-        }
-
-        val proxy = Proxy.newProxyInstance(
-            BatchService::class.java.classLoader,
-            arrayOf(BatchService::class.java),
-        ) { _, _, _ -> null } as BatchService
-
-        val result = tryInjectViaDelegateField(noFieldObject, proxy)
-
-        assertFalse(result, "tryInjectViaDelegateField should return false when the delegate field is absent")
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────────────────────
     // Test helpers
     // ──────────────────────────────────────────────────────────────────────────────────────────
-
-    /** Creates a no-op [BatchService] proxy for injection tests. */
-    private fun makeBatchServiceProxy(delegate: BatchService): BatchService =
-        Proxy.newProxyInstance(
-            delegate.javaClass.classLoader,
-            arrayOf(BatchService::class.java),
-        ) { _, method, args ->
-            method.invoke(delegate, *(args ?: emptyArray()))
-        } as BatchService
-
     /**
      * Replaces the [BatchService] inside [client] with a dynamic proxy that throws
      * [IllegalStateException] from every `create(...)` overload without making any HTTP call.

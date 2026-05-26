@@ -72,6 +72,7 @@ class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIn
      */
     private val requestApiTypeThreadLocal = ThreadLocal<String?>()
 
+    // TODO: reimplement with when-cases on url (response.url), remove the `requestApiTypeThreadLocal`
     override fun getRequestBodyAttributes(span: Span, request: TracyHttpRequest) {
         // Detect and persist the API type so error-response handling doesn't need to re-parse the
         // URL (response.url may differ from request.url after OkHttp redirects).

@@ -7,6 +7,7 @@ package org.jetbrains.ai.tracy.gemini.adapters.handlers
 
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -19,7 +20,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
-import org.jetbrains.ai.tracy.core.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.http.protocol.TracyContentType
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
@@ -29,6 +29,7 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponseBody
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrlImpl
 import org.jetbrains.ai.tracy.core.http.protocol.TracyQueryParameters
+import org.jetbrains.ai.tracy.core.interceptors.OpenTelemetryOkHttpInterceptor
 import org.jetbrains.ai.tracy.gemini.adapters.GeminiLLMTracingAdapter
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Test
@@ -51,6 +52,7 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
         host = "generativelanguage.googleapis.com",
         port = 443,
         pathSegments = listOf("v1beta", "models", "$model:embedContent"),
+        url = "https://generativelanguage.googleapis.com/v1beta/models/$model:embedContent",
         parameters = emptyQueryParameters(),
     )
 
@@ -58,8 +60,11 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
         scheme = "https",
         host = "us-central1-aiplatform.googleapis.com",
         port = 443,
-        pathSegments = listOf("v1", "projects", "my-project", "locations", "us-central1",
-            "publishers", "google", "models", "$model:predict"),
+        pathSegments = listOf(
+            "v1", "projects", "my-project", "locations", "us-central1",
+            "publishers", "google", "models", "$model:predict",
+        ),
+        url = "https://us-central1-aiplatform.googleapis.com/v1/projects/my-project/locations/us-central1/publishers/google/models/$model:predict",
         parameters = emptyQueryParameters(),
     )
 
@@ -70,7 +75,7 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
 
     // ─── Request / response factories ─────────────────────────────────────────
 
-    private fun makeRequest(url: TracyHttpUrl, body: kotlinx.serialization.json.JsonObject): TracyHttpRequest =
+    private fun makeRequest(url: TracyHttpUrl, body: JsonObject): TracyHttpRequest =
         object : TracyHttpRequest {
             override val contentType = TracyContentType.Application.Json
             override val body = TracyHttpRequestBody.Json(body)
@@ -78,7 +83,7 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
             override val method = "POST"
         }
 
-    private fun makeResponse(url: TracyHttpUrl, body: kotlinx.serialization.json.JsonObject): TracyHttpResponse =
+    private fun makeResponse(url: TracyHttpUrl, body: JsonObject): TracyHttpResponse =
         object : TracyHttpResponse {
             override val contentType = TracyContentType.Application.Json
             override val code = 200

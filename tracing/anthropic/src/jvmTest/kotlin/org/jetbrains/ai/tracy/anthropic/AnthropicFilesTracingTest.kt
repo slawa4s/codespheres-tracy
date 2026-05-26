@@ -14,7 +14,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.anthropic.adapters.AnthropicLLMTracingAdapter
-import org.jetbrains.ai.tracy.core.instrument
+import org.jetbrains.ai.tracy.core.interceptors.instrument
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
