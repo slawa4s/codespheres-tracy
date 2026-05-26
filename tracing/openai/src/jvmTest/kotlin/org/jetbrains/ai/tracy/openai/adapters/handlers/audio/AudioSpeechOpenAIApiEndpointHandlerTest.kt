@@ -14,7 +14,8 @@ import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.policy.ContentCapturePolicy
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
 import org.jetbrains.ai.tracy.openai.clients.instrument
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import java.time.Duration
@@ -97,7 +98,9 @@ class AudioSpeechOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             server.enqueue(speechResponse())
             client.audio().speech().create(
-                speechParams(voice = SpeechCreateParams.Voice.ALLOY)
+                speechParams(
+                    voice = SpeechCreateParams.Voice.ofUnionMember1(SpeechCreateParams.Voice.UnionMember1.ALLOY)
+                )
             ).close()
 
             val trace = analyzeSpans().first()
@@ -267,7 +270,7 @@ class AudioSpeechOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
     private fun speechParams(
         model: SpeechModel = SpeechModel.TTS_1,
-        voice: SpeechCreateParams.Voice = SpeechCreateParams.Voice.ALLOY,
+        voice: SpeechCreateParams.Voice = SpeechCreateParams.Voice.ofUnionMember1(SpeechCreateParams.Voice.UnionMember1.ALLOY),
         input: String = "Hello world",
         instructions: String? = null,
         responseFormat: SpeechCreateParams.ResponseFormat? = null,

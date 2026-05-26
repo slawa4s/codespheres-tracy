@@ -8,6 +8,7 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MAX_TOKENS
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -36,6 +37,7 @@ class ChatCompletionsRequestAttributesTest : BaseOpenTelemetryTracingTest() {
         host = "api.openai.com",
         port = 443,
         pathSegments = listOf("v1", "chat", "completions"),
+        url = "https://api.openai.com/v1/chat/completions",
         parameters = object : TracyQueryParameters {
             override fun queryParameter(name: String): String? = null
             override fun queryParameterValues(name: String): List<String?> = emptyList()
@@ -48,7 +50,7 @@ class ChatCompletionsRequestAttributesTest : BaseOpenTelemetryTracingTest() {
 
     private val handler = ChatCompletionsOpenAIApiEndpointHandler(noOpExtractor)
 
-    private fun makeRequest(body: kotlinx.serialization.json.JsonObject): TracyHttpRequest {
+    private fun makeRequest(body: JsonObject): TracyHttpRequest {
         return object : TracyHttpRequest {
             override val contentType = TracyContentType.Application.Json
             override val body = TracyHttpRequestBody.Json(body)

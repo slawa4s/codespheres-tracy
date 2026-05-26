@@ -13,6 +13,7 @@ import com.openai.models.responses.ResponseCreateParams
 import com.openai.models.videos.VideoCreateParams
 import com.openai.models.videos.VideoModel
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.openai.clients.instrument
@@ -228,7 +229,7 @@ class OpenAIApiTypeAttributeTest : BaseOpenAITracingTest() {
 
             val trace = analyzeSpans().first()
             // operation name must be "chat", not the raw "chat.completion" object field from the response body
-            assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("chat", trace.attributes[GEN_AI_OPERATION_NAME])
         }
     }
 
@@ -271,7 +272,7 @@ class OpenAIApiTypeAttributeTest : BaseOpenAITracingTest() {
             }
 
             val trace = analyzeSpans().first()
-            assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("chat", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(true, trace.attributes[AttributeKey.booleanKey("gen_ai.request.stream")])
         }
     }

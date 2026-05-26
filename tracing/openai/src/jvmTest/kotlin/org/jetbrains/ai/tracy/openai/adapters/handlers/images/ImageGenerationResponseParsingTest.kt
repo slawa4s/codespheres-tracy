@@ -7,19 +7,14 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.images
 
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContent
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
-import org.jetbrains.ai.tracy.core.http.protocol.TracyContentType
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponseBody
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrlImpl
-import org.jetbrains.ai.tracy.core.http.protocol.TracyQueryParameters
+import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.test.utils.BaseOpenTelemetryTracingTest
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -32,6 +27,7 @@ class ImageGenerationResponseParsingTest : BaseOpenTelemetryTracingTest() {
         host = "api.openai.com",
         port = 443,
         pathSegments = listOf("v1", "images", "generations"),
+        url = "https://api.openai.com/v1/images/generations",
         parameters = object : TracyQueryParameters {
             override fun queryParameter(name: String): String? = null
             override fun queryParameterValues(name: String): List<String?> = emptyList()
@@ -42,7 +38,7 @@ class ImageGenerationResponseParsingTest : BaseOpenTelemetryTracingTest() {
         override fun setUploadableContentAttributes(span: Span, field: String, content: MediaContent) = Unit
     }
 
-    private fun makeResponse(body: kotlinx.serialization.json.JsonObject): TracyHttpResponse {
+    private fun makeResponse(body: JsonObject): TracyHttpResponse {
         return object : TracyHttpResponse {
             override val contentType = TracyContentType.Application.Json
             override val code = 200
