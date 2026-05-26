@@ -30,11 +30,25 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        // `gen_ai.operation.name` is an OTel-defined enum: chat | generate_content |
+        // text_completion | embeddings | create_agent | invoke_agent | execute_tool.
+        // The OpenAI Chat Completions API is a chat operation, so the correct value is
+        // "chat" — NOT "chat.completion" (which is the `object` discriminator from the
+        // response body and would be captured separately in `openai.api.type`). Using
+        // "chat" keeps OpenAI spans groupable with chat completions from other providers
+        // (Anthropic, Gemini, …) in observability backends.
+        // See: https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/#gen-ai-operation-name
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
+
         val body = request.body.asJson()?.jsonObject ?: return
         OpenAIApiUtils.setCommonRequestAttributes(span, request)
 
         (body["max_completion_tokens"] ?: body["max_tokens"])?.jsonPrimitive?.intOrNull?.let {
             span.setAttribute(GEN_AI_REQUEST_MAX_TOKENS, it.toLong())
+        }
+
+        body["stream"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("gen_ai.request.stream", it)
         }
 
         body["tool_choice"]?.let {
@@ -134,6 +148,12 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val body = response.body.asJson()?.jsonObject ?: return
 
+        // Re-apply the OTel operation name to override what
+        // [OpenAIApiUtils.setCommonResponseAttributes] writes from the response `object`
+        // field (e.g. "chat.completion"). The semantic operation is "chat" — see the
+        // request-side comment for the rationale and OTel spec link.
+        span.setAttribute(GEN_AI_OPERATION_NAME, "chat")
+
         val finishReasons = mutableListOf<String>()
 
         body["choices"]?.let { choices ->
@@ -224,8 +244,30 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
             return sseHandlingFailure("Cannot parse event data as JSON: ${err.message}")
         }
 
+        // For streaming responses the body is SSE (not a JSON object), so
+        // [OpenAIApiUtils.setCommonResponseAttributes] is never called from the adapter.
+        // Each chunk carries the same `id` and `model` at the top level — extract them
+        // here so `gen_ai.response.id` and `gen_ai.response.model` are populated for
+        // streamed completions. Idempotent overwrite per event is fine.
+        data["id"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute(GEN_AI_RESPONSE_ID, it)
+        }
+        data["model"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute(GEN_AI_RESPONSE_MODEL, it)
+        }
+
         val choice = data["choices"]?.jsonArray?.firstOrNull()?.jsonObject
             ?: return sseHandlingFailure("Event's JSON has no 'choices' field")
+
+        // `finish_reason` is null on intermediate chunks and set on the final chunk.
+        choice["finish_reason"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, listOf(it))
+        }
+
+        // `usage` is sent on the final chunk (when `stream_options.include_usage = true`).
+        data["usage"]?.jsonObject?.let { usage ->
+            setUsageAttributes(span, usage)
+        }
 
         val delta = choice["delta"]?.jsonObject
             ?: return sseHandlingFailure("Event's 'choices' field has no 'delta' field")
@@ -352,7 +394,8 @@ internal class ChatCompletionsOpenAIApiEndpointHandler(
         "temperature",
         "max_completion_tokens",
         "max_tokens",
-        "tool_choice"
+        "tool_choice",
+        "stream"
     )
 
     // https://platform.openai.com/docs/api-reference/chat/object
