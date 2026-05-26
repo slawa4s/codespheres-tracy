@@ -6,7 +6,6 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.models.routes
 
 import io.opentelemetry.api.trace.Span
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -18,11 +17,14 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 /**
  * Handles the `GET /models` endpoint.
  *
+ * `gen_ai.operation.name` is set by the parent [org.jetbrains.ai.tracy.openai.adapters.handlers.models.ModelsOpenAIApiEndpointHandler]
+ * in both request and response phases.
+ *
  * See [list](https://developers.openai.com/api/reference/resources/models/methods/list)
  */
 internal class ListModelsHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        span.setAttribute(GEN_AI_OPERATION_NAME, "models.list")
+        // operation name set by the parent handler
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {

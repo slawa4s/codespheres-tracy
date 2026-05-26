@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.models
 
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
@@ -28,6 +29,11 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.models.routes.RetrieveMod
  * Both `/v1/models` and `/models` path prefixes are supported — detection is based on the
  * `models` segment, not the leading `v1`.
  *
+ * TODO: fix this logic; here, we should not know that `OpenAIApiUtils.setCommonResponseAttributes` does
+ * The main handler re-applies `gen_ai.operation.name` in the response phase to override what
+ * [org.jetbrains.ai.tracy.openai.adapters.handlers.OpenAIApiUtils.setCommonResponseAttributes]
+ * writes from the response `object` field (e.g. `"list"`, `"model"`).
+ *
  * See [Models API Reference](https://developers.openai.com/api/reference/resources/models)
  */
 internal class ModelsOpenAIApiEndpointHandler : EndpointApiHandler {
@@ -42,11 +48,15 @@ internal class ModelsOpenAIApiEndpointHandler : EndpointApiHandler {
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         val route = detectRoute(request.url, request.method)
+        span.setAttribute(GEN_AI_OPERATION_NAME, route.operationName)
         routeHandlers[route]?.handleRequest(span, request)
     }
 
     override fun handleResponseAttributes(span: Span, response: TracyHttpResponse) {
         val route = detectRoute(response.url, response.requestMethod)
+        // Re-apply to override what setCommonResponseAttributes writes from response.object.
+        // TODO: see how to fix to avoid overriding what setCommonResponseAttributes set
+        span.setAttribute(GEN_AI_OPERATION_NAME, route.operationName)
         routeHandlers[route]?.handleResponse(span, response)
     }
 
@@ -71,5 +81,9 @@ internal class ModelsOpenAIApiEndpointHandler : EndpointApiHandler {
         }
     }
 
-    private enum class ModelRoute { LIST, RETRIEVE, DELETE }
+    private enum class ModelRoute(val operationName: String) {
+        LIST("models.list"),
+        RETRIEVE("models.retrieve"),
+        DELETE("models.delete"),
+    }
 }

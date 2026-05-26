@@ -6,8 +6,6 @@
 package org.jetbrains.ai.tracy.openai.adapters.handlers.models.routes
 
 import io.opentelemetry.api.trace.Span
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -21,11 +19,13 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
  *
  * Response: ModelDeleted { id, deleted, object }
  *
+ * `gen_ai.operation.name` is set by the parent [org.jetbrains.ai.tracy.openai.adapters.handlers.models.ModelsOpenAIApiEndpointHandler]
+ * in both request and response phases.
+ *
  * See [delete](https://developers.openai.com/api/reference/resources/models/methods/delete)
  */
 internal class DeleteModelHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        span.setAttribute(GEN_AI_OPERATION_NAME, "models.delete")
         extractModelIdFromPath(request.url)?.let {
             span.setAttribute("tracy.request.model", it)
         }
