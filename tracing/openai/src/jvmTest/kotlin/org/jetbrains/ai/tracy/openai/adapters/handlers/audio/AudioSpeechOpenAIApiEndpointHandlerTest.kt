@@ -8,6 +8,7 @@ package org.jetbrains.ai.tracy.openai.adapters.handlers.audio
 import com.openai.models.audio.speech.SpeechCreateParams
 import com.openai.models.audio.speech.SpeechModel
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.core.TracingManager
@@ -42,7 +43,7 @@ class AudioSpeechOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             val trace = analyzeSpans().first()
 
-            assertEquals("audio.speech", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("audio.speech", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("audio", trace.attributes[AttributeKey.stringKey("openai.api.type")])
         }
     }

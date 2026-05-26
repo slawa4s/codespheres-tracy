@@ -9,6 +9,7 @@ import com.openai.models.models.ModelDeleteParams
 import com.openai.models.models.ModelListParams
 import com.openai.models.models.ModelRetrieveParams
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
@@ -51,7 +52,7 @@ class ModelsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("models.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("models.list", trace.attributes[GEN_AI_OPERATION_NAME])
         }
     }
 
@@ -168,7 +169,7 @@ class ModelsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("models.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("models.retrieve", trace.attributes[GEN_AI_OPERATION_NAME])
         }
     }
 
@@ -327,7 +328,7 @@ class ModelsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("models.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("models.delete", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("models", trace.attributes[AttributeKey.stringKey("openai.api.type")])
         }
     }

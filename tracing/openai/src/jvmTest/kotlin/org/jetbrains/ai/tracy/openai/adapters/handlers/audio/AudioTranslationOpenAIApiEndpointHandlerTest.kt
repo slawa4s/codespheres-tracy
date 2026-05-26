@@ -9,6 +9,7 @@ import com.openai.core.MultipartField
 import com.openai.models.audio.AudioModel
 import com.openai.models.audio.translations.TranslationCreateParams
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.core.TracingManager
@@ -45,7 +46,7 @@ class AudioTranslationOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             val trace = analyzeSpans().first()
 
-            assertEquals("audio.translation", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("audio.translation", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("audio", trace.attributes[AttributeKey.stringKey("openai.api.type")])
         }
     }

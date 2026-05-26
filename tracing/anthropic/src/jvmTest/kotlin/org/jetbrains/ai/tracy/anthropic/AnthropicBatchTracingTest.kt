@@ -11,6 +11,7 @@ import com.anthropic.models.messages.batches.BatchCancelParams
 import com.anthropic.models.messages.batches.BatchCreateParams
 import com.anthropic.models.messages.batches.BatchRetrieveParams
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.anthropic.clients.instrument
@@ -257,7 +258,7 @@ class AnthropicBatchTracingTest : BaseAITracingTest() {
         // operation name
         assertEquals(
             operationName,
-            trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")],
+            trace.attributes[GEN_AI_OPERATION_NAME],
             "gen_ai.operation.name"
         )
 

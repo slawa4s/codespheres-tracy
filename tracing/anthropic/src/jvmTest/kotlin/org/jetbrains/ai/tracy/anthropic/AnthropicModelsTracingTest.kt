@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.anthropic
 
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -60,7 +61,7 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
             val trace = traces.first()
 
             assertEquals("models", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
-            assertEquals("list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("list", trace.attributes[GEN_AI_OPERATION_NAME])
             assertNull(trace.attributes[AttributeKey.stringKey("gen_ai.request.model")])
             assertEquals(1L, trace.attributes[AttributeKey.longKey("gen_ai.response.list.count")])
             assertEquals("false", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.has_more")])
@@ -94,7 +95,7 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
             val trace = traces.first()
 
             assertEquals("models", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
-            assertEquals("retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("retrieve", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(MODEL_ALIAS, trace.attributes[AttributeKey.stringKey("gen_ai.request.model")])
         }
     }
@@ -218,7 +219,7 @@ class AnthropicModelsTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("chat", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("messages", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
         }
     }

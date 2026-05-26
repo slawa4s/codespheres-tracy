@@ -12,6 +12,7 @@ import com.openai.models.files.FileListParams
 import com.openai.models.files.FilePurpose
 import com.openai.models.files.FileRetrieveParams
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
@@ -62,7 +63,7 @@ class FilesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             // Operation name must be "files.create", NOT "file" from the response `object` field
-            assertEquals("files.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("files.create", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("files", trace.attributes[AttributeKey.stringKey("openai.api.type")])
         }
     }
@@ -115,7 +116,7 @@ class FilesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("files.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("files.create", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals("file", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
@@ -189,7 +190,7 @@ class FilesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             // Operation name must be "files.list", NOT "list" from the response `object` field
-            assertEquals("files.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("files.list", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("files", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(2L, trace.attributes[AttributeKey.longKey("tracy.response.list.count")])
         }
@@ -263,7 +264,7 @@ class FilesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             // Operation name must be "files.retrieve", NOT "file" from the response `object` field
-            assertEquals("files.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("files.retrieve", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("files", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.request.file_id")])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
@@ -315,7 +316,7 @@ class FilesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             // Operation name must be "files.delete", NOT "file.deleted" from the response `object` field
-            assertEquals("files.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("files.delete", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("files", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.request.file_id")])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
@@ -360,7 +361,7 @@ class FilesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             // Operation name must be "files.content", NOT overwritten by common attributes
-            assertEquals("files.content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("files.content", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("files", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(fileId, trace.attributes[AttributeKey.stringKey("tracy.request.file_id")])
         }

@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.anthropic
 
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -52,7 +53,7 @@ class AnthropicFilesTracingTest : BaseAITracingTest() {
             val trace = traces.first()
 
             assertEquals("files", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
-            assertEquals("files.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("files.create", trace.attributes[GEN_AI_OPERATION_NAME])
         }
     }
 
@@ -131,7 +132,7 @@ class AnthropicFilesTracingTest : BaseAITracingTest() {
             val trace = traces.first()
 
             assertEquals("files", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
-            assertEquals("files.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("files.list", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(2L, trace.attributes[AttributeKey.longKey("gen_ai.response.list.count")])
             assertEquals("false", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.has_more")])
             assertEquals("file_001", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.first_id")])
@@ -164,7 +165,7 @@ class AnthropicFilesTracingTest : BaseAITracingTest() {
             val trace = traces.first()
 
             assertEquals("files", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
-            assertEquals("files.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("files.retrieve", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(FILE_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals(FILE_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.file.id")])
             assertEquals(FILE_FILENAME, trace.attributes[AttributeKey.stringKey("gen_ai.response.file.filename")])
@@ -197,7 +198,7 @@ class AnthropicFilesTracingTest : BaseAITracingTest() {
             val trace = traces.first()
 
             assertEquals("files", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
-            assertEquals("files.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("files.delete", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(FILE_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.file.id")])
         }
     }
@@ -234,7 +235,7 @@ class AnthropicFilesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("chat", trace.attributes[GEN_AI_OPERATION_NAME])
             // files handler should not have been invoked for a messages endpoint
             assertNull(trace.attributes[AttributeKey.stringKey("gen_ai.response.file.id")])
         }

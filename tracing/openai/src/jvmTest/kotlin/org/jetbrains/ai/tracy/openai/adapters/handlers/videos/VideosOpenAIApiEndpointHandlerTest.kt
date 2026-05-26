@@ -9,6 +9,7 @@ import com.openai.core.MultipartField
 import com.openai.errors.NotFoundException
 import com.openai.models.videos.*
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.api.trace.StatusCode
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
@@ -78,7 +79,7 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals(prompt, trace.attributes[AttributeKey.stringKey("gen_ai.response.video.prompt")])
             assertTrue(trace.attributes[AttributeKey.stringKey("gen_ai.response.video.model")]?.startsWith(model.asString()) == true)
             assertNotNull(trace.attributes[AttributeKey.stringKey("gen_ai.response.video.status")])
-            assertEquals("video", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("video", trace.attributes[GEN_AI_OPERATION_NAME])
             assertNotNull(trace.attributes[AttributeKey.longKey("gen_ai.response.video.created_at")])
 
             // These might be present depending on status
@@ -546,7 +547,7 @@ class VideosOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             assertEquals(videoList.data().size.toLong(), videosCount)
             assertNotNull(trace.attributes[AttributeKey.booleanKey("tracy.response.has_more")])
-            assertEquals("videos.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("videos.list", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("list", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
 
             // Verify individual videos are traced

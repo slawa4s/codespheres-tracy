@@ -17,6 +17,7 @@ import com.openai.core.JsonValue
 import com.openai.models.ChatModel
 import com.openai.models.responses.*
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.junit.jupiter.api.Assertions.*
@@ -689,7 +690,7 @@ class ResponsesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertEquals(10L, trace.attributes[AttributeKey.longKey("gen_ai.usage.input_tokens")])
             assertEquals(5L, trace.attributes[AttributeKey.longKey("gen_ai.usage.output_tokens")])
             assertEquals("Hello!", trace.attributes[AttributeKey.stringKey("gen_ai.completion.0.content")])
-            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("generate_content", trace.attributes[GEN_AI_OPERATION_NAME])
         }
     }
 
@@ -739,7 +740,7 @@ class ResponsesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("generate_content", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("resp_abc123", trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals("gpt-4o-mini-2024-07-18", trace.attributes[AttributeKey.stringKey("gen_ai.response.model")])
             assertEquals("response", trace.attributes[AttributeKey.stringKey("tracy.response.object")])

@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.anthropic
 
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -62,7 +63,7 @@ class AnthropicCountTokensTracingTest : BaseAITracingTest() {
             val trace = traces.first()
 
             assertEquals("count_tokens", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
-            assertEquals("count_tokens", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("count_tokens", trace.attributes[GEN_AI_OPERATION_NAME])
         }
     }
 
@@ -358,7 +359,7 @@ class AnthropicCountTokensTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("chat", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("chat", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("messages", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])
         }
     }

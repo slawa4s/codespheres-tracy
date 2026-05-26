@@ -73,7 +73,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.create", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(1L, trace.attributes[AttributeKey.longKey("gen_ai.request.requests.size")])
             assertEquals("test-1", trace.attributes[AttributeKey.stringKey("gen_ai.request.requests.0.custom_id")])
             assertEquals(
@@ -109,7 +109,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("batches.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.list", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(2L, trace.attributes[AttributeKey.longKey("gen_ai.response.list.count")])
             assertEquals("false", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.has_more")])
             assertEquals("msgbatch_01", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.first_id")])
@@ -146,7 +146,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("batches.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.retrieve", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(BATCH_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals("in_progress", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
         }
@@ -176,7 +176,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("batches.cancel", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.cancel", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(BATCH_ID, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals("canceling", trace.attributes[AttributeKey.stringKey("gen_ai.response.batch.processing_status")])
         }
@@ -206,7 +206,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("batches.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.delete", trace.attributes[GEN_AI_OPERATION_NAME])
         }
     }
 
@@ -285,7 +285,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             // gen_ai.provider.name must be set on error spans as a safety net for the batch error path.
             assertEquals("anthropic", trace.attributes[AttributeKey.stringKey("gen_ai.provider.name")])
             // gen_ai.operation.name must be set on error spans using only the URL + HTTP method.
-            assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.create", trace.attributes[GEN_AI_OPERATION_NAME])
             // gen_ai.output.type must NOT be set on error spans — the early guard in
             // BatchesAnthropicApiEndpointHandler.handleResponseAttributes prevents it.
             assertNull(
@@ -393,7 +393,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
                 trace.attributes[AttributeKey.stringKey("anthropic.api.type")],
                 "anthropic.api.type must be present from span attribute fallback"
             )
-            assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.create", trace.attributes[GEN_AI_OPERATION_NAME])
         }
     }
 
@@ -501,7 +501,7 @@ class AnthropicBatchesTracingTest : BaseAITracingTest() {
             // by detectOperation() on the redirect target URL (which would give "batches.retrieve").
             assertEquals(
                 "batches.create",
-                trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")],
+                trace.attributes[GEN_AI_OPERATION_NAME],
                 "gen_ai.operation.name must not be overwritten by detectOperation() after redirect"
             )
             assertEquals("batches", trace.attributes[AttributeKey.stringKey("anthropic.api.type")])

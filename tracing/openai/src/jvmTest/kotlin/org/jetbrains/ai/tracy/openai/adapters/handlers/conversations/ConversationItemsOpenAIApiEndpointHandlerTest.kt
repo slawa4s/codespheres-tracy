@@ -11,6 +11,7 @@ import com.openai.models.conversations.items.ItemListParams
 import com.openai.models.conversations.items.ItemRetrieveParams
 import com.openai.models.responses.EasyInputMessage
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.core.TracingManager
@@ -62,7 +63,7 @@ class ConversationItemsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("conversations.items.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("conversations.items.create", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("tracy.request.conversation_id")])
             assertNotNull(trace.attributes[AttributeKey.longKey("tracy.response.list.count")])
@@ -157,7 +158,7 @@ class ConversationItemsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("conversations.items.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("conversations.items.list", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("tracy.request.conversation_id")])
 
@@ -216,7 +217,7 @@ class ConversationItemsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("conversations.items.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("conversations.items.list", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(0L, trace.attributes[AttributeKey.longKey("tracy.response.list.count")])
             assertEquals(false, trace.attributes[AttributeKey.booleanKey("tracy.response.list.has_more")])
         }
@@ -263,7 +264,7 @@ class ConversationItemsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("conversations.items.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("conversations.items.retrieve", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("tracy.request.conversation_id")])
             assertEquals(itemId, trace.attributes[AttributeKey.stringKey("tracy.request.item_id")])
@@ -301,7 +302,7 @@ class ConversationItemsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("conversations.items.delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("conversations.items.delete", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("conversations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(conversationId, trace.attributes[AttributeKey.stringKey("tracy.request.conversation_id")])
             assertEquals(itemId, trace.attributes[AttributeKey.stringKey("tracy.request.item_id")])
@@ -348,8 +349,8 @@ class ConversationItemsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val traces = analyzeSpans()
             assertTracesCount(2, traces)
 
-            assertEquals("conversations.items.create", traces[0].attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals("conversations.items.list", traces[1].attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("conversations.items.create", traces[0].attributes[GEN_AI_OPERATION_NAME])
+            assertEquals("conversations.items.list", traces[1].attributes[GEN_AI_OPERATION_NAME])
         }
     }
 

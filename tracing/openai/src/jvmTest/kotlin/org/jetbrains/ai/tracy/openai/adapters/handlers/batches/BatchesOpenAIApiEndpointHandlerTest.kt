@@ -10,6 +10,7 @@ import com.openai.models.batches.BatchCreateParams
 import com.openai.models.batches.BatchListParams
 import com.openai.models.batches.BatchRetrieveParams
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
@@ -60,7 +61,7 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             // Operation name must be "batches.create", NOT "batch" from the response `object` field
-            assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.create", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("batches", trace.attributes[AttributeKey.stringKey("openai.api.type")])
         }
     }
@@ -125,7 +126,7 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("batches.create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.create", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
             assertEquals(batchId, trace.attributes[AttributeKey.stringKey("gen_ai.response.id")])
             assertEquals("batch", trace.attributes[AttributeKey.stringKey("tracy.response.object")])
@@ -208,7 +209,7 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             // Operation name must be "batches.retrieve", NOT "batch" from the response `object` field
-            assertEquals("batches.retrieve", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.retrieve", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("batches", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.request.batch_id")])
             assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
@@ -245,7 +246,7 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             // Operation name must be "batches.cancel", NOT "batch" from the response `object` field
-            assertEquals("batches.cancel", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.cancel", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("batches", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.request.batch_id")])
             assertEquals(batchId, trace.attributes[AttributeKey.stringKey("tracy.response.id")])
@@ -277,7 +278,7 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val trace = traces.first()
 
             // Operation name must be "batches.list", NOT "list" from the response `object` field
-            assertEquals("batches.list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.list", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("batches", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(3L, trace.attributes[AttributeKey.longKey("tracy.response.list.count")])
         }
@@ -346,9 +347,9 @@ class BatchesOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             val traces = analyzeSpans()
             assertTracesCount(3, traces)
 
-            assertEquals("batches.create", traces[0].attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals("batches.retrieve", traces[1].attributes[AttributeKey.stringKey("gen_ai.operation.name")])
-            assertEquals("batches.cancel", traces[2].attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("batches.create", traces[0].attributes[GEN_AI_OPERATION_NAME])
+            assertEquals("batches.retrieve", traces[1].attributes[GEN_AI_OPERATION_NAME])
+            assertEquals("batches.cancel", traces[2].attributes[GEN_AI_OPERATION_NAME])
         }
     }
 

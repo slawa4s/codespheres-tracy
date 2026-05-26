@@ -11,6 +11,7 @@ import com.openai.models.audio.AudioResponseFormat
 import com.openai.models.audio.transcriptions.TranscriptionCreateParams
 import com.openai.models.audio.transcriptions.TranscriptionInclude
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.core.TracingManager
@@ -47,7 +48,7 @@ class AudioTranscriptionOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             val trace = analyzeSpans().first()
 
-            assertEquals("audio.transcription", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("audio.transcription", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("audio", trace.attributes[AttributeKey.stringKey("openai.api.type")])
         }
     }

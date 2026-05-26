@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.gemini.adapters.handlers
 
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -314,7 +315,7 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
         val traces = analyzeSpans()
         assertTracesCount(1, traces)
         val trace = traces.first()
-        assertEquals("embedContent", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("embedContent", trace.attributes[GEN_AI_OPERATION_NAME])
         assertEquals("models", trace.attributes[AttributeKey.stringKey("gemini.api.type")])
     }
 
@@ -336,7 +337,7 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
         assertTracesCount(1, traces)
         val trace = traces.first()
         // Must be "embedContent", NOT "predict"
-        assertEquals("embedContent", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("embedContent", trace.attributes[GEN_AI_OPERATION_NAME])
         assertEquals("models", trace.attributes[AttributeKey.stringKey("gemini.api.type")])
     }
 
@@ -381,7 +382,7 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
         assertTracesCount(1, traces)
         val trace = traces.first()
         // generateContent URL must produce "generateContent" operation, not "embedContent"
-        assertEquals("generateContent", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("generateContent", trace.attributes[GEN_AI_OPERATION_NAME])
         // GeminiContentGenHandler always sets gemini.api.type = "models"
         assertEquals("models", trace.attributes[AttributeKey.stringKey("gemini.api.type")])
     }
@@ -401,7 +402,7 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
         assertTracesCount(1, traces)
         val trace = traces.first()
         // imagen:predict must stay as "predict"
-        assertEquals("predict", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("predict", trace.attributes[GEN_AI_OPERATION_NAME])
         assertNull(trace.attributes[AttributeKey.stringKey("gemini.api.type")])
     }
 }

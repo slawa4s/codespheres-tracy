@@ -11,6 +11,7 @@ import com.openai.models.moderations.ModerationModel
 import com.openai.models.moderations.ModerationMultiModalInput
 import com.openai.models.moderations.ModerationTextInput
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import org.jetbrains.ai.tracy.openai.adapters.BaseOpenAITracingTest
@@ -56,7 +57,7 @@ class ModerationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("moderations", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("moderations", trace.attributes[GEN_AI_OPERATION_NAME])
         }
     }
 
@@ -303,7 +304,7 @@ class ModerationsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             assertTracesCount(1, traces)
             val trace = traces.first()
 
-            assertEquals("moderations", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("moderations", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("moderations", trace.attributes[AttributeKey.stringKey("openai.api.type")])
             assertEquals(1L, trace.attributes[AttributeKey.longKey("tracy.response.results.count")])
             assertEquals(false, trace.attributes[AttributeKey.booleanKey("tracy.response.results.0.flagged")])

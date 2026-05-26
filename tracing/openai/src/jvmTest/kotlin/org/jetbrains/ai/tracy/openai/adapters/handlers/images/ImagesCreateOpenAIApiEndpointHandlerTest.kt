@@ -13,6 +13,7 @@ import org.jetbrains.ai.tracy.test.utils.MediaContentAttributeValues
 import com.openai.models.images.ImageGenerateParams
 import com.openai.models.images.ImageModel
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import io.opentelemetry.api.trace.StatusCode
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -57,7 +58,7 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         validateBasicImageTracing(prompt, model)
         val trace = analyzeSpans().first()
 
-        assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("generate_content", trace.attributes[GEN_AI_OPERATION_NAME])
         assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
 
         assertEquals(
@@ -122,7 +123,7 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         validateBasicImageTracing(prompt, model)
         val trace = traces.first()
 
-        assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("generate_content", trace.attributes[GEN_AI_OPERATION_NAME])
         assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
 
         assertEquals(
@@ -170,7 +171,7 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         validateBasicImageTracing(prompt, model)
         val trace = analyzeSpans().first()
 
-        assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("generate_content", trace.attributes[GEN_AI_OPERATION_NAME])
         assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
 
         assertEquals(
@@ -253,7 +254,7 @@ class ImagesCreateOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
         validateBasicImageTracing(prompt, model)
         val trace = analyzeSpans().first()
 
-        assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("generate_content", trace.attributes[GEN_AI_OPERATION_NAME])
         assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
 
         assertEquals(

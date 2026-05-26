@@ -17,6 +17,7 @@ import com.openai.errors.InternalServerException
 import com.openai.models.images.ImageEditParams
 import com.openai.models.images.ImageModel
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.coroutines.test.runTest
 import mu.KotlinLogging
 import okhttp3.mockwebserver.MockResponse
@@ -451,7 +452,7 @@ class ImagesCreateEditOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
             val trace = analyzeSpans().first()
 
-            assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+            assertEquals("generate_content", trace.attributes[GEN_AI_OPERATION_NAME])
             assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
 
             val sizeBytes = trace.attributes[AttributeKey.longKey("tracy.request.image.0.size_bytes")]
@@ -477,7 +478,7 @@ class ImagesCreateEditOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
             true,
             trace.attributes[AttributeKey.stringKey("gen_ai.request.model")]?.startsWith(model.asString())
         )
-        assertEquals("generate_content", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("generate_content", trace.attributes[GEN_AI_OPERATION_NAME])
         assertEquals("image", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
     }
 

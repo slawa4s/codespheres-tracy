@@ -6,6 +6,7 @@
 package org.jetbrains.ai.tracy.gemini.adapters.handlers
 
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -102,7 +103,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         span.end()
 
         val spanData = analyzeSpans().single { it.name == "test" }
-        assertEquals("list", spanData.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("list", spanData.attributes[GEN_AI_OPERATION_NAME])
     }
 
     @Test
@@ -114,7 +115,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         span.end()
 
         val spanData = analyzeSpans().single { it.name == "test" }
-        assertEquals("get", spanData.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("get", spanData.attributes[GEN_AI_OPERATION_NAME])
     }
 
     @Test
@@ -126,7 +127,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         span.end()
 
         val spanData = analyzeSpans().single { it.name == "test" }
-        assertEquals("create", spanData.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("create", spanData.attributes[GEN_AI_OPERATION_NAME])
     }
 
     @Test
@@ -138,7 +139,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         span.end()
 
         val spanData = analyzeSpans().single { it.name == "test" }
-        assertEquals("update", spanData.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("update", spanData.attributes[GEN_AI_OPERATION_NAME])
     }
 
     @Test
@@ -150,7 +151,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         span.end()
 
         val spanData = analyzeSpans().single { it.name == "test" }
-        assertEquals("delete", spanData.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("delete", spanData.attributes[GEN_AI_OPERATION_NAME])
     }
 
     // ─── GeminiCachedContentsHandler response tests ───────────────────────────
@@ -299,7 +300,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         assertTracesCount(1, traces)
         val trace = traces.first()
         assertEquals("cachedContents", trace.attributes[AttributeKey.stringKey("gemini.api.type")])
-        assertEquals("list", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("list", trace.attributes[GEN_AI_OPERATION_NAME])
         // Model must NOT be set to "cachedContents" (a garbage value from URL parsing)
         assertNull(trace.attributes[AttributeKey.stringKey("gen_ai.request.model")])
     }
@@ -315,7 +316,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         assertTracesCount(1, traces)
         val trace = traces.first()
         assertEquals("cachedContents", trace.attributes[AttributeKey.stringKey("gemini.api.type")])
-        assertEquals("get", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("get", trace.attributes[GEN_AI_OPERATION_NAME])
     }
 
     @Test
@@ -332,7 +333,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         assertTracesCount(1, traces)
         val trace = traces.first()
         assertEquals("cachedContents", trace.attributes[AttributeKey.stringKey("gemini.api.type")])
-        assertEquals("create", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("create", trace.attributes[GEN_AI_OPERATION_NAME])
     }
 
     @Test
@@ -346,7 +347,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         assertTracesCount(1, traces)
         val trace = traces.first()
         assertEquals("cachedContents", trace.attributes[AttributeKey.stringKey("gemini.api.type")])
-        assertEquals("delete", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("delete", trace.attributes[GEN_AI_OPERATION_NAME])
     }
 
     @Test
@@ -393,7 +394,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         assertTracesCount(1, traces)
         val trace = traces.first()
         // generateContent URL must NOT be routed to cached contents handler
-        assertEquals("generateContent", trace.attributes[AttributeKey.stringKey("gen_ai.operation.name")])
+        assertEquals("generateContent", trace.attributes[GEN_AI_OPERATION_NAME])
         assertEquals("models", trace.attributes[AttributeKey.stringKey("gemini.api.type")])
     }
 }
