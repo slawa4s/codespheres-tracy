@@ -9,24 +9,16 @@ import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MAX_TOKENS
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.jetbrains.ai.tracy.core.TracingManager
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContent
 import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
-import org.jetbrains.ai.tracy.core.http.protocol.TracyContentType
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequestBody
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
-import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrlImpl
-import org.jetbrains.ai.tracy.core.http.protocol.TracyQueryParameters
+import org.jetbrains.ai.tracy.core.http.protocol.*
 import org.jetbrains.ai.tracy.test.utils.BaseOpenTelemetryTracingTest
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
