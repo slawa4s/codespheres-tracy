@@ -7,10 +7,14 @@ package org.jetbrains.ai.tracy.gemini.adapters.handlers
 
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -25,7 +29,9 @@ import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.GeminiCach
 import org.jetbrains.ai.tracy.test.utils.BaseAITracingTest
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Unit tests for [GeminiCachedContentsHandler] and the [GeminiLLMTracingAdapter] routing logic.
@@ -59,6 +65,22 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         override fun queryParameter(name: String): String? = null
         override fun queryParameterValues(name: String): List<String?> = emptyList()
     }
+
+    /** Returns a [TracyQueryParameters] that resolves only the supplied key/value pairs. */
+    private fun queryParameters(vararg entries: Pair<String, String>) = object : TracyQueryParameters {
+        private val map = entries.toMap()
+        override fun queryParameter(name: String): String? = map[name]
+        override fun queryParameterValues(name: String): List<String?> = map[name]?.let { listOf(it) } ?: emptyList()
+    }
+
+    private fun resourceUrlWith(id: String = "cachedContent123", parameters: TracyQueryParameters) = TracyHttpUrlImpl(
+        scheme = "https",
+        host = "generativelanguage.googleapis.com",
+        port = 443,
+        pathSegments = listOf("v1beta", "cachedContents", id),
+        url = "https://generativelanguage.googleapis.com/v1beta/cachedContents/$id",
+        parameters = parameters,
+    )
 
     // ─── Request / response factories ─────────────────────────────────────────
 
@@ -131,7 +153,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
     }
 
     @Test
-    fun `patch request sets operation name to update`() {
+    fun `patch request sets operation name to patch`() {
         val handler = GeminiCachedContentsHandler()
         val span = TracingManager.tracer.spanBuilder("test").startSpan()
 
@@ -139,7 +161,7 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         span.end()
 
         val spanData = analyzeSpans().single { it.name == "test" }
-        assertEquals("update", spanData.attributes[GEN_AI_OPERATION_NAME])
+        assertEquals("patch", spanData.attributes[GEN_AI_OPERATION_NAME])
     }
 
     @Test
@@ -371,6 +393,301 @@ class GeminiCachedContentsHandlerTest : BaseAITracingTest() {
         val trace = traces.first()
         assertEquals(2L, trace.attributes[AttributeKey.longKey("gen_ai.response.list.count")])
         assertEquals("true", trace.attributes[AttributeKey.stringKey("gen_ai.response.list.has_more")])
+    }
+
+    // ─── CachedContent payload tracing tests ──────────────────────────────────
+
+    @Test
+    fun `create request traces model and displayName from CachedContent body`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        val body = buildJsonObject {
+            put("model", "models/gemini-2.5-flash")
+            put("displayName", "my-cache")
+        }
+        handler.handleRequestAttributes(span, makeRequest(listUrl(), "POST", body))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("models/gemini-2.5-flash", spanData.attributes[GEN_AI_REQUEST_MODEL])
+        assertEquals("my-cache", spanData.attributes[AttributeKey.stringKey("tracy.request.display_name")])
+    }
+
+    @Test
+    fun `create request traces contents and tools and systemInstruction and toolConfig`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        val sysInstr = buildJsonObject {
+            putJsonArray("parts") { add(buildJsonObject { put("text", "You are helpful.") }) }
+        }
+        val toolConfig = buildJsonObject {
+            putJsonObject("functionCallingConfig") { put("mode", "AUTO") }
+        }
+        val body = buildJsonObject {
+            put("model", "models/gemini-2.5-flash")
+            putJsonArray("contents") {
+                add(buildJsonObject {
+                    put("role", "user")
+                    putJsonArray("parts") { add(buildJsonObject { put("text", "Background context") }) }
+                })
+            }
+            putJsonArray("tools") {
+                add(buildJsonObject {
+                    putJsonArray("functionDeclarations") {
+                        add(buildJsonObject {
+                            put("name", "get_weather")
+                            put("description", "Get current weather")
+                            putJsonObject("parameters") {
+                                put("type", "object")
+                                putJsonObject("properties") {
+                                    putJsonObject("location") { put("type", "string") }
+                                }
+                            }
+                        })
+                    }
+                })
+            }
+            put("systemInstruction", sysInstr)
+            put("toolConfig", toolConfig)
+        }
+        handler.handleRequestAttributes(span, makeRequest(listUrl(), "POST", body))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("user", spanData.attributes[AttributeKey.stringKey("gen_ai.prompt.0.role")])
+        assertEquals("Background context", spanData.attributes[AttributeKey.stringKey("gen_ai.prompt.0.content")])
+        assertEquals("get_weather", spanData.attributes[AttributeKey.stringKey("gen_ai.tool.0.function.0.name")])
+        assertEquals("Get current weather", spanData.attributes[AttributeKey.stringKey("gen_ai.tool.0.function.0.description")])
+        assertEquals("object", spanData.attributes[AttributeKey.stringKey("gen_ai.tool.0.function.0.type")])
+        assertEquals(sysInstr.toString(), spanData.attributes[AttributeKey.stringKey("tracy.request.system_instruction")])
+        assertEquals(toolConfig.toString(), spanData.attributes[AttributeKey.stringKey("tracy.request.tool_config")])
+    }
+
+    @Test
+    fun `create request traces ttl when present`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        val body = buildJsonObject {
+            put("model", "models/gemini-2.5-flash")
+            put("ttl", "3600s")
+        }
+        handler.handleRequestAttributes(span, makeRequest(listUrl(), "POST", body))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("3600s", spanData.attributes[AttributeKey.stringKey("tracy.request.ttl")])
+    }
+
+    @Test
+    fun `create response traces name as gen_ai response id and cached_content name`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        // Need a POST that fires handleRequest first so the route is detected for the response too.
+        handler.handleRequestAttributes(span, makeRequest(listUrl(), "POST", buildJsonObject {}))
+
+        val responseBody = buildJsonObject {
+            put("name", "cachedContents/abc-xyz")
+            put("model", "models/gemini-2.5-flash")
+        }
+        val response = object : TracyHttpResponse {
+            override val contentType = TracyContentType.Application.Json
+            override val code = 200
+            override val body = TracyHttpResponseBody.Json(responseBody)
+            override val url = listUrl()
+            override val requestMethod = "POST"
+            override fun isError() = false
+        }
+        handler.handleResponseAttributes(span, response)
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("cachedContents/abc-xyz", spanData.attributes[GEN_AI_RESPONSE_ID])
+        assertEquals("cachedContents/abc-xyz", spanData.attributes[AttributeKey.stringKey("tracy.response.cached_content.name")])
+    }
+
+    @Test
+    fun `create response traces model and createTime and expireTime and usageMetadata`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        handler.handleRequestAttributes(span, makeRequest(listUrl(), "POST", buildJsonObject {}))
+
+        val usage = buildJsonObject { put("totalTokenCount", 123) }
+        val responseBody = buildJsonObject {
+            put("name", "cachedContents/abc")
+            put("model", "models/gemini-2.5-flash")
+            put("createTime", "2024-10-02T15:01:23Z")
+            put("expireTime", "2024-10-02T16:01:23Z")
+            put("usageMetadata", usage)
+        }
+        val response = object : TracyHttpResponse {
+            override val contentType = TracyContentType.Application.Json
+            override val code = 200
+            override val body = TracyHttpResponseBody.Json(responseBody)
+            override val url = listUrl()
+            override val requestMethod = "POST"
+            override fun isError() = false
+        }
+        handler.handleResponseAttributes(span, response)
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("models/gemini-2.5-flash", spanData.attributes[GEN_AI_RESPONSE_MODEL])
+        assertEquals("2024-10-02T15:01:23Z", spanData.attributes[AttributeKey.stringKey("tracy.response.cached_content.create_time")])
+        assertEquals("2024-10-02T16:01:23Z", spanData.attributes[AttributeKey.stringKey("tracy.response.cached_content.expire_time")])
+        assertEquals(usage.toString(), spanData.attributes[AttributeKey.stringKey("tracy.response.cached_content.usage_metadata")])
+    }
+
+    @Test
+    fun `get response traces full CachedContent response body`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        handler.handleRequestAttributes(span, makeRequest(resourceUrl(), "GET"))
+
+        val responseBody = buildJsonObject {
+            put("name", "cachedContents/abc")
+            put("model", "models/gemini-2.5-flash")
+            put("displayName", "doc-cache")
+            put("createTime", "2024-10-02T15:01:23Z")
+            put("updateTime", "2024-10-02T15:30:00Z")
+            put("expireTime", "2024-10-02T16:01:23Z")
+        }
+        handler.handleResponseAttributes(span, makeResponse(resourceUrl(), responseBody))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("cachedContents/abc", spanData.attributes[GEN_AI_RESPONSE_ID])
+        assertEquals("models/gemini-2.5-flash", spanData.attributes[GEN_AI_RESPONSE_MODEL])
+        assertEquals("doc-cache", spanData.attributes[AttributeKey.stringKey("tracy.response.cached_content.display_name")])
+        assertEquals("2024-10-02T15:30:00Z", spanData.attributes[AttributeKey.stringKey("tracy.response.cached_content.update_time")])
+    }
+
+    @Test
+    fun `patch request traces updateMask query parameter`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        val url = resourceUrlWith(parameters = queryParameters("updateMask" to "expireTime"))
+        handler.handleRequestAttributes(span, makeRequest(url, "PATCH", buildJsonObject {}))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("expireTime", spanData.attributes[AttributeKey.stringKey("tracy.request.update_mask")])
+    }
+
+    @Test
+    fun `patch request traces partial CachedContent fields when only some are present`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        val body = buildJsonObject {
+            // PATCH typically only updates expiration; the helper must handle missing fields.
+            put("expireTime", "2025-01-01T00:00:00Z")
+        }
+        handler.handleRequestAttributes(span, makeRequest(resourceUrl(), "PATCH", body))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("2025-01-01T00:00:00Z", spanData.attributes[AttributeKey.stringKey("tracy.request.expire_time")])
+        // model/displayName/etc. weren't in the body, must be absent.
+        assertNull(spanData.attributes[GEN_AI_REQUEST_MODEL])
+        assertNull(spanData.attributes[AttributeKey.stringKey("tracy.request.display_name")])
+    }
+
+    @Test
+    fun `patch response traces updated CachedContent`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        handler.handleRequestAttributes(span, makeRequest(resourceUrl(), "PATCH", buildJsonObject {}))
+
+        val responseBody = buildJsonObject {
+            put("name", "cachedContents/abc")
+            put("model", "models/gemini-2.5-flash")
+            put("expireTime", "2025-01-01T00:00:00Z")
+            put("updateTime", "2024-12-31T23:00:00Z")
+        }
+        val response = object : TracyHttpResponse {
+            override val contentType = TracyContentType.Application.Json
+            override val code = 200
+            override val body = TracyHttpResponseBody.Json(responseBody)
+            override val url = resourceUrl()
+            override val requestMethod = "PATCH"
+            override fun isError() = false
+        }
+        handler.handleResponseAttributes(span, response)
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("cachedContents/abc", spanData.attributes[GEN_AI_RESPONSE_ID])
+        assertEquals("2025-01-01T00:00:00Z", spanData.attributes[AttributeKey.stringKey("tracy.response.cached_content.expire_time")])
+        assertEquals("2024-12-31T23:00:00Z", spanData.attributes[AttributeKey.stringKey("tracy.response.cached_content.update_time")])
+    }
+
+    @Test
+    fun `list response traces per-item name and model and displayName`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        val responseBody = buildJsonObject {
+            putJsonArray("cachedContents") {
+                add(buildJsonObject {
+                    put("name", "cachedContents/first")
+                    put("model", "models/gemini-2.5-flash")
+                    put("displayName", "first-cache")
+                })
+                add(buildJsonObject {
+                    put("name", "cachedContents/second")
+                    put("model", "models/gemini-2.5-pro")
+                    // no displayName on this one
+                })
+            }
+        }
+        handler.handleResponseAttributes(span, makeResponse(listUrl(), responseBody))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("cachedContents/first", spanData.attributes[AttributeKey.stringKey("tracy.response.list.0.name")])
+        assertEquals("models/gemini-2.5-flash", spanData.attributes[AttributeKey.stringKey("tracy.response.list.0.model")])
+        assertEquals("first-cache", spanData.attributes[AttributeKey.stringKey("tracy.response.list.0.display_name")])
+
+        assertEquals("cachedContents/second", spanData.attributes[AttributeKey.stringKey("tracy.response.list.1.name")])
+        assertEquals("models/gemini-2.5-pro", spanData.attributes[AttributeKey.stringKey("tracy.response.list.1.model")])
+        assertNull(spanData.attributes[AttributeKey.stringKey("tracy.response.list.1.display_name")])
+
+        // count + has_more are still set by the LIST handler itself.
+        assertEquals(2L, spanData.attributes[AttributeKey.longKey("gen_ai.response.list.count")])
+        assertEquals("false", spanData.attributes[AttributeKey.stringKey("gen_ai.response.list.has_more")])
+    }
+
+    @Test
+    fun `delete request and response do not trace CachedContent`() {
+        val handler = GeminiCachedContentsHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        handler.handleRequestAttributes(span, makeRequest(resourceUrl(), "DELETE"))
+        // DELETE response body is `{}` per the API spec.
+        val response = object : TracyHttpResponse {
+            override val contentType = TracyContentType.Application.Json
+            override val code = 200
+            override val body = TracyHttpResponseBody.Json(buildJsonObject {})
+            override val url = resourceUrl()
+            override val requestMethod = "DELETE"
+            override fun isError() = false
+        }
+        handler.handleResponseAttributes(span, response)
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("delete", spanData.attributes[GEN_AI_OPERATION_NAME])
+        // No CachedContent attributes are emitted for delete.
+        assertNull(spanData.attributes[AttributeKey.stringKey("tracy.response.cached_content.name")])
+        assertNull(spanData.attributes[GEN_AI_RESPONSE_ID])
     }
 
     @Test
