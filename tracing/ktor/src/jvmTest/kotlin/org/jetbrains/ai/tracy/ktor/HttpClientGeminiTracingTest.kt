@@ -124,4 +124,172 @@ class HttpClientGeminiTracingTest : BaseAITracingTest() {
             trace.attributes[AttributeKey.longKey("gen_ai.usage.output_tokens")]!!.toInt()
         )
     }
+
+    @EnabledIfEnvironmentVariable(
+        named = "LLM_PROVIDER_URL",
+        matches = "https://litellm.labs.jb.gg",
+        disabledReason = "LLM_PROVIDER_URL environment variable is not https://litellm.labs.jb.gg",
+    )
+    @Test
+    fun `test Ktor HttpClient traces systemInstruction for Gemini`() = runTest {
+        val client: HttpClient = instrument(HttpClient(), adapter = GeminiLLMTracingAdapter())
+
+        val model = "gemini-2.5-flash"
+        val url =
+            "${llmProviderUrl}/vertex_ai/v1/projects/jetbrains-grazie/locations/us-central1/publishers/google/models/$model:generateContent"
+
+        val response = client.post(url) {
+            header("x-litellm-api-key", "Bearer $llmProviderApiKey")
+            header("Content-Type", "application/json")
+            setBody(
+                """
+                {
+                    "systemInstruction": {
+                        "parts": [
+                            { "text": "You are a terse assistant. Answer in one sentence." }
+                        ]
+                    },
+                    "contents": [
+                        { "role": "user", "parts": [{ "text": "Say hi" }] }
+                    ]
+                }
+                """.trimIndent()
+            )
+        }
+
+        val traces = analyzeSpans()
+        assertTracesCount(1, traces)
+        val trace = traces.first()
+
+        assertEquals(StatusCode.OK, trace.status.statusCode)
+        val sysInstr = trace.attributes[AttributeKey.stringKey("tracy.request.system_instruction")]
+        assertNotNull(sysInstr)
+        assertTrue(sysInstr.contains("terse assistant"))
+
+        // Sanity: response was not consumed by tracing.
+        val responseBody = response.bodyAsText()
+        assertTrue(responseBody.isNotEmpty())
+    }
+
+    @EnabledIfEnvironmentVariable(
+        named = "LLM_PROVIDER_URL",
+        matches = "https://litellm.labs.jb.gg",
+        disabledReason = "LLM_PROVIDER_URL environment variable is not https://litellm.labs.jb.gg",
+    )
+    @Test
+    fun `test Ktor HttpClient traces inlineData media upload for Gemini`() = runTest {
+        val client: HttpClient = instrument(HttpClient(), adapter = GeminiLLMTracingAdapter())
+
+        val model = "gemini-2.5-flash"
+        val url =
+            "${llmProviderUrl}/vertex_ai/v1/projects/jetbrains-grazie/locations/us-central1/publishers/google/models/$model:generateContent"
+
+        // 1x1 transparent PNG, base64-encoded.
+        val pngPixelB64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAen6n+gAAAAASUVORK5CYII="
+
+        val response = client.post(url) {
+            header("x-litellm-api-key", "Bearer $llmProviderApiKey")
+            header("Content-Type", "application/json")
+            setBody(
+                """
+                {
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [
+                                { "text": "What is in this image?" },
+                                { "inlineData": { "mimeType": "image/png", "data": "$pngPixelB64" } }
+                            ]
+                        }
+                    ]
+                }
+                """.trimIndent()
+            )
+        }
+
+        val traces = analyzeSpans()
+        assertTracesCount(1, traces)
+        val trace = traces.first()
+
+        // MediaContentExtractor attributes verify the inlineData blob was captured for upload.
+        assertEquals("base64", trace.attributes[AttributeKey.stringKey("custom.uploadableMediaContent.0.type")])
+        assertEquals("input", trace.attributes[AttributeKey.stringKey("custom.uploadableMediaContent.0.field")])
+        assertEquals("image/png", trace.attributes[AttributeKey.stringKey("custom.uploadableMediaContent.0.contentType")])
+        assertEquals(pngPixelB64, trace.attributes[AttributeKey.stringKey("custom.uploadableMediaContent.0.data")])
+
+        // Multi-part prompt → content falls back to JSON-stringified parts array.
+        val promptContent = trace.attributes[AttributeKey.stringKey("gen_ai.prompt.0.content")]
+        assertNotNull(promptContent)
+        assertTrue(promptContent.contains("inlineData"))
+
+        val responseBody = response.bodyAsText()
+        assertTrue(responseBody.isNotEmpty())
+    }
+
+    @EnabledIfEnvironmentVariable(
+        named = "LLM_PROVIDER_URL",
+        matches = "https://litellm.labs.jb.gg",
+        disabledReason = "LLM_PROVIDER_URL environment variable is not https://litellm.labs.jb.gg",
+    )
+    @Test
+    fun `test Ktor HttpClient traces tools toolConfig and safetySettings for Gemini`() = runTest {
+        val client: HttpClient = instrument(HttpClient(), adapter = GeminiLLMTracingAdapter())
+
+        val model = "gemini-2.5-flash"
+        val url =
+            "${llmProviderUrl}/vertex_ai/v1/projects/jetbrains-grazie/locations/us-central1/publishers/google/models/$model:generateContent"
+
+        val response = client.post(url) {
+            header("x-litellm-api-key", "Bearer $llmProviderApiKey")
+            header("Content-Type", "application/json")
+            setBody(
+                """
+                {
+                    "contents": [
+                        { "role": "user", "parts": [{ "text": "What's the weather in Paris?" }] }
+                    ],
+                    "tools": [
+                        {
+                            "functionDeclarations": [
+                                {
+                                    "name": "get_weather",
+                                    "description": "Get the current weather",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "location": { "type": "string" }
+                                        },
+                                        "required": ["location"]
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "toolConfig": {
+                        "functionCallingConfig": { "mode": "AUTO" }
+                    },
+                    "safetySettings": [
+                        { "category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE" }
+                    ]
+                }
+                """.trimIndent()
+            )
+        }
+
+        val traces = analyzeSpans()
+        assertTracesCount(1, traces)
+        val trace = traces.first()
+
+        assertEquals("get_weather", trace.attributes[AttributeKey.stringKey("gen_ai.tool.0.function.0.name")])
+        val toolConfig = trace.attributes[AttributeKey.stringKey("tracy.request.tool_config")]
+        assertNotNull(toolConfig)
+        assertTrue(toolConfig.contains("functionCallingConfig"))
+        val safety = trace.attributes[AttributeKey.stringKey("tracy.request.safety_settings")]
+        assertNotNull(safety)
+        assertTrue(safety.contains("HARM_CATEGORY_HARASSMENT"))
+
+        val responseBody = response.bodyAsText()
+        assertTrue(responseBody.isNotEmpty())
+    }
 }

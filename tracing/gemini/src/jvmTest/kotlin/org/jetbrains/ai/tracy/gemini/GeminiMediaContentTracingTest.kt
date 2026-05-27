@@ -356,6 +356,108 @@ class GeminiMediaContentTracingTest : BaseGeminiTracingTest() {
     }
 
     @Test
+    fun `test attached PDF file gets traced as input`() = runTest(timeout = 3.minutes) {
+        val client = createGeminiClient(
+            timeout = Duration.ofMinutes(3)
+        ).apply { instrument(this) }
+
+        val model = "gemini-2.5-flash"
+        val params = GeminiGenerateContentConfig.builder()
+            .responseModalities("TEXT")
+            .build()
+
+        val file = MediaSource.File("sample.pdf", "application/pdf")
+
+        val prompt = Content.fromParts(
+            Part.fromText("Summarize this document in a single sentence"),
+            Part.fromBytes(
+                readResource(file.filepath).readAllBytes(),
+                file.contentType,
+            )
+        )
+
+        client.models.generateContent(model, prompt, params)
+
+        validateBasicTracing(model)
+        val trace = analyzeSpans().first()
+
+        verifyMediaContentUploadAttributes(
+            trace, expected = listOf(
+                file.toMediaContentAttributeValues(field = "input"),
+            )
+        )
+    }
+
+    @Test
+    fun `test attached image input for image understanding traces only as input`() = runTest(timeout = 3.minutes) {
+        // Image understanding (text-only response) — input image must be traced; the response
+        // is plain text so NO output media is expected. This complements the existing tests
+        // that all exercise the IMAGE response modality.
+        val client = createGeminiClient(
+            timeout = Duration.ofMinutes(3)
+        ).apply { instrument(this) }
+
+        val model = "gemini-2.5-flash"
+        val params = GeminiGenerateContentConfig.builder()
+            .responseModalities("TEXT")
+            .build()
+
+        val image = MediaSource.File("naruto.png", "image/png")
+
+        val prompt = Content.fromParts(
+            Part.fromText("Describe in one short sentence what you see in this image."),
+            Part.fromBytes(readResource(image.filepath).readAllBytes(), image.contentType)
+        )
+
+        client.models.generateContent(model, prompt, params)
+
+        validateBasicTracing(model)
+        val trace = analyzeSpans().first()
+
+        verifyMediaContentUploadAttributes(
+            trace, expected = listOf(
+                image.toMediaContentAttributeValues(field = "input"),
+            )
+        )
+    }
+
+    @Test
+    fun `test multiple input images in single message get traced separately`() = runTest(timeout = 3.minutes) {
+        // Two distinct images attached in the same `Content` — both must appear as separate
+        // input media items. This exercises the per-Part iteration in
+        // `parseRequestMediaContent` (multiple inlineData blocks in one parts[] array).
+        val client = createGeminiClient(
+            timeout = Duration.ofMinutes(3)
+        ).apply { instrument(this) }
+
+        val model = "gemini-2.5-flash"
+        val params = GeminiGenerateContentConfig.builder()
+            .responseModalities("TEXT")
+            .build()
+
+        val firstImage = MediaSource.File("naruto.png", "image/png")
+        val secondImage = MediaSource.File("noir-style-image.jpg", "image/jpeg")
+
+        val prompt = Content.fromParts(
+            Part.fromText("Compare these two images. Mention style and subject differences in one short sentence."),
+            Part.fromBytes(readResource(firstImage.filepath).readAllBytes(), firstImage.contentType),
+            Part.fromBytes(readResource(secondImage.filepath).readAllBytes(), secondImage.contentType),
+        )
+
+        client.models.generateContent(model, prompt, params)
+
+        validateBasicTracing(model)
+        val trace = analyzeSpans().first()
+
+        verifyMediaContentUploadAttributes(
+            trace, expected = listOf(
+                firstImage.toMediaContentAttributeValues(field = "input"),
+                secondImage.toMediaContentAttributeValues(field = "input"),
+            )
+        )
+    }
+
+    @Test
     fun `test image upscaling API gets traced`() = runTest(timeout = 3.minutes) {
         val client = createGeminiClient(
             timeout = Duration.ofMinutes(3)
