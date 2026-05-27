@@ -6,17 +6,12 @@
 package org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents
 
 import io.opentelemetry.api.trace.Span
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes.*
+import kotlinx.serialization.json.*
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.CachedContentTracer.traceListItem
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.CachedContentTracer.traceRequest
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.CachedContentTracer.traceResponse
 
 /**
  * Shared tracing helper for the `CachedContent` resource used by every cached-contents route

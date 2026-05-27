@@ -17,7 +17,7 @@ import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.CachedCont
 /**
  * Handles the `PATCH /v1beta/cachedContents/{name}` endpoint.
  *
- * The PATCH body is a (possibly partial) [CachedContent] resource — the API documents only
+ * The PATCH body is a (possibly partial) [com.google.genai.types.CachedContent] resource — the API documents only
  * `expiration` as updatable, but the request body still validates against the full
  * `CachedContent` schema. The shared [CachedContentTracer] handles missing fields gracefully.
  *
