@@ -17,18 +17,19 @@ import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.routes.Cre
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.routes.DeleteCachedContentHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.routes.GetCachedContentHandler
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.routes.ListCachedContentsHandler
-import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.routes.UpdateCachedContentHandler
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.routes.PatchCachedContentHandler
 
 /**
  * Parses Gemini Cached Contents API requests and responses.
  *
  * Dispatches to per-route [RouteHandler] implementations under `cachedcontents/routes/`:
+ *
  * | HTTP method      | `gen_ai.operation.name` |
  * |------------------|-------------------------|
  * | GET (collection) | `list`                  |
  * | GET (resource)   | `get`                   |
  * | POST             | `create`                |
- * | PATCH            | `update`                |
+ * | PATCH            | `patch`                 |
  * | DELETE           | `delete`                |
  *
  * See: [Gemini Caching API](https://ai.google.dev/api/caching)
@@ -40,7 +41,7 @@ internal class GeminiCachedContentsHandler : EndpointApiHandler {
             CachedContentRoute.LIST to ListCachedContentsHandler(),
             CachedContentRoute.GET to GetCachedContentHandler(),
             CachedContentRoute.CREATE to CreateCachedContentHandler(),
-            CachedContentRoute.UPDATE to UpdateCachedContentHandler(),
+            CachedContentRoute.PATCH to PatchCachedContentHandler(),
             CachedContentRoute.DELETE to DeleteCachedContentHandler(),
         )
     }
@@ -72,10 +73,10 @@ internal class GeminiCachedContentsHandler : EndpointApiHandler {
                 else CachedContentRoute.GET
             }
             "POST" -> CachedContentRoute.CREATE
-            "PATCH" -> CachedContentRoute.UPDATE
+            "PATCH" -> CachedContentRoute.PATCH
             "DELETE" -> CachedContentRoute.DELETE
             else -> null
         }
 
-    private enum class CachedContentRoute { LIST, GET, CREATE, UPDATE, DELETE }
+    private enum class CachedContentRoute { LIST, GET, CREATE, PATCH, DELETE }
 }

@@ -15,16 +15,28 @@ import org.jetbrains.ai.tracy.core.http.protocol.asJson
 import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.CachedContentTracer
 
 /**
- * Handles the `GET /v1beta/cachedContents/{name}` endpoint.
+ * Handles the `PATCH /v1beta/cachedContents/{name}` endpoint.
  *
- * Request body is empty. Response body is a full `CachedContent` resource — traced via the
- * shared [CachedContentTracer].
+ * The PATCH body is a (possibly partial) [CachedContent] resource — the API documents only
+ * `expiration` as updatable, but the request body still validates against the full
+ * `CachedContent` schema. The shared [CachedContentTracer] handles missing fields gracefully.
  *
- * See: [Gemini Caching API — get](https://ai.google.dev/api/caching#method:-cachedcontents.get)
+ * Also captures the `updateMask` query parameter, which lists the comma-separated fully-
+ * qualified field names being modified (e.g. `"expireTime"`).
+ *
+ * See: [Gemini Caching API — patch](https://ai.google.dev/api/caching#method:-cachedcontents.patch)
  */
-internal class GetCachedContentHandler : RouteHandler {
+internal class PatchCachedContentHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
-        span.setAttribute(GEN_AI_OPERATION_NAME, "get")
+        span.setAttribute(GEN_AI_OPERATION_NAME, "patch")
+
+        request.url.parameters.queryParameter("updateMask")?.let {
+            span.setAttribute("tracy.request.update_mask", it)
+        }
+
+        request.body.asJson()?.jsonObject?.let { body ->
+            CachedContentTracer.traceRequest(span, body)
+        }
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {

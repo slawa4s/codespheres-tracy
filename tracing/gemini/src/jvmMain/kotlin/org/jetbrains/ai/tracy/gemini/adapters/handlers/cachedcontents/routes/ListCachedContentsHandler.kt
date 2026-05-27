@@ -14,9 +14,17 @@ import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
+import org.jetbrains.ai.tracy.gemini.adapters.handlers.cachedcontents.CachedContentTracer
 
 /**
  * Handles the `GET /v1beta/cachedContents` endpoint.
+ *
+ * Response carries `cachedContents[]` plus an optional `nextPageToken`. Per-item metadata
+ * (name, model, displayName) is traced via [CachedContentTracer.traceListItem] — full
+ * resource tracing per item would flood the span; backends can `GET /v1beta/{name}` for
+ * detail.
+ *
+ * See: [Gemini Caching API — list](https://ai.google.dev/api/caching#method:-cachedcontents.list)
  */
 internal class ListCachedContentsHandler : RouteHandler {
     override fun handleRequest(span: Span, request: TracyHttpRequest) {
@@ -24,7 +32,6 @@ internal class ListCachedContentsHandler : RouteHandler {
     }
 
     override fun handleResponse(span: Span, response: TracyHttpResponse) {
-        // See: https://ai.google.dev/api/caching#v1beta.cachedContents.list
         val body = response.body.asJson()?.jsonObject ?: return
 
         val cachedContents = body["cachedContents"]?.jsonArray ?: return
@@ -33,5 +40,9 @@ internal class ListCachedContentsHandler : RouteHandler {
         val nextPageToken = body["nextPageToken"]?.jsonPrimitive?.content
         val hasMore = !nextPageToken.isNullOrEmpty()
         span.setAttribute("gen_ai.response.list.has_more", hasMore.toString())
+
+        for ((index, item) in cachedContents.withIndex()) {
+            CachedContentTracer.traceListItem(span, item.jsonObject, index)
+        }
     }
 }
