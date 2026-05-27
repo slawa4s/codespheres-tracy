@@ -43,18 +43,6 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
         parameters = emptyQueryParameters(),
     )
 
-    private fun predictEmbedUrl(model: String = "gemini-embedding-001") = TracyHttpUrlImpl(
-        scheme = "https",
-        host = "us-central1-aiplatform.googleapis.com",
-        port = 443,
-        pathSegments = listOf(
-            "v1", "projects", "my-project", "locations", "us-central1",
-            "publishers", "google", "models", "$model:predict",
-        ),
-        url = "https://us-central1-aiplatform.googleapis.com/v1/projects/my-project/locations/us-central1/publishers/google/models/$model:predict",
-        parameters = emptyQueryParameters(),
-    )
-
     private fun emptyQueryParameters() = object : TracyQueryParameters {
         override fun queryParameter(name: String): String? = null
         override fun queryParameterValues(name: String): List<String?> = emptyList()
@@ -130,47 +118,6 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
     }
 
     @Test
-    fun `vertex ai predict request extracts task_type from instances`() {
-        val handler = GeminiEmbedHandler()
-        val span = TracingManager.tracer.spanBuilder("test").startSpan()
-
-        handler.handleRequestAttributes(span, makeRequest(predictEmbedUrl(), buildJsonObject {
-            putJsonArray("instances") {
-                add(buildJsonObject {
-                    put("task_type", "SEMANTIC_SIMILARITY")
-                    put("content", "hello world")
-                })
-            }
-            putJsonObject("parameters") {
-                put("outputDimensionality", 512)
-            }
-        }))
-        span.end()
-
-        val spanData = analyzeSpans().single { it.name == "test" }
-        assertEquals("SEMANTIC_SIMILARITY", spanData.attributes[AttributeKey.stringKey("gen_ai.request.task_type")])
-    }
-
-    @Test
-    fun `vertex ai predict request extracts outputDimensionality from parameters`() {
-        val handler = GeminiEmbedHandler()
-        val span = TracingManager.tracer.spanBuilder("test").startSpan()
-
-        handler.handleRequestAttributes(span, makeRequest(predictEmbedUrl(), buildJsonObject {
-            putJsonArray("instances") {
-                add(buildJsonObject { put("content", "hello world") })
-            }
-            putJsonObject("parameters") {
-                put("outputDimensionality", 768)
-            }
-        }))
-        span.end()
-
-        val spanData = analyzeSpans().single { it.name == "test" }
-        assertEquals(768L, spanData.attributes[AttributeKey.longKey("gen_ai.request.output_dimensionality")])
-    }
-
-    @Test
     fun `missing optional fields do not produce task_type or output_dimensionality attributes`() {
         val handler = GeminiEmbedHandler()
         val span = TracingManager.tracer.spanBuilder("test").startSpan()
@@ -220,44 +167,168 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
     }
 
     @Test
-    fun `vertex ai predict response sets gen_ai output type to embedding`() {
+    fun `native embedContent request traces single text part as prompt content`() {
         val handler = GeminiEmbedHandler()
         val span = TracingManager.tracer.spanBuilder("test").startSpan()
 
-        handler.handleResponseAttributes(span, makeResponse(predictEmbedUrl(), buildJsonObject {
-            putJsonArray("predictions") {
-                add(buildJsonObject {
-                    putJsonObject("embeddings") {
-                        put("values", buildEmbeddingValues(256))
-                        put("statistics", buildJsonObject { put("truncated", false) })
-                    }
-                })
+        handler.handleRequestAttributes(span, makeRequest(embedContentUrl(), buildJsonObject {
+            putJsonObject("content") {
+                putJsonArray("parts") {
+                    add(buildJsonObject { put("text", "hello world") })
+                }
             }
         }))
         span.end()
 
         val spanData = analyzeSpans().single { it.name == "test" }
-        assertEquals("embedding", spanData.attributes[AttributeKey.stringKey("gen_ai.output.type")])
+        assertEquals("hello world", spanData.attributes[AttributeKey.stringKey("gen_ai.prompt.0.content")])
     }
 
     @Test
-    fun `vertex ai predict response extracts embedding dimension`() {
+    fun `native embedContent request serializes multi-part content`() {
         val handler = GeminiEmbedHandler()
         val span = TracingManager.tracer.spanBuilder("test").startSpan()
 
-        handler.handleResponseAttributes(span, makeResponse(predictEmbedUrl(), buildJsonObject {
-            putJsonArray("predictions") {
-                add(buildJsonObject {
-                    putJsonObject("embeddings") {
-                        put("values", buildEmbeddingValues(256))
-                    }
-                })
+        handler.handleRequestAttributes(span, makeRequest(embedContentUrl(), buildJsonObject {
+            putJsonObject("content") {
+                putJsonArray("parts") {
+                    add(buildJsonObject { put("text", "part one") })
+                    add(buildJsonObject { put("text", "part two") })
+                }
             }
         }))
         span.end()
 
         val spanData = analyzeSpans().single { it.name == "test" }
-        assertEquals(256L, spanData.attributes[AttributeKey.longKey("gen_ai.response.embedding.dimension")])
+        val content = spanData.attributes[AttributeKey.stringKey("gen_ai.prompt.0.content")]
+        assertEquals("""[{"text":"part one"},{"text":"part two"}]""", content)
+    }
+
+    @Test
+    fun `native embedContent request traces title when present`() {
+        val handler = GeminiEmbedHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        handler.handleRequestAttributes(span, makeRequest(embedContentUrl(), buildJsonObject {
+            put("title", "Document title")
+            putJsonObject("content") {
+                putJsonArray("parts") {
+                    add(buildJsonObject { put("text", "body text") })
+                }
+            }
+        }))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("Document title", spanData.attributes[AttributeKey.stringKey("gen_ai.request.title")])
+    }
+
+    @Test
+    fun `native embedContent request without content does not set prompt attribute`() {
+        val handler = GeminiEmbedHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        handler.handleRequestAttributes(span, makeRequest(embedContentUrl(), buildJsonObject {
+            put("taskType", "RETRIEVAL_DOCUMENT")
+        }))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertNull(spanData.attributes[AttributeKey.stringKey("gen_ai.prompt.0.content")])
+        assertNull(spanData.attributes[AttributeKey.stringKey("gen_ai.request.title")])
+    }
+
+    @Test
+    fun `native embedContent request traces embedContentConfig as JSON`() {
+        val handler = GeminiEmbedHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        val config = buildJsonObject {
+            put("taskType", "RETRIEVAL_DOCUMENT")
+            put("outputDimensionality", 256)
+            put("title", "Doc title")
+        }
+        handler.handleRequestAttributes(span, makeRequest(embedContentUrl(), buildJsonObject {
+            put("embedContentConfig", config)
+        }))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals(
+            config.toString(),
+            spanData.attributes[AttributeKey.stringKey("gen_ai.request.embed_content_config")]
+        )
+    }
+
+    @Test
+    fun `native embedContent response extracts usageMetadata input tokens`() {
+        val handler = GeminiEmbedHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        handler.handleResponseAttributes(span, makeResponse(embedContentUrl(), buildJsonObject {
+            putJsonObject("embedding") {
+                put("values", buildEmbeddingValues(768))
+            }
+            putJsonObject("usageMetadata") {
+                put("promptTokenCount", 42)
+            }
+        }))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals(42L, spanData.attributes[AttributeKey.longKey("gen_ai.usage.input_tokens")])
+    }
+
+    @Test
+    fun `native embedContent response extracts promptTokenDetails modality and token count`() {
+        val handler = GeminiEmbedHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        handler.handleResponseAttributes(span, makeResponse(embedContentUrl(), buildJsonObject {
+            putJsonObject("embedding") {
+                put("values", buildEmbeddingValues(768))
+            }
+            putJsonObject("usageMetadata") {
+                put("promptTokenCount", 30)
+                putJsonArray("promptTokenDetails") {
+                    add(buildJsonObject {
+                        put("modality", "TEXT")
+                        put("tokenCount", 20)
+                    })
+                    add(buildJsonObject {
+                        put("modality", "IMAGE")
+                        put("tokenCount", 10)
+                    })
+                }
+            }
+        }))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("TEXT", spanData.attributes[AttributeKey.stringKey("gen_ai.usage.prompt_token_details.0.modality")])
+        assertEquals(20L, spanData.attributes[AttributeKey.longKey("gen_ai.usage.prompt_token_details.0.token_count")])
+        assertEquals("IMAGE", spanData.attributes[AttributeKey.stringKey("gen_ai.usage.prompt_token_details.1.modality")])
+        assertEquals(10L, spanData.attributes[AttributeKey.longKey("gen_ai.usage.prompt_token_details.1.token_count")])
+    }
+
+    @Test
+    fun `native embedContent response extracts embedding shape`() {
+        val handler = GeminiEmbedHandler()
+        val span = TracingManager.tracer.spanBuilder("test").startSpan()
+
+        handler.handleResponseAttributes(span, makeResponse(embedContentUrl(), buildJsonObject {
+            putJsonObject("embedding") {
+                put("values", buildEmbeddingValues(768))
+                putJsonArray("shape") {
+                    add(JsonPrimitive(1))
+                    add(JsonPrimitive(768))
+                }
+            }
+        }))
+        span.end()
+
+        val spanData = analyzeSpans().single { it.name == "test" }
+        assertEquals("[1,768]", spanData.attributes[AttributeKey.stringKey("gen_ai.response.embedding.shape")])
     }
 
     // ─── GeminiLLMTracingAdapter routing + operation name tests (via OkHttp) ──
@@ -347,6 +418,9 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
             putJsonObject("embedding") {
                 put("values", buildEmbeddingValues(512))
             }
+            putJsonObject("usageMetadata") {
+                put("promptTokenCount", 7)
+            }
         }.toString()
 
         withAdapterRequest(
@@ -360,6 +434,7 @@ class GeminiEmbedHandlerTest : BaseAITracingTest() {
         val trace = traces.first()
         assertEquals("embedding", trace.attributes[AttributeKey.stringKey("gen_ai.output.type")])
         assertEquals(512L, trace.attributes[AttributeKey.longKey("gen_ai.response.embedding.dimension")])
+        assertEquals(7L, trace.attributes[AttributeKey.longKey("gen_ai.usage.input_tokens")])
     }
 
     @Test
