@@ -121,6 +121,35 @@ class GeminiContentGenHandler(
             }
             config.jsonObject["topP"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_P, it) }
             config.jsonObject["topK"]?.jsonPrimitive?.doubleOrNull?.let { span.setAttribute(GEN_AI_REQUEST_TOP_K, it) }
+
+            // Preserve all non-canonical generationConfig fields (stopSequences, presencePenalty,
+            // responseMimeType, responseSchema, mediaResolution, …) by serializing the whole object.
+            span.setAttribute("tracy.request.generation_config", config.toString())
+        }
+
+        // systemInstruction is a Content object — same prompt-content treatment as `contents`.
+        // Treated as input per content policy.
+        body["systemInstruction"]?.let {
+            span.setAttribute("tracy.request.system_instruction", it.toString().orRedactedInput())
+        }
+
+        // toolConfig, safetySettings: traced as opaque JSON; their internals are configuration,
+        // not user content. See https://ai.google.dev/api/generate-content#request-body for shape.
+        body["toolConfig"]?.let {
+            span.setAttribute("tracy.request.tool_config", it.toString())
+        }
+        body["safetySettings"]?.let {
+            span.setAttribute("tracy.request.safety_settings", it.toString())
+        }
+
+        body["cachedContent"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("tracy.request.cached_content", it)
+        }
+        body["serviceTier"]?.jsonPrimitive?.contentOrNull?.let {
+            span.setAttribute("tracy.request.service_tier", it)
+        }
+        body["store"]?.jsonPrimitive?.booleanOrNull?.let {
+            span.setAttribute("tracy.request.store", it)
         }
 
         span.populateUnmappedAttributes(body, mappedAttributes, PayloadType.REQUEST)
@@ -132,6 +161,15 @@ class GeminiContentGenHandler(
 
         body["responseId"]?.let { span.setAttribute(GEN_AI_RESPONSE_ID, it.jsonPrimitive.content) }
         body["modelVersion"]?.let { span.setAttribute(GEN_AI_RESPONSE_MODEL, it.jsonPrimitive.content) }
+
+        // Top-level response objects traced as opaque JSON — they aggregate sub-objects that
+        // observability backends typically inspect ad-hoc rather than via canonical keys.
+        body["modelStatus"]?.let {
+            span.setAttribute("tracy.response.model_status", it.toString())
+        }
+        body["promptFeedback"]?.let {
+            span.setAttribute("tracy.response.prompt_feedback", it.toString())
+        }
 
         body["candidates"]?.let {
             for ((index, candidate) in it.jsonArray.withIndex()) {
@@ -177,6 +215,40 @@ class GeminiContentGenHandler(
                     "gen_ai.completion.$index.finish_reason",
                     candidate.jsonObject["finishReason"]?.jsonPrimitive?.content
                 )
+
+                // Additional Candidate scalar fields.
+                candidate.jsonObject["index"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("tracy.completion.$index.index", it.toLong())
+                }
+                candidate.jsonObject["tokenCount"]?.jsonPrimitive?.intOrNull?.let {
+                    span.setAttribute("tracy.completion.$index.token_count", it.toLong())
+                }
+                candidate.jsonObject["finishMessage"]?.jsonPrimitive?.contentOrNull?.let {
+                    span.setAttribute("tracy.completion.$index.finish_message", it)
+                }
+                candidate.jsonObject["avgLogprobs"]?.jsonPrimitive?.doubleOrNull?.let {
+                    span.setAttribute("tracy.completion.$index.avg_logprobs", it)
+                }
+
+                // Metadata blobs — traced as opaque JSON per the "don't granulate" rule.
+                candidate.jsonObject["safetyRatings"]?.let {
+                    span.setAttribute("tracy.completion.$index.safety_ratings", it.toString())
+                }
+                candidate.jsonObject["citationMetadata"]?.let {
+                    span.setAttribute("tracy.completion.$index.citation_metadata", it.toString())
+                }
+                candidate.jsonObject["groundingMetadata"]?.let {
+                    span.setAttribute("tracy.completion.$index.grounding_metadata", it.toString())
+                }
+                candidate.jsonObject["groundingAttributions"]?.let {
+                    span.setAttribute("tracy.completion.$index.grounding_attributions", it.toString())
+                }
+                candidate.jsonObject["logprobsResult"]?.let {
+                    span.setAttribute("tracy.completion.$index.logprobs_result", it.toString())
+                }
+                candidate.jsonObject["urlContextMetadata"]?.let {
+                    span.setAttribute("tracy.completion.$index.url_context_metadata", it.toString())
+                }
             }
         }
 
@@ -340,14 +412,22 @@ class GeminiContentGenHandler(
     private val mappedRequestAttributes: List<String> = listOf(
         "contents",
         "tools",
-        "generationConfig"
+        "generationConfig",
+        "systemInstruction",
+        "toolConfig",
+        "safetySettings",
+        "cachedContent",
+        "serviceTier",
+        "store",
     )
 
     private val mappedResponseAttributes: List<String> = listOf(
         "responseId",
         "modelVersion",
         "candidates",
-        "usageMetadata"
+        "usageMetadata",
+        "modelStatus",
+        "promptFeedback",
     )
 
     private val mappedAttributes = mappedRequestAttributes + mappedResponseAttributes
