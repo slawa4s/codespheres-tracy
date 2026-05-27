@@ -67,7 +67,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test OpenAI chat completions span error status when request fails`() = runTest {
+    fun `test OpenAI chat completions span error status when request fails`() = runTest(timeout = 3.minutes) {
         val client = createOpenAIClient().apply { instrument(this) }
 
         val params = ChatCompletionCreateParams.builder()
