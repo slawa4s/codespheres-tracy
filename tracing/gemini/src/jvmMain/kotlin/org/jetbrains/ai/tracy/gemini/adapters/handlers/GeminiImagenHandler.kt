@@ -27,6 +27,7 @@ class GeminiImagenHandler(
     private val extractor: MediaContentExtractor
 ) : EndpointApiHandler {
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
+        // body: { "instances": [..], "parameters": [..] }
         val body = request.body.asJson()?.jsonObject ?: return
 
         val instancesEntry = body["instances"]
@@ -38,41 +39,6 @@ class GeminiImagenHandler(
         for ((index, instance) in instances.withIndex()) {
             span.setAttribute("gen_ai.prompt.$index.content", instance.jsonObject["prompt"]?.jsonPrimitive?.content)
         }
-
-        // build resources from the input images
-        val images: List<Resource> = buildList {
-            for (instance in instances) {
-                val image = instance.jsonObject["image"]?.jsonObject ?: continue
-                val resource = parseImagenImage(image) ?: continue
-                add(resource)
-            }
-        }
-        // build resources and other image attributes from the input reference images
-        val referenceImages: List<Pair<Resource, JsonObject>> = buildList {
-            for (instance in instances) {
-                val referenceImages = instance.jsonObject["referenceImages"]?.jsonArray ?: continue
-                for (image in referenceImages) {
-                    // create resource from image data
-                    val imageRef = image.jsonObject["referenceImage"]?.jsonObject ?: continue
-                    val resource = parseImagenImage(imageRef) ?: continue
-                    // save other attributes of this image (excluding "referenceImage")
-                    val attributes = Json.encodeToJsonElement(
-                        image.jsonObject.filterKeys { it != "referenceImage" }
-                    ).jsonObject
-                    add(resource to attributes)
-                }
-            }
-        }
-        // set reference image attributes into span
-        for ((index, attributes) in referenceImages.map { it.second }.withIndex()) {
-            span.setAttribute("tracy.request.referenceImage.$index.attributes", attributes.toString())
-        }
-        // save media content for upload
-        val mediaContent = run {
-            val resources = images + referenceImages.map { it.first }
-            MediaContent(parts = resources.map { MediaContentPart(it) })
-        }
-        extractor.setUploadableContentAttributes(span, field = "input", mediaContent)
 
         body["parameters"]?.let { span.setAttribute("tracy.request.imagen.parameters", it.toString()) }
     }
