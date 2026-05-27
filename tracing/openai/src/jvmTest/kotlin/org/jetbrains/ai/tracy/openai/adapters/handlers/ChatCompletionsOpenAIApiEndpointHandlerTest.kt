@@ -35,7 +35,7 @@ import kotlin.time.Duration.Companion.minutes
 @Tag("openai")
 class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     @Test
-    fun `test OpenAI chat completions auto tracing`() = runTest {
+    fun `test OpenAI chat completions auto tracing`() = runTest(timeout = 3.minutes) {
         val client = createOpenAIClient().apply { instrument(this) }
         val model = ChatModel.GPT_4O_MINI
 
@@ -48,7 +48,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test nested instrumentation calls don't cause duplicative tracing`() = runTest {
+    fun `test nested instrumentation calls don't cause duplicative tracing`() = runTest(timeout = 3.minutes) {
         val client = createOpenAIClient(llmProviderUrl, llmProviderApiKey)
             .apply { instrument(this) }
             .apply { instrument(this) }
@@ -88,7 +88,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
 
     @ParameterizedTest
     @MethodSource("provideContentCapturePolicies")
-    fun `test capture policy hides sensitive data`(policy: ContentCapturePolicy) = runTest {
+    fun `test capture policy hides sensitive data`(policy: ContentCapturePolicy) = runTest(timeout = 3.minutes) {
         TracingManager.withCapturingPolicy(policy)
 
         val client = createOpenAIClient().apply { instrument(this) }
@@ -146,7 +146,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test OpenAI chat completions tool calls auto tracing`() = runTest {
+    fun `test OpenAI chat completions tool calls auto tracing`() = runTest(timeout = 3.minutes) {
         val client = createOpenAIClient().apply { instrument(this) }
 
         val toolName = "hi"
@@ -167,7 +167,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test OpenAI chat completions response to a tool call auto tracing`() = runTest {
+    fun `test OpenAI chat completions response to a tool call auto tracing`() = runTest(timeout = 3.minutes) {
         val client = createOpenAIClient().apply { instrument(this) }
 
         val toolName = "hi"
@@ -207,7 +207,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test OpenAI chat completions multiple tools response to tool calls auto tracing`() = runTest {
+    fun `test OpenAI chat completions multiple tools response to tool calls auto tracing`() = runTest(timeout = 3.minutes) {
         val client = createOpenAIClient().apply { instrument(this) }
 
         val greetToolName = "hi"
@@ -246,7 +246,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test OpenAI auto tracing when instrumentation is off`() = runTest {
+    fun `test OpenAI auto tracing when instrumentation is off`() = runTest(timeout = 3.minutes) {
         val client = createOpenAIClient()
 
         val params = ChatCompletionCreateParams.builder()
@@ -264,7 +264,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test OpenAI chat completions streaming`(): Unit = runTest {
+    fun `test OpenAI chat completions streaming`(): Unit = runTest(timeout = 3.minutes) {
         val client = createOpenAIClient().apply { instrument(this) }
 
         val params = ChatCompletionCreateParams.builder()
@@ -289,7 +289,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test OpenAI chat completions additional attributes`() = runTest {
+    fun `test OpenAI chat completions additional attributes`() = runTest(timeout = 3.minutes) {
         // this test is only possible on a LiteLLM pass-through.
         // OpenAI API endpoint throws 400 Bad Request on unconventional properties, unlike LiteLLM, which ignores them
         Assumptions.assumeTrue { llmProviderUrl.startsWith("https://litellm.labs.jb.gg") }
@@ -313,7 +313,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test OpenAI embeddings`() = runTest {
+    fun `test OpenAI embeddings`() = runTest(timeout = 3.minutes) {
         // handler defaults to chat/completions, but the specific embedding parameters are still propagated to the span
         val client = createOpenAIClient(llmProviderUrl, llmProviderApiKey).apply { instrument(this) }
 
@@ -437,7 +437,7 @@ class ChatCompletionsOpenAIApiEndpointHandlerTest : BaseOpenAITracingTest() {
     }
 
     @Test
-    fun `test OpenAI chat completions auto tracing disabled`() = runTest {
+    fun `test OpenAI chat completions auto tracing disabled`() = runTest(timeout = 3.minutes) {
         TracingManager.isTracingEnabled = false
 
         val model = ChatModel.GPT_4O_MINI
