@@ -38,11 +38,38 @@ class GeminiImagenHandler(
         }
         val instances = instancesEntry.jsonArray
 
-        for ((index, instance) in instances.withIndex()) {
+        // Collect every input image across all instances. The Imagen API uses three different
+        // shapes depending on the operation:
+        //   - generate : instance.prompt (text only, no input image)
+        //   - upscale  : instance.image           — single base64 image
+        //   - edit     : instance.referenceImages[].referenceImage  — N reference images
+        val inputResources = mutableListOf<Resource>()
+
+        for ((index, instanceElem) in instances.withIndex()) {
+            val instance = instanceElem.jsonObject
+
             span.setAttribute(
                 "gen_ai.prompt.$index.content",
-                instance.jsonObject["prompt"]?.jsonPrimitive?.content?.orRedactedInput(),
+                instance["prompt"]?.jsonPrimitive?.content?.orRedactedInput(),
             )
+
+            // upscale: single inline input image at instance.image
+            instance["image"]?.jsonObject?.let { image ->
+                parseImagenImage(image)?.let { inputResources.add(it) }
+            }
+
+            // edit: per-reference inline input images at instance.referenceImages[].referenceImage
+            (instance["referenceImages"] as? JsonArray)?.forEach { refElem ->
+                val ref = refElem.jsonObject
+                ref["referenceImage"]?.jsonObject?.let { image ->
+                    parseImagenImage(image)?.let { inputResources.add(it) }
+                }
+            }
+        }
+
+        if (inputResources.isNotEmpty()) {
+            val mediaContent = MediaContent(inputResources.map { MediaContentPart(it) })
+            extractor.setUploadableContentAttributes(span, field = "input", mediaContent)
         }
 
         body["parameters"]?.let { span.setAttribute("tracy.request.imagen.parameters", it.toString()) }
