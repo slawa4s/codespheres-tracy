@@ -17,6 +17,8 @@ import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
+import org.jetbrains.ai.tracy.core.policy.orRedactedInput
+import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
 
 /**
  * Parses Imagen API requests and responses
@@ -37,7 +39,10 @@ class GeminiImagenHandler(
         val instances = instancesEntry.jsonArray
 
         for ((index, instance) in instances.withIndex()) {
-            span.setAttribute("gen_ai.prompt.$index.content", instance.jsonObject["prompt"]?.jsonPrimitive?.content)
+            span.setAttribute(
+                "gen_ai.prompt.$index.content",
+                instance.jsonObject["prompt"]?.jsonPrimitive?.content?.orRedactedInput(),
+            )
         }
 
         body["parameters"]?.let { span.setAttribute("tracy.request.imagen.parameters", it.toString()) }
@@ -50,7 +55,7 @@ class GeminiImagenHandler(
         for ((index, prediction) in predictions.withIndex()) {
             span.setAttribute(
                 "gen_ai.completion.$index.content",
-                prediction.jsonObject["prompt"]?.jsonPrimitive?.content
+                prediction.jsonObject["prompt"]?.jsonPrimitive?.content?.orRedactedOutput(),
             )
         }
         val resources = parseImagenImages(predictions)
