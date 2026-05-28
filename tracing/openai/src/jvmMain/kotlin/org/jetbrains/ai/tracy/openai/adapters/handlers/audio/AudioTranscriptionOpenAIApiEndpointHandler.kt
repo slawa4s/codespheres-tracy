@@ -20,20 +20,29 @@ import kotlinx.serialization.json.longOrNull
 import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
+import org.jetbrains.ai.tracy.core.adapters.media.MediaContent
+import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
+import org.jetbrains.ai.tracy.core.adapters.media.MediaContentPart
+import org.jetbrains.ai.tracy.core.adapters.media.Resource
 import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
 import org.jetbrains.ai.tracy.core.http.protocol.asFormData
 import org.jetbrains.ai.tracy.core.http.protocol.asJson
+import org.jetbrains.ai.tracy.core.policy.ContentKind
+import org.jetbrains.ai.tracy.core.policy.contentTracingAllowed
 import org.jetbrains.ai.tracy.core.policy.orRedactedInput
 import org.jetbrains.ai.tracy.core.policy.orRedactedOutput
+import java.util.Base64
 
 /**
  * Extracts request/response attributes for the OpenAI Audio Transcriptions API.
  *
  * See [Create transcription API](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)
  */
-internal class AudioTranscriptionOpenAIApiEndpointHandler : EndpointApiHandler {
+internal class AudioTranscriptionOpenAIApiEndpointHandler(
+    private val extractor: MediaContentExtractor,
+) : EndpointApiHandler {
 
     override fun handleRequestAttributes(span: Span, request: TracyHttpRequest) {
         span.setAttribute(GEN_AI_OPERATION_NAME, OPERATION_NAME)
@@ -44,6 +53,7 @@ internal class AudioTranscriptionOpenAIApiEndpointHandler : EndpointApiHandler {
         val knownSpeakerNames = mutableListOf<String>()
         val knownSpeakerReferences = mutableListOf<String>()
         val timestampGranularities = mutableListOf<String>()
+        val mediaContentParts = mutableListOf<MediaContentPart>()
 
         for (part in body.parts) {
             val contentType = part.contentType
@@ -54,8 +64,13 @@ internal class AudioTranscriptionOpenAIApiEndpointHandler : EndpointApiHandler {
                 "file" -> {
                     // file: scrape MIME type and size in bytes from the multipart part
                     span.setAttribute("tracy.request.audio.size_bytes", part.content.size.toLong())
-                    if (contentType != null) {
-                        span.setAttribute("tracy.request.audio.mime_type", "${contentType.type}/${contentType.subtype}")
+                    val mimeType = contentType?.let { "${it.type}/${it.subtype}" }
+                    mimeType?.let { span.setAttribute("tracy.request.audio.mime_type", it) }
+
+                    // Upload audio bytes for Langfuse rendering — gated by input capture policy.
+                    if (mimeType != null && contentTracingAllowed(ContentKind.INPUT)) {
+                        val base64 = Base64.getEncoder().encodeToString(part.content)
+                        mediaContentParts.add(MediaContentPart(Resource.Base64(base64, mimeType)))
                     }
                 }
 
@@ -131,6 +146,14 @@ internal class AudioTranscriptionOpenAIApiEndpointHandler : EndpointApiHandler {
         }
         if (timestampGranularities.isNotEmpty()) {
             span.setAttribute("tracy.request.timestamp_granularities", timestampGranularities.joinToString(","))
+        }
+
+        if (mediaContentParts.isNotEmpty()) {
+            extractor.setUploadableContentAttributes(
+                span,
+                field = "input",
+                content = MediaContent(parts = mediaContentParts),
+            )
         }
     }
 
