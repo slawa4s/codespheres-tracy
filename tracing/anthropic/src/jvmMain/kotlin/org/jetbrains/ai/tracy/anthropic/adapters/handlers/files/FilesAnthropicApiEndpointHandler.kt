@@ -16,6 +16,7 @@ import org.jetbrains.ai.tracy.anthropic.adapters.handlers.files.routes.RetrieveF
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
+import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
 import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -35,11 +36,13 @@ import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpUrl
  *
  * See: [Files API](https://platform.claude.com/docs/en/api/beta/files)
  */
-internal class FilesAnthropicApiEndpointHandler : EndpointApiHandler {
+internal class FilesAnthropicApiEndpointHandler(
+    private val extractor: MediaContentExtractor,
+) : EndpointApiHandler {
 
     private val routeHandlers: Map<FileRoute, RouteHandler> by lazy {
         mapOf(
-            FileRoute.CREATE to CreateFileHandler(),
+            FileRoute.CREATE to CreateFileHandler(extractor),
             FileRoute.LIST to ListFilesHandler(),
             FileRoute.RETRIEVE to RetrieveFileHandler(),
             FileRoute.DELETE to DeleteFileHandler(),

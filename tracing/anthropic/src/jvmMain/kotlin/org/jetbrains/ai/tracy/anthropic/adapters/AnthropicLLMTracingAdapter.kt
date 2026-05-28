@@ -17,6 +17,8 @@ import org.jetbrains.ai.tracy.anthropic.adapters.handlers.messages.MessagesAnthr
 import org.jetbrains.ai.tracy.anthropic.adapters.handlers.models.ModelsAnthropicApiEndpointHandler
 import org.jetbrains.ai.tracy.core.adapters.LLMTracingAdapter
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
+import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
+import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractorImpl
 import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -89,9 +91,10 @@ private enum class AnthropicApiType(val route: String, val apiTypeName: String) 
  * See: [Anthropic Messages API](https://docs.claude.com/en/api/messages)
  */
 class AnthropicLLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncubatingValues.ANTHROPIC) {
+    private val extractor: MediaContentExtractor = MediaContentExtractorImpl()
     private val batchesHandler = BatchesAnthropicApiEndpointHandler()
     private val countTokensHandler = CountTokensAnthropicApiEndpointHandler()
-    private val filesHandler = FilesAnthropicApiEndpointHandler()
+    private val filesHandler = FilesAnthropicApiEndpointHandler(extractor)
     private val modelsHandler = ModelsAnthropicApiEndpointHandler()
 
     private val handlers = ConcurrentHashMap<AnthropicApiType, EndpointApiHandler>()
