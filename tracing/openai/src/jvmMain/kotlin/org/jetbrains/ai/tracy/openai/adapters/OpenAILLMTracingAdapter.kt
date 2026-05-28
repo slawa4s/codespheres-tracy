@@ -189,15 +189,15 @@ class OpenAILLMTracingAdapter : LLMTracingAdapter(genAISystem = GenAiSystemIncub
             }
 
             OpenAIApiType.AUDIO -> handlers.getOrPut(OpenAIApiType.AUDIO) {
-                AudioTranscriptionOpenAIApiEndpointHandler()
+                AudioTranscriptionOpenAIApiEndpointHandler(extractor)
             }
 
             OpenAIApiType.AUDIO_TRANSLATION -> handlers.getOrPut(OpenAIApiType.AUDIO_TRANSLATION) {
-                AudioTranslationOpenAIApiEndpointHandler()
+                AudioTranslationOpenAIApiEndpointHandler(extractor)
             }
 
             OpenAIApiType.FILES -> handlers.getOrPut(OpenAIApiType.FILES) {
-                FilesOpenAIApiEndpointHandler()
+                FilesOpenAIApiEndpointHandler(extractor)
             }
 
             OpenAIApiType.BATCHES -> handlers.getOrPut(OpenAIApiType.BATCHES) {

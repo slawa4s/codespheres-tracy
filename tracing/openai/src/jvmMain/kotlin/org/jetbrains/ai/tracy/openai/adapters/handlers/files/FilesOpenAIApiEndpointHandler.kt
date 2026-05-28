@@ -11,6 +11,7 @@ import mu.KotlinLogging
 import org.jetbrains.ai.tracy.core.adapters.handlers.EndpointApiHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.RouteHandler
 import org.jetbrains.ai.tracy.core.adapters.handlers.sse.sseHandlingUnsupported
+import org.jetbrains.ai.tracy.core.adapters.media.MediaContentExtractor
 import org.jetbrains.ai.tracy.core.http.parsers.SseEvent
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpRequest
 import org.jetbrains.ai.tracy.core.http.protocol.TracyHttpResponse
@@ -37,11 +38,13 @@ import org.jetbrains.ai.tracy.openai.adapters.handlers.files.routes.RetrieveFile
  *
  * See [Files API Reference](https://platform.openai.com/docs/api-reference/files)
  */
-internal class FilesOpenAIApiEndpointHandler : EndpointApiHandler {
+internal class FilesOpenAIApiEndpointHandler(
+    private val extractor: MediaContentExtractor,
+) : EndpointApiHandler {
 
     private val routeHandlers: Map<FileRoute, RouteHandler> by lazy {
         mapOf(
-            FileRoute.CREATE to CreateFileHandler(),
+            FileRoute.CREATE to CreateFileHandler(extractor),
             FileRoute.LIST to ListFilesHandler(),
             FileRoute.RETRIEVE to RetrieveFileHandler(),
             FileRoute.DELETE to DeleteFileHandler(),
